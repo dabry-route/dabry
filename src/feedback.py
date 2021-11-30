@@ -75,3 +75,35 @@ class RandomFB(Feedback):
 
     def value(self, x):
         return random.uniform(self.lower, self.upper)
+
+
+class FixedHeadingFB(Feedback):
+    """
+    Defines a control law to follow a straight line from initial position
+    defined by its angle to the x-axis.
+    Behavior uncertain when entering strong wind zones (wind value
+    greater than airpseed)
+    """
+
+    def __init__(self, wind, v_a: float, initial_steering: float):
+        """
+        :param v_a: The UAV airspeed in m/s
+        :param initial_steering: The heading to keep constant in rad
+        """
+        super().__init__(1, wind)
+        self.v_a = v_a
+        self.theta_0 = initial_steering
+
+    def value(self, x):
+        e_theta_0 = np.array([np.cos(self.theta_0), np.sin(self.theta_0)])
+        wind = self.wind.value(x)
+        wind_tangent = np.cross(e_theta_0, wind)
+        r = -wind_tangent / self.v_a
+        if r > 1.:
+            res = np.pi / 2.
+        elif r < -1.:
+            res = -np.pi / 2.
+        else:
+            res = np.arcsin(-wind_tangent / self.v_a)
+        res += self.theta_0
+        return res

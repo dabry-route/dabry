@@ -4,9 +4,9 @@ import scipy.optimize
 import portion as ivl
 from matplotlib import mlab
 
-from src.feedback import ZermeloPMPFB, ConstantFB
+from src.feedback import ZermeloPMPFB, ConstantFB, FixedHeadingFB
 from src.mermoz import MermozProblem
-from src.model import Model1, Model2, Model3
+from src.model import Model1, Model2, Model3, Model4
 from src.shooting import Shooting
 from src.stoppingcond import TimedSC
 from wind import TwoSectorsWind
@@ -160,23 +160,29 @@ def run():
     # print(mp.trajs[0].get_final_time())
     # exit(1)
 
-    omega = np.array([0.5, 0.3])
-    gamma = -2.
+    omega = np.array([0.5, 0.7])
+    gamma = 1.5
     flux = 1.
+    T = 2.
+    const_wind = np.array([-1.1, 0.])
 
     # model = Model1(v_a, v_w1, v_w2, x_f)
-    model = Model2(v_a, x_f, omega, gamma)
+    model = Model4(v_a, x_f, const_wind, omega, gamma)
     mp = MermozProblem(model)
     list_p = list(map(lambda theta: np.array([np.cos(theta), np.sin(theta)]),
                       np.linspace(np.pi/2. + 1e-3, 3*np.pi/2. - 1e-3, 20)))
-    for p in list_p:
-        shoot = Shooting(model.dyn,
-                         np.zeros(2),
-                         1.,
-                         N_iter=100)
-        shoot.set_adjoint(p)
-        aug_traj = shoot.integrate()
-        mp.trajs.append(aug_traj)
+    # for p in list_p:
+    #     shoot = Shooting(model.dyn,
+    #                      np.zeros(2),
+    #                      T,
+    #                      N_iter=100)
+    #     shoot.set_adjoint(p)
+    #     aug_traj = shoot.integrate()
+    #     mp.trajs.append(aug_traj)
+    list_headings = np.linspace(-0.6, 1.2, 10)
+    for heading in list_headings:
+        mp.load_feedback(FixedHeadingFB(mp._model.wind, v_a, heading))
+        mp.integrate_trajectory(TimedSC(T), int_step=0.01)
     mp.plot_trajs(mode="reachability")
 
     exit(1)

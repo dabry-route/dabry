@@ -1,10 +1,28 @@
-import matplotlib as mpl
+import colorsys
+
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.colors as mpl_colors
+import matplotlib.cm as mpl_cm
+import matplotlib.ticker as mpl_ticker
 from matplotlib.gridspec import GridSpec
 import numpy as np
 import string
 
 from src.trajectory import Trajectory
+
+
+class FontsizeConf:
+
+    def __init__(self):
+        self.fontsize = 10
+        self.axes_titlesize = 10
+        self.axes_labelsize = 8
+        self.xtick_labelsize = 7
+        self.ytick_labelsize = 7
+        self.legend_fontsize = 10
+        self.font_family = 'lato'
+        self.mathtext_fontset = 'cm'
 
 
 class Visual:
@@ -44,7 +62,19 @@ class Visual:
         self.display_setup = False
 
     def setup(self):
-        self.fig = plt.figure()
+
+        fsc = FontsizeConf()
+        plt.rc('font', size=fsc.fontsize)
+        plt.rc('axes', titlesize=fsc.axes_titlesize)
+        plt.rc('axes', labelsize=fsc.axes_labelsize)
+        plt.rc('xtick', labelsize=fsc.xtick_labelsize)
+        plt.rc('ytick', labelsize=fsc.ytick_labelsize)
+        plt.rc('legend', fontsize=fsc.legend_fontsize)
+        plt.rc('font', family=fsc.font_family)
+        plt.rc('mathtext', fontset=fsc.mathtext_fontset)
+
+        self.fig = plt.figure(num="Mermoz problem")
+
         if self.mode == "only-map":
             gs = GridSpec(1, 1, figure=self.fig)
             self.map = self.fig.add_subplot(gs[0, 0])
@@ -59,9 +89,24 @@ class Visual:
                 self.state.append(self.fig.add_subplot(gs[k, 1]))
             for k in range(self.dim_control):
                 self.control.append(self.fig.add_subplot(gs[k + self.dim_state, 1]))
+        self.setup_cm()
         self.setup_map()
         self.draw_wind()
+        self.setup_components()
         self.display_setup = True
+
+    def setup_cm(self):
+        top = np.array(colorsys.hls_to_rgb(141 / 360, .6, .81) + (1.,))
+        middle = np.array(colorsys.hls_to_rgb(41 / 360, .6, .88) + (1.,))
+        bottom = np.array(colorsys.hls_to_rgb(358 / 360, .6, .82) + (1.,))
+
+        S = np.linspace(0., 1., 128)
+
+        first = np.array([(1 - s) * top + s * middle for s in S])
+        second = np.array([(1 - s) * middle + s * bottom for s in S])
+
+        newcolors = np.vstack((first, second))
+        self.cm = mpl_colors.ListedColormap(newcolors, name='Custom')
 
     def setup_map(self):
         """
@@ -77,32 +122,58 @@ class Visual:
         self.map.set_xlim(self.x_min, self.x_max)
         self.map.set_ylim(self.y_min, self.y_max)
 
-        self.map.set_xlabel('$x$ ($m$)')
-        self.map.set_ylabel('$y$ ($m$)')
+        self.map.set_xlabel('$x\;[m]$')
+        self.map.set_ylabel('$y\;[m]$')
 
         self.map.grid(visible=True, linestyle='-.', linewidth=0.5)
         self.map.tick_params(direction='in')
 
     def draw_wind(self):
-        X, Y = np.meshgrid(np.linspace(0.1, 0.9, self.nx_wind), np.linspace(self.y_min, self.y_max, self.ny_wind))
+        X, Y = np.meshgrid(np.linspace(-0.05, 1.05, self.nx_wind), np.linspace(self.y_min, self.y_max, self.ny_wind))
 
         cartesian = np.dstack((X, Y)).reshape(-1, 2)
 
         res = np.array(list(map(self.windfield, list(cartesian))))
         U, V = res[:, 0], res[:, 1]
 
-        norms = np.sqrt(U**2 + V**2)
-        lognorms = np.log(np.sqrt(U**2 + V**2))
+        norms = np.sqrt(U ** 2 + V ** 2)
+        lognorms = np.log(np.sqrt(U ** 2 + V ** 2))
 
-        norm = mpl.colors.Normalize()
-        norm.autoscale(lognorms)
-        cm = mpl.cm.jet
+        norm = mpl_colors.Normalize()
+        norm.autoscale(np.array([0., 2.]))
 
-        sm = mpl.cm.ScalarMappable(cmap=cm, norm=norm)
-        sm.set_array([])
+        sm = mpl_cm.ScalarMappable(cmap=self.cm, norm=norm)
 
-        self.map.quiver(X, Y, U/norms, V/norms, lognorms, alpha=1., headwidth=2, width=0.004)
-        plt.colorbar(sm, ax=[self.map], location='right')
+        # sm.set_array(np.array([]))
+
+        def color_value(x):
+            res = sm.to_rgba(x)
+            if x > 1.:
+                return res
+            else:
+                newres = res[0], res[1], res[2], 0.3
+                return newres
+
+        color = list(map(lambda x: color_value(x), norms))
+
+        self.map.quiver(X, Y, U / norms, V / norms, headwidth=2, width=0.004, color=color)
+
+        divider = make_axes_locatable(self.map)
+        cax = divider.append_axes("right", size="5%", pad=0.05)
+
+        # cb = plt.colorbar(sm, ax=[self.map], location='right')
+        cb = plt.colorbar(sm, cax=cax)
+        cb.set_label('log Wind speed')
+        # cb.ax.semilogy()
+        # cb.ax.yaxis.set_major_formatter(mpl_ticker.LogFormatter())#mpl_ticker.FuncFormatter(lambda s, pos: (np.exp(s*np.log(10)), pos)))
+
+    def setup_components(self):
+        for state_plot in self.state:
+            state_plot.grid(visible=True, linestyle='-.', linewidth=0.5)
+            state_plot.tick_params(direction='in')
+        for control_plot in self.control:
+            control_plot.grid(visible=True, linestyle='-.', linewidth=0.5)
+            control_plot.tick_params(direction='in')
 
     def plot_traj(self, traj: Trajectory, mode="default"):
         """
@@ -127,7 +198,7 @@ class Visual:
             cmap = plt.get_cmap("YlGn")
         else:
             raise ValueError(f"Unknown plot mode {mode}")
-        self.map.scatter(traj.points[:traj.last_index + 1, 0], traj.points[:traj.last_index + 1, 1],
+        self.map.scatter(traj.points[:traj.last_index, 0], traj.points[:traj.last_index, 1],
                          s=s,
                          c=colors,
                          cmap=cmap,
@@ -135,6 +206,7 @@ class Visual:
                          marker=('x' if traj.optimal else None))
         if self.mode == "full":
             for k in range(traj.points.shape[1]):
-                self.state[k].scatter(traj.timestamps[:traj.last_index + 1], traj.points[:traj.last_index + 1, k], s=0.5)
+                self.state[k].scatter(traj.timestamps[:traj.last_index + 1], traj.points[:traj.last_index + 1, k],
+                                      s=0.5)
             k = 0
             self.control[k].scatter(traj.timestamps[:traj.last_index + 1], traj.controls[:traj.last_index + 1], s=0.5)

@@ -63,6 +63,21 @@ class TSEqualWind(TwoSectorsWind):
         super().__init__(v_w1, v_w2, x_f / 2)
 
 
+class UniformWind(Wind):
+
+    def __init__(self, wind_vector: ndarray):
+        """
+        :param wind_vector: Direction and strength of wind
+        """
+        self.wind_vector = wind_vector
+
+    def value(self, x):
+        return self.wind_vector
+
+    def d_value(self, x):
+        return 0.
+
+
 class VortexWind(Wind):
 
     def __init__(self,
@@ -94,6 +109,19 @@ class VortexWind(Wind):
         return self.gamma / (2 * np.pi * r ** 4) * \
                np.array([[-2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
                          [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
+
+
+class VortexUniformWind(VortexWind, UniformWind):
+
+    def __init__(self, wind_vector, x_omega, y_omega, gamma):
+        VortexWind.__init__(self, x_omega, y_omega, gamma)
+        UniformWind.__init__(self, wind_vector)
+
+    def value(self, x):
+        return VortexWind.value(self, x) + UniformWind.value(self, x)
+
+    def d_value(self, x):
+        return VortexWind.d_value(self, x) + UniformWind.d_value(self, x)
 
 
 class SourceWind(Wind):
