@@ -11,6 +11,20 @@ import string
 
 from src.trajectory import Trajectory
 
+reachability_colors = {
+    "pmp": {
+        "steps": np.array([0.8, 0.8, 0.8, 0.6]),
+        "last": np.array([0.8, 0., 0., 1.])
+    },
+    "integral": {
+        "steps": np.array([0.75, 0.75, 0.75, 0.6]),
+        "last": np.array([0., 0., 0.8, 1.])
+    }
+}
+
+state_names = [r"$x\:[m]$", r"$y\:[m]$"]
+control_names = [r"$u\:[rad]$"]
+
 
 class FontsizeConf:
 
@@ -36,7 +50,8 @@ class Visual:
                  dim_control: int,
                  windfield,
                  nx_wind=16,
-                 ny_wind=20):
+                 ny_wind=20,
+                 title=""):
         """
             Sets the display of the problem
             :param mode:
@@ -60,6 +75,7 @@ class Visual:
         self.state = []
         self.control = []
         self.display_setup = False
+        self.title = title
 
     def setup(self):
 
@@ -73,7 +89,8 @@ class Visual:
         plt.rc('font', family=fsc.font_family)
         plt.rc('mathtext', fontset=fsc.mathtext_fontset)
 
-        self.fig = plt.figure(num="Mermoz problem")
+        self.fig = plt.figure(num="Mermoz problem", constrained_layout=False)
+        self.fig.suptitle(self.title)
 
         if self.mode == "only-map":
             gs = GridSpec(1, 1, figure=self.fig)
@@ -83,7 +100,7 @@ class Visual:
             In this mode, let the map on the left hand side of the plot and plot the components of the state
             and the control on the right hand side
             """
-            gs = GridSpec(self.dim_state + self.dim_control, 2, figure=self.fig)
+            gs = GridSpec(self.dim_state + self.dim_control, 2, figure=self.fig, wspace=.25)
             self.map = self.fig.add_subplot(gs[:, 0])
             for k in range(self.dim_state):
                 self.state.append(self.fig.add_subplot(gs[k, 1]))
@@ -106,6 +123,7 @@ class Visual:
         second = np.array([(1 - s) * middle + s * bottom for s in S])
 
         newcolors = np.vstack((first, second))
+        newcolors[-1] = np.array([0.4, 0., 1., 1.])
         self.cm = mpl_colors.ListedColormap(newcolors, name='Custom')
 
     def setup_map(self):
@@ -163,17 +181,28 @@ class Visual:
 
         # cb = plt.colorbar(sm, ax=[self.map], location='right')
         cb = plt.colorbar(sm, cax=cax)
-        cb.set_label('log Wind speed')
+        cb.set_label('$|v_w|\;[m/s]$')
         # cb.ax.semilogy()
         # cb.ax.yaxis.set_major_formatter(mpl_ticker.LogFormatter())#mpl_ticker.FuncFormatter(lambda s, pos: (np.exp(s*np.log(10)), pos)))
 
     def setup_components(self):
-        for state_plot in self.state:
+        for k, state_plot in enumerate(self.state):
             state_plot.grid(visible=True, linestyle='-.', linewidth=0.5)
             state_plot.tick_params(direction='in')
-        for control_plot in self.control:
+            state_plot.yaxis.set_label_position("right")
+            state_plot.yaxis.tick_right()
+            state_plot.set_ylabel(state_names[k])
+            plt.setp(state_plot.get_xticklabels(), visible=False)
+
+        for k, control_plot in enumerate(self.control):
             control_plot.grid(visible=True, linestyle='-.', linewidth=0.5)
             control_plot.tick_params(direction='in')
+            control_plot.yaxis.set_label_position("right")
+            control_plot.yaxis.tick_right()
+            control_plot.set_ylabel(control_names[k])
+            # Last plot
+            if k == len(self.control) - 1:
+                control_plot.set_xlabel(r"$t\:[s]$")
 
     def plot_traj(self, traj: Trajectory, mode="default"):
         """
@@ -188,12 +217,9 @@ class Visual:
             cmap = None
         elif mode == "reachability":
             colors = np.ones((traj.last_index, 4))
-            colors[:, 0] *= 0.8  # R
-            colors[:, 1] *= 0.8  # G
-            colors[:, 2] *= 0.8  # B
-            colors[:, 3] *= 0.6  # Alpha
+            colors[:] = np.einsum("ij,j->ij", colors, reachability_colors[traj.type]["steps"])
 
-            colors[-1, :] = np.array([0.8, 0., 0., 1.])  # Last point
+            colors[-1, :] = reachability_colors[traj.type]["last"]  # Last point
             s[-1] = 2.
             cmap = plt.get_cmap("YlGn")
         else:

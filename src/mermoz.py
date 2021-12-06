@@ -21,11 +21,16 @@ class MermozProblem:
     def __init__(self,
                  model: Model,
                  max_iter=10000,
-                 int_step=0.0001):
+                 int_step=0.0001,
+                 T=0.):
         self._model = model
         self._feedback = None
-
-        self.display = Visual("full", 2, 1, lambda x: self._model.wind.value(x) / self._model.v_a)
+        title = "$v_a=" + str(self._model.v_a) + "\:m/s$, $T=" + str(T) + "\:s$"
+        self.display = Visual("full",
+                              2,
+                              1,
+                              lambda x: self._model.wind.value(x) / self._model.v_a,
+                              title=title)
         self.display.setup()
 
         self.trajs = []
@@ -35,6 +40,7 @@ class MermozProblem:
     def load_feedback(self, feedback: Feedback):
         """
         Load a feedback law for integration
+
         :param feedback: A feedback law
         """
         self._feedback = feedback
@@ -46,11 +52,12 @@ class MermozProblem:
                      int_step=0.01):
         """
         Compute sample trajectories for a reachability analysis of the problem
+
         :param T: Stop time
         :param N_samples: Number of sample trajectories
         """
         for ns in range(N_samples):
-            self.load_feedback(RandomFB(-np.pi, np.pi, seed=42+ns))
+            self.load_feedback(RandomFB(-np.pi, np.pi, seed=42 + ns))
             stop_cond = TimedSC(T)
             self.integrate_trajectory(stop_cond, max_iter=max_iter, int_step=int_step)
 
@@ -79,5 +86,6 @@ class MermozProblem:
         if mode not in self.plot_modes:
             raise ValueError(f"Unknown plot mode : {mode}")
         for traj in self.trajs:
+            print(traj.adjoints[0])
             self.display.plot_traj(traj, mode=mode)
         plt.show()

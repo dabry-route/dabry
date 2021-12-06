@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from numpy import ndarray
 
 from src.dynamics import ZermeloDyn
-from src.wind import TSEqualWind, VortexWind, SourceWind, VortexUniformWind
+from src.wind import TSEqualWind, VortexWind, SourceWind, VortexUniformWind, UniformWind
 
 
 class Model(ABC):
@@ -12,7 +12,6 @@ class Model(ABC):
     Defines:
         - the windfield
         - the dynamics of the model
-        - the feedback law for the UAV
     """
 
     def __init__(self, x_f: float):
@@ -96,4 +95,18 @@ class Model4(Model):
         self.omega = omega
         self.gamma = gamma
         self.wind = VortexUniformWind(const_wind, omega[0], omega[1], gamma)
+        self.dyn = ZermeloDyn(self.wind, v_a)
+
+class Model5(Model):
+    def __init__(self,
+                 v_a: float,
+                 x_f: float,
+                 const_wind: ndarray,
+                 omega: ndarray,
+                 gamma: float):
+        super().__init__(x_f)
+        self.v_a = v_a
+        self.omega = omega
+        self.gamma = gamma
+        self.wind = UniformWind(const_wind) + VortexWind(omega[0], omega[1], gamma)
         self.dyn = ZermeloDyn(self.wind, v_a)

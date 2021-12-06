@@ -5,25 +5,33 @@ from numpy import ndarray
 
 class Wind(ABC):
 
-    @abstractmethod
+    def __init__(self, value_func=None, d_value_func=None):
+        """
+        Builds a windfield which is a smooth vector field of space
+        value_func Function taking a point in space (ndarray) and returning the
+        wind value at the given point.
+        d_value_func Function taking a point in space (ndarray) and returning the
+        jacobian of the windfield at the given point.
+        """
+        self._value_func = value_func
+        self._d_value_func = d_value_func
+
+    def __add__(self, other):
+        return Wind(value_func=lambda x: self._value_func(x) + other._value_func(x),
+                    d_value_func=lambda x: self._d_value_func(x) + other._value_func(x))
+
+    def __mul__(self, other):
+        if isinstance(other, float):
+            return Wind(value_func=other * self._value_func,
+                        d_value_func=other * self._d_value_func)
+        else:
+            raise TypeError(f"Unsupported type for multiplication : {type(other)}")
+
     def value(self, x: ndarray) -> ndarray:
-        """
-        Computes the local wind vector
+        return self._value_func(x)
 
-        :param x: The point at which to compute the wind
-        :return: The wind vector
-        """
-        pass
-
-    @abstractmethod
     def d_value(self, x: ndarray) -> ndarray:
-        """
-        Computes the gradient of local wind vector
-
-        :param x: The point at which to compute the gradient
-        :return: The gradient
-        """
-        pass
+        return self._d_value_func(x)
 
 
 class TwoSectorsWind(Wind):
@@ -43,13 +51,10 @@ class TwoSectorsWind(Wind):
         self.v_w2 = v_w2
         self.x_switch = x_switch
 
-    def value(self, x):
-        return np.array([0, self.v_w1 * np.heaviside(self.x_switch - x[0], 0.)
-                         + self.v_w2 * np.heaviside(x[0] - self.x_switch, 0.)])
-
-    def d_value(self, x):
-        return np.array([[0, 0],
-                         [0, 0]])
+        self._value_func = lambda x: np.array([0, self.v_w1 * np.heaviside(self.x_switch - x[0], 0.)
+                                               + self.v_w2 * np.heaviside(x[0] - self.x_switch, 0.)])
+        self._d_value_func = lambda x: np.array([[0, 0],
+                                                 [0, 0]])
 
 
 class TSEqualWind(TwoSectorsWind):
@@ -70,12 +75,11 @@ class UniformWind(Wind):
         :param wind_vector: Direction and strength of wind
         """
         self.wind_vector = wind_vector
+        self._value_func = lambda x: self.value(x)
+        self._d_value_func = lambda x: 0.
 
     def value(self, x):
         return self.wind_vector
-
-    def d_value(self, x):
-        return 0.
 
 
 class VortexWind(Wind):
@@ -95,6 +99,7 @@ class VortexWind(Wind):
         self.y_omega = y_omega
         self.omega = np.array([x_omega, y_omega])
         self.gamma = gamma
+        self._value_func = lambda x: self.value(x)
 
     def value(self, x):
         r = np.linalg.norm(x - self.omega)
