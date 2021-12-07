@@ -1,11 +1,10 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 
 import numpy as np
+from numpy import ndarray
 
 from src.dynamics import Dynamics
 from src.trajectory import AugmentedTraj
-from wind import Wind
-from numpy import ndarray
 
 
 class Shooting(ABC):

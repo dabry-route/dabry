@@ -1,8 +1,7 @@
-import string
-
 import numpy as np
 from matplotlib import pyplot as plt
 from numpy import ndarray
+
 from src.feedback import Feedback, RandomFB
 from src.integration import IntEulerExpl
 from src.model import Model
@@ -31,8 +30,6 @@ class MermozProblem:
                               1,
                               lambda x: self._model.wind.value(x) / self._model.v_a,
                               title=title)
-        self.display.setup()
-
         self.trajs = []
 
         self.plot_modes = ["default", "reachability"]
@@ -86,6 +83,6 @@ class MermozProblem:
         if mode not in self.plot_modes:
             raise ValueError(f"Unknown plot mode : {mode}")
         for traj in self.trajs:
-            print(traj.adjoints[0])
+            # print(traj.adjoints[0])
             self.display.plot_traj(traj, mode=mode)
         plt.show()

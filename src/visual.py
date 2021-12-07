@@ -1,13 +1,12 @@
 import colorsys
-
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import matplotlib.colors as mpl_colors
-import matplotlib.cm as mpl_cm
-import matplotlib.ticker as mpl_ticker
-from matplotlib.gridspec import GridSpec
-import numpy as np
 import string
+
+import matplotlib.cm as mpl_cm
+import matplotlib.colors as mpl_colors
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.gridspec import GridSpec
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from src.trajectory import Trajectory
 
@@ -146,13 +145,23 @@ class Visual:
         self.map.grid(visible=True, linestyle='-.', linewidth=0.5)
         self.map.tick_params(direction='in')
 
+    def set_wind_density(self, level: int):
+        """
+        Sets the wind vector density in the plane.
+        :param level: The density level (1 or 2)
+        """
+        if level not in [1, 2]:
+            raise ValueError(f"Unsupported wind density level {level}")
+        self.nx_wind *= level
+        self.ny_wind *= level
+
     def draw_wind(self):
         X, Y = np.meshgrid(np.linspace(-0.05, 1.05, self.nx_wind), np.linspace(self.y_min, self.y_max, self.ny_wind))
 
         cartesian = np.dstack((X, Y)).reshape(-1, 2)
 
-        res = np.array(list(map(self.windfield, list(cartesian))))
-        U, V = res[:, 0], res[:, 1]
+        uv = np.array(list(map(self.windfield, list(cartesian))))
+        U, V = uv[:, 0], uv[:, 1]
 
         norms = np.sqrt(U ** 2 + V ** 2)
         lognorms = np.log(np.sqrt(U ** 2 + V ** 2))
