@@ -58,7 +58,7 @@ class ZermeloPMPFB(Feedback):
 class ConstantFB(Feedback):
 
     def __init__(self, value):
-        super().__init__(1, None)
+        super().__init__(1, Wind())
         self._value = value
 
     def value(self, x):
@@ -71,7 +71,7 @@ class RandomFB(Feedback):
         self.lower = lower
         self.upper = upper
         random.seed(seed)
-        super().__init__(1, None)
+        super().__init__(1, Wind())
 
     def value(self, x):
         return random.uniform(self.lower, self.upper)
@@ -81,8 +81,8 @@ class FixedHeadingFB(Feedback):
     """
     Defines a control law to follow a straight line from initial position
     defined by its angle to the x-axis.
-    Behavior uncertain when entering strong wind zones (wind value
-    greater than airpseed)
+    When the wind value is too high for the UAV to keep its line, the
+    control law steers perpendicular to the target direction
     """
 
     def __init__(self, wind, v_a: float, initial_steering: float):

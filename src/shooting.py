@@ -1,11 +1,10 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 
 import numpy as np
+from numpy import ndarray
 
 from src.dynamics import Dynamics
 from src.trajectory import AugmentedTraj
-from wind import Wind
-from numpy import ndarray
 
 
 class Shooting(ABC):
@@ -29,10 +28,10 @@ class Shooting(ABC):
         self.x_init = x_init
         self.final_time = final_time
         self.N_iter = N_iter
-        self.p_init = None
+        self.p_init = np.zeros(2)
 
     def set_adjoint(self, p_init: ndarray):
-        self.p_init = p_init
+        self.p_init[:] = p_init
 
     def control(self, x, p, t):
         v = -p/np.linalg.norm(p)
@@ -54,7 +53,7 @@ class Shooting(ABC):
         p = self.p_init
         states[0] = x
         adjoints[0] = p
-        controls[0] = 0
+        controls[0] = self.control(x, p, 0.)
         dt = self.final_time/self.N_iter
         for i in range(1, self.N_iter):
             t += dt
@@ -68,4 +67,4 @@ class Shooting(ABC):
             states[i] = x
             adjoints[i] = p
             controls[i] = u
-        return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter)
+        return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter, type="pmp")

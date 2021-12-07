@@ -1,29 +1,46 @@
-from abc import ABC, abstractmethod
 import numpy as np
 from numpy import ndarray
 
 
-class Wind(ABC):
+class Wind:
 
-    @abstractmethod
-    def value(self, x: ndarray) -> ndarray:
+    def __init__(self, value_func=None, d_value_func=None):
         """
-        Computes the local wind vector
+        Builds a windfield which is a smooth vector field of space
+        value_func Function taking a point in space (ndarray) and returning the
+        wind value at the given point.
+        d_value_func Function taking a point in space (ndarray) and returning the
+        jacobian of the windfield at the given point.
+        """
+        self.value = value_func
+        self.d_value = d_value_func
 
-        :param x: The point at which to compute the wind
-        :return: The wind vector
+    def __add__(self, other):
         """
-        pass
+        Add windfields
 
-    @abstractmethod
-    def d_value(self, x: ndarray) -> ndarray:
+        :param other: Another windfield
+        :return: The sum of the two windfields
         """
-        Computes the gradient of local wind vector
+        if not isinstance(other, Wind):
+            raise TypeError(f"Unsupported type for addition : {type(other)}")
+        return Wind(value_func=lambda x: self.value(x) + other.value(x),
+                    d_value_func=lambda x: self.d_value(x) + other.d_value(x))
 
-        :param x: The point at which to compute the gradient
-        :return: The gradient
+    def __mul__(self, other):
         """
-        pass
+        Handles the scaling of a windfield by a real number
+
+        :param other: A real number (float)
+        :return: The scaled windfield
+        """
+        if not isinstance(other, float):
+            raise TypeError(f"Unsupported type for multiplication : {type(other)}")
+        return Wind(value_func=lambda x: other * self.value(x),
+                    d_value_func=lambda x: other * self.d_value(x))
+
+    def __rmul__(self, other):
+        return self.__mul__(other)
 
 
 class TwoSectorsWind(Wind):
@@ -39,6 +56,7 @@ class TwoSectorsWind(Wind):
         :param v_w2: y-wind value for x >= x_switch
         :param x_switch: x-coordinate for sectors separation
         """
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
         self.v_w1 = v_w1
         self.v_w2 = v_w2
         self.x_switch = x_switch
@@ -69,6 +87,7 @@ class UniformWind(Wind):
         """
         :param wind_vector: Direction and strength of wind
         """
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
         self.wind_vector = wind_vector
 
     def value(self, x):
@@ -91,6 +110,7 @@ class VortexWind(Wind):
         :param y_omega: y_coordinate of vortex center in m
         :param gamma: Circulation of the vortex in m^2/s. Positive is ccw vortex.
         """
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
         self.x_omega = x_omega
         self.y_omega = y_omega
         self.omega = np.array([x_omega, y_omega])
@@ -137,6 +157,7 @@ class SourceWind(Wind):
         :param y_omega: y_coordinate of source center in m
         :param flux: Flux of the source m^2/s. Positive is source, negative is well.
         """
+        super().__init__()
         self.x_omega = x_omega
         self.y_omega = y_omega
         self.omega = np.array([x_omega, y_omega])

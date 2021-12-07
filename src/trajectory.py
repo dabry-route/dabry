@@ -12,13 +12,15 @@ class Trajectory:
                  points: ndarray,
                  controls: ndarray,
                  last_index: int,
-                 optimal=False):
+                 optimal=False,
+                 type="integral"):
         """
         :param timestamps: A list of timestamps (t_0, ..., t_N) at which the following values were computed
         :param points: A list of points ((x_0, y_0), ..., (x_N, y_N)) describing the trajectory
         :param controls: A list of controls (u_0, ..., u_N) applied to follow the previous trajectory
         :param last_index: The index of the last significant value
         :param optimal: Indicates if trajectory is optimal or not (for plotting)
+        :param type: Gives the type of the trajectory : "integral" or "pmp"
         """
         self.timestamps = np.zeros(timestamps.shape)
         self.timestamps[:] = timestamps
@@ -31,6 +33,7 @@ class Trajectory:
 
         self.last_index = last_index
         self.optimal = optimal
+        self.type = type
 
     def get_final_time(self):
         return self.timestamps[self.last_index]
@@ -46,10 +49,11 @@ class AugmentedTraj(Trajectory):
                  adjoints: ndarray,
                  controls: ndarray,
                  last_index: int,
-                 optimal=False):
+                 optimal=False,
+                 type="integral"):
         """
         :param adjoints: A list of adjoint states ((p_x0, p_y0), ..., (p_xN, p_yN))
         """
-        super().__init__(timestamps, points, controls, last_index, optimal)
+        super().__init__(timestamps, points, controls, last_index, optimal, type)
         self.adjoints = np.zeros(adjoints.shape)
         self.adjoints[:] = adjoints
