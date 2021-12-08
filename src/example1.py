@@ -20,7 +20,7 @@ def example1():
     # UAV goal point x-coordinate in meters
     x_f = 1.
     # The time window upper bound in seconds
-    T = 1.
+    T = 2.
     # The vortex center definition in meters
     omega = np.array([0.5, 0.3])
     # The vortex intensity in m^2/s
@@ -37,11 +37,11 @@ def example1():
     zermelo_model.update_wind(total_wind)
 
     # Creates the navigation problem on top of the previous model
-    mp = MermozProblem(zermelo_model, T=T)
+    mp = MermozProblem(zermelo_model, T=T, visual_mode='full-adjoint')
 
     # Set a list of initial adjoint states for the shooting method
     list_p = list(map(lambda theta: np.array([np.cos(theta), np.sin(theta)]),
-                      np.linspace(3 * np.pi / 4. + 1e-3, 5 * np.pi / 4. - 1e-3, 10)))
+                      np.linspace(3 * np.pi / 4. + 1e-3, 5 * np.pi / 4. - 1e-3, 3)))
 
     # Get time-optimal candidate trajectories as integrals of
     # the augmented system using the shooting method

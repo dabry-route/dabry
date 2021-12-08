@@ -21,11 +21,12 @@ class MermozProblem:
                  model: Model,
                  max_iter=10000,
                  int_step=0.0001,
-                 T=0.):
+                 T=0.,
+                 visual_mode="full"):
         self._model = model
         self._feedback = None
         title = "$v_a=" + str(self._model.v_a) + "\:m/s$, $T=" + str(T) + "\:s$"
-        self.display = Visual("full",
+        self.display = Visual(visual_mode,
                               2,
                               1,
                               lambda x: self._model.wind.value(x) / self._model.v_a,

@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from src.trajectory import Trajectory
+from src.trajectory import Trajectory, AugmentedTraj
 
 reachability_colors = {
     "pmp": {
@@ -28,14 +28,24 @@ control_names = [r"$u\:[rad]$"]
 class FontsizeConf:
 
     def __init__(self):
-        self.fontsize = 10
-        self.axes_titlesize = 10
-        self.axes_labelsize = 8
-        self.xtick_labelsize = 7
-        self.ytick_labelsize = 7
-        self.legend_fontsize = 10
+        self.fontsize = 15
+        self.axes_titlesize = 14
+        self.axes_labelsize = 10
+        self.xtick_labelsize = 10
+        self.ytick_labelsize = 10
+        self.legend_fontsize = 14
         self.font_family = 'lato'
         self.mathtext_fontset = 'cm'
+
+    # def __init__(self):
+    #     self.fontsize = 10
+    #     self.axes_titlesize = 10
+    #     self.axes_labelsize = 8
+    #     self.xtick_labelsize = 7
+    #     self.ytick_labelsize = 7
+    #     self.legend_fontsize = 10
+    #     self.font_family = 'lato'
+    #     self.mathtext_fontset = 'cm'
 
 
 class Visual:
@@ -71,6 +81,7 @@ class Visual:
 
         self.fig = None
         self.map = None
+        self.map_adjoint = None
         self.state = []
         self.control = []
         self.display_setup = False
@@ -105,8 +116,17 @@ class Visual:
                 self.state.append(self.fig.add_subplot(gs[k, 1]))
             for k in range(self.dim_control):
                 self.control.append(self.fig.add_subplot(gs[k + self.dim_state, 1]))
+        elif self.mode == "full-adjoint":
+            """
+            In this mode, plot the state as well as the adjoint state vector
+            """
+            gs = GridSpec(1, 2, figure=self.fig, wspace=.25)
+            self.map = self.fig.add_subplot(gs[0, 0])
+            self.map_adjoint = self.fig.add_subplot(gs[0, 1]) #, projection="polar")
         self.setup_cm()
         self.setup_map()
+        if self.mode == "full-adjoint":
+            self.setup_map_adj()
         self.draw_wind()
         self.setup_components()
         self.display_setup = True
@@ -144,6 +164,23 @@ class Visual:
 
         self.map.grid(visible=True, linestyle='-.', linewidth=0.5)
         self.map.tick_params(direction='in')
+
+    def setup_map_adj(self):
+        """
+        Sets the display of the map
+        """
+        self.map_adjoint.axhline(y=0, color='k', linewidth=0.5)
+        self.map_adjoint.axvline(x=0, color='k', linewidth=0.5)
+        self.map_adjoint.axvline(x=1., color='k', linewidth=0.5)
+
+        self.map_adjoint.set_xlim(-1.1, 1.1)
+        self.map_adjoint.set_ylim(-1.1, 1.1)
+
+        self.map_adjoint.set_xlabel('$p_x\;[s/m]$')
+        self.map_adjoint.set_ylabel('$p_y\;[s/m]$')
+
+        self.map_adjoint.grid(visible=True, linestyle='-.', linewidth=0.5)
+        self.map_adjoint.tick_params(direction='in')
 
     def set_wind_density(self, level: int):
         """
@@ -233,6 +270,7 @@ class Visual:
             cmap = plt.get_cmap("YlGn")
         else:
             raise ValueError(f"Unknown plot mode {mode}")
+        s *= 3.
         self.map.scatter(traj.points[:traj.last_index, 0], traj.points[:traj.last_index, 1],
                          s=s,
                          c=colors,
@@ -245,3 +283,11 @@ class Visual:
                                       s=0.5)
             k = 0
             self.control[k].scatter(traj.timestamps[:traj.last_index + 1], traj.controls[:traj.last_index + 1], s=0.5)
+        elif self.mode == "full-adjoint":
+            if isinstance(traj, AugmentedTraj):
+                self.map_adjoint.scatter(traj.adjoints[:traj.last_index, 0], traj.adjoints[:traj.last_index, 1],
+                                 s=s,
+                                 c=colors,
+                                 cmap=cmap,
+                                 label=label,
+                                 marker=('x' if traj.optimal else None))
