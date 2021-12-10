@@ -1,17 +1,9 @@
-import matplotlib.pyplot as plt
-import numpy as np
-import scipy.optimize
-import portion as ivl
-from matplotlib import mlab
-
-from src.feedback import ZermeloPMPFB, ConstantFB, FixedHeadingFB
-from src.mermoz import MermozProblem
-from src.model import Model1, Model2, Model3, Model4, Model5
-from src.shooting import Shooting
-from src.stoppingcond import TimedSC
-from wind import TwoSectorsWind
-
 import matplotlib as mpl
+import numpy as np
+
+from src.mermoz import MermozProblem
+from src.model import Model5
+from src.shooting import Shooting
 
 mpl.style.use('seaborn-notebook')
 
@@ -62,7 +54,7 @@ def run():
     # for heading in list_headings:
     #     mp.load_feedback(FixedHeadingFB(mp._model.wind, v_a, heading))
     #     mp.integrate_trajectory(TimedSC(T), int_step=0.01)
-    mp.plot_trajs(mode="reachability")
+    mp.plot_trajs(color_mode="reachability")
 
 
 # Press the green button in the gutter to run the script.

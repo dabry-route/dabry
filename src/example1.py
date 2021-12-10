@@ -20,7 +20,7 @@ def example1():
     # UAV goal point x-coordinate in meters
     x_f = 1.
     # The time window upper bound in seconds
-    T = 1.
+    T = 3.
     # The vortex center definition in meters
     omega = np.array([0.5, 0.3])
     # The vortex intensity in m^2/s
@@ -36,19 +36,22 @@ def example1():
     zermelo_model = ZermeloGeneralModel(v_a, x_f)
     zermelo_model.update_wind(total_wind)
 
+    # Initial point
+    x_init = np.array([0., 0.])
+
     # Creates the navigation problem on top of the previous model
-    mp = MermozProblem(zermelo_model, T=T)
+    mp = MermozProblem(zermelo_model, T=T, visual_mode='full-adjoint')
 
     # Set a list of initial adjoint states for the shooting method
-    list_p = list(map(lambda theta: np.array([np.cos(theta), np.sin(theta)]),
-                      np.linspace(3 * np.pi / 4. + 1e-3, 5 * np.pi / 4. - 1e-3, 10)))
+    initial_headings = np.linspace(- np.pi / 2 + 1e-3, np.pi / 2 - 1e-3, 200)
+    list_p = list(map(lambda theta: -np.array([np.cos(theta), np.sin(theta)]), initial_headings))
 
     # Get time-optimal candidate trajectories as integrals of
     # the augmented system using the shooting method
     # The control law is a result of the integration and is
     # thus implicitly defined
     for p in list_p:
-        shoot = Shooting(zermelo_model.dyn, np.zeros(2), T, N_iter=100)
+        shoot = Shooting(zermelo_model.dyn, x_init, T, N_iter=100)
         shoot.set_adjoint(p)
         aug_traj = shoot.integrate()
         mp.trajs.append(aug_traj)
@@ -60,9 +63,9 @@ def example1():
     list_headings = np.linspace(-0.6, 1.2, 10)
     for heading in list_headings:
         mp.load_feedback(FixedHeadingFB(mp._model.wind, v_a, heading))
-        mp.integrate_trajectory(TimedSC(T), int_step=0.01)
+        mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
 
-    mp.plot_trajs(mode="reachability")
+    mp.plot_trajs(color_mode="reachability")
 
 
 if __name__ == '__main__':

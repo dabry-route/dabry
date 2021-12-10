@@ -44,7 +44,8 @@ class IntEulerExpl(Integration):
         controls = np.zeros(self.max_iter)
         i = 0
         t = 0.
-        x = x_init
+        x = np.zeros(2)
+        x[:] = x_init
         points[0] = x
         controls[0] = self.feedback.value(x)
         dt = self.int_step

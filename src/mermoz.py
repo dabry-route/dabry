@@ -2,10 +2,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 from numpy import ndarray
 
-from src.feedback import Feedback, RandomFB
+from src.feedback import Feedback
 from src.integration import IntEulerExpl
 from src.model import Model
-from src.stoppingcond import StoppingCond, TimedSC
+from src.stoppingcond import StoppingCond
+from src.trajectory import Trajectory
 from src.visual import Visual
 
 
@@ -21,18 +22,17 @@ class MermozProblem:
                  model: Model,
                  max_iter=10000,
                  int_step=0.0001,
-                 T=0.):
+                 T=0.,
+                 visual_mode="full"):
         self._model = model
         self._feedback = None
         title = "$v_a=" + str(self._model.v_a) + "\:m/s$, $T=" + str(T) + "\:s$"
-        self.display = Visual("full",
+        self.display = Visual(visual_mode,
                               2,
                               1,
                               lambda x: self._model.wind.value(x) / self._model.v_a,
                               title=title)
         self.trajs = []
-
-        self.plot_modes = ["default", "reachability"]
 
     def load_feedback(self, feedback: Feedback):
         """
@@ -42,21 +42,21 @@ class MermozProblem:
         """
         self._feedback = feedback
 
-    def reachability(self,
-                     T: float,
-                     N_samples=100,
-                     max_iter=20000,
-                     int_step=0.01):
-        """
-        Compute sample trajectories for a reachability analysis of the problem
-
-        :param T: Stop time
-        :param N_samples: Number of sample trajectories
-        """
-        for ns in range(N_samples):
-            self.load_feedback(RandomFB(-np.pi, np.pi, seed=42 + ns))
-            stop_cond = TimedSC(T)
-            self.integrate_trajectory(stop_cond, max_iter=max_iter, int_step=int_step)
+    # def reachability(self,
+    #                  T: float,
+    #                  N_samples=100,
+    #                  max_iter=20000,
+    #                  int_step=0.01):
+    #     """
+    #     Compute sample trajectories for a reachability analysis of the problem
+    #
+    #     :param T: Stop time
+    #     :param N_samples: Number of sample trajectories
+    #     """
+    #     for ns in range(N_samples):
+    #         self.load_feedback(RandomFB(-np.pi, np.pi, seed=42 + ns))
+    #         stop_cond = TimedSC(T)
+    #         self.integrate_trajectory(stop_cond, max_iter=max_iter, int_step=int_step)
 
     def stop_cond(self, x: ndarray):
         """
@@ -66,9 +66,19 @@ class MermozProblem:
         return x[0] < self._model.x_f
 
     def integrate_trajectory(self,
+                             x_init: ndarray,
                              stop_cond: StoppingCond,
                              max_iter=20000,
                              int_step=0.0001):
+        """
+        Use the specified discrete integration method to build a trajectory
+        with the given control law. Store the integrated trajectory in
+        the trajectory list.
+        :param x_init: The initial state
+        :param stop_cond: A stopping condition for the integration
+        :param max_iter: Maximum number of iterations
+        :param int_step: Integration step
+        """
         if self._feedback is None:
             raise ValueError("No feedback provided for integration")
         integrator = IntEulerExpl(self._model.wind,
@@ -77,12 +87,10 @@ class MermozProblem:
                                   stop_cond=stop_cond,
                                   max_iter=max_iter,
                                   int_step=int_step)
-        self.trajs.append(integrator.integrate(np.array([0., 0.])))
+        self.trajs.append(integrator.integrate(x_init))
 
-    def plot_trajs(self, mode="default"):
-        if mode not in self.plot_modes:
-            raise ValueError(f"Unknown plot mode : {mode}")
+    def plot_trajs(self, color_mode="default"):
         for traj in self.trajs:
             # print(traj.adjoints[0])
-            self.display.plot_traj(traj, mode=mode)
+            self.display.plot_traj(traj, color_mode=color_mode)
         plt.show()

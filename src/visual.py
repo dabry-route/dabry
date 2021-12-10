@@ -8,17 +8,32 @@ import numpy as np
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from src.trajectory import Trajectory
+from src.trajectory import Trajectory, AugmentedTraj
+
+my_red = np.array([0.8, 0., 0., 1.])
+my_red_t = np.diag((1., 1., 1., 0.2)).dot(my_red)
+my_orange = np.array([0.8, 0.3, 0., 1.])
+my_orange_t = np.diag((1., 1., 1., 0.5)).dot(my_orange)
+my_blue = np.array([0., 0., 0.8, 1.])
+my_blue_t = np.diag((1., 1., 1., 0.5)).dot(my_blue)
+my_black = np.array([0., 0., 0., 1.])
 
 reachability_colors = {
     "pmp": {
         "steps": np.array([0.8, 0.8, 0.8, 0.6]),
-        "last": np.array([0.8, 0., 0., 1.])
+        "last": my_red
     },
     "integral": {
         "steps": np.array([0.75, 0.75, 0.75, 0.6]),
-        "last": np.array([0., 0., 0.8, 1.])
+        "last": my_blue
     }
+}
+
+monocolor_colors = {
+    "pmp": my_red_t,
+    "approx": my_orange_t,
+    "point": my_blue,
+    "integral": my_black
 }
 
 state_names = [r"$x\:[m]$", r"$y\:[m]$"]
@@ -28,14 +43,24 @@ control_names = [r"$u\:[rad]$"]
 class FontsizeConf:
 
     def __init__(self):
-        self.fontsize = 10
-        self.axes_titlesize = 10
-        self.axes_labelsize = 8
-        self.xtick_labelsize = 7
-        self.ytick_labelsize = 7
-        self.legend_fontsize = 10
+        self.fontsize = 15
+        self.axes_titlesize = 14
+        self.axes_labelsize = 10
+        self.xtick_labelsize = 10
+        self.ytick_labelsize = 10
+        self.legend_fontsize = 14
         self.font_family = 'lato'
         self.mathtext_fontset = 'cm'
+
+    # def __init__(self):
+    #     self.fontsize = 10
+    #     self.axes_titlesize = 10
+    #     self.axes_labelsize = 8
+    #     self.xtick_labelsize = 7
+    #     self.ytick_labelsize = 7
+    #     self.legend_fontsize = 10
+    #     self.font_family = 'lato'
+    #     self.mathtext_fontset = 'cm'
 
 
 class Visual:
@@ -67,10 +92,11 @@ class Visual:
         self.ny_wind = ny_wind
 
         self.x_min, self.x_max = -.1, 1.1
-        self.y_min, self.y_max = -1., 1.
+        self.y_min, self.y_max = -.75, .75
 
         self.fig = None
         self.map = None
+        self.map_adjoint = None
         self.state = []
         self.control = []
         self.display_setup = False
@@ -105,8 +131,17 @@ class Visual:
                 self.state.append(self.fig.add_subplot(gs[k, 1]))
             for k in range(self.dim_control):
                 self.control.append(self.fig.add_subplot(gs[k + self.dim_state, 1]))
+        elif self.mode == "full-adjoint":
+            """
+            In this mode, plot the state as well as the adjoint state vector
+            """
+            gs = GridSpec(1, 2, figure=self.fig, wspace=.25)
+            self.map = self.fig.add_subplot(gs[0, 0])
+            self.map_adjoint = self.fig.add_subplot(gs[0, 1]) #, projection="polar")
         self.setup_cm()
         self.setup_map()
+        if self.mode == "full-adjoint":
+            self.setup_map_adj()
         self.draw_wind()
         self.setup_components()
         self.display_setup = True
@@ -144,6 +179,21 @@ class Visual:
 
         self.map.grid(visible=True, linestyle='-.', linewidth=0.5)
         self.map.tick_params(direction='in')
+        self.map.axis('equal')
+
+    def setup_map_adj(self):
+        """
+        Sets the display of the map for the adjoint state
+        """
+        self.map_adjoint.set_xlim(-1.1, 1.1)
+        self.map_adjoint.set_ylim(-1.1, 1.1)
+
+        self.map_adjoint.set_xlabel('$p_x\;[s/m]$')
+        self.map_adjoint.set_ylabel('$p_y\;[s/m]$')
+
+        self.map_adjoint.grid(visible=True, linestyle='-.', linewidth=0.5)
+        self.map_adjoint.tick_params(direction='in')
+        self.map_adjoint.axis('equal')
 
     def set_wind_density(self, level: int):
         """
@@ -213,7 +263,7 @@ class Visual:
             if k == len(self.control) - 1:
                 control_plot.set_xlabel(r"$t\:[s]$")
 
-    def plot_traj(self, traj: Trajectory, mode="default"):
+    def plot_traj(self, traj: Trajectory, color_mode="default"):
         """
         Plots the given trajectory according to selected display mode
         """
@@ -221,10 +271,13 @@ class Visual:
             self.setup()
         label = None
         s = 0.5 * np.ones(traj.last_index)
-        if mode == "default":
+        if color_mode == "default":
             colors = None
             cmap = None
-        elif mode == "reachability":
+        elif color_mode == "monocolor":
+            colors = np.tile(monocolor_colors[traj.type], traj.last_index).reshape((traj.last_index, 4))
+            cmap = None
+        elif color_mode == "reachability":
             colors = np.ones((traj.last_index, 4))
             colors[:] = np.einsum("ij,j->ij", colors, reachability_colors[traj.type]["steps"])
 
@@ -232,7 +285,8 @@ class Visual:
             s[-1] = 2.
             cmap = plt.get_cmap("YlGn")
         else:
-            raise ValueError(f"Unknown plot mode {mode}")
+            raise ValueError(f"Unknown plot mode {color_mode}")
+        s *= 3.
         self.map.scatter(traj.points[:traj.last_index, 0], traj.points[:traj.last_index, 1],
                          s=s,
                          c=colors,
@@ -245,3 +299,11 @@ class Visual:
                                       s=0.5)
             k = 0
             self.control[k].scatter(traj.timestamps[:traj.last_index + 1], traj.controls[:traj.last_index + 1], s=0.5)
+        elif self.mode == "full-adjoint":
+            if isinstance(traj, AugmentedTraj):
+                self.map_adjoint.scatter(traj.adjoints[:traj.last_index, 0], traj.adjoints[:traj.last_index, 1],
+                                 s=s,
+                                 c=colors,
+                                 cmap=cmap,
+                                 label=label,
+                                 marker=('x' if traj.optimal else None))

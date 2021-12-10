@@ -25,7 +25,8 @@ class Shooting(ABC):
         :param N_iter: The number of subdivisions for the integration scheme
         """
         self.dyn = dyn
-        self.x_init = x_init
+        self.x_init = np.zeros(2)
+        self.x_init[:] = x_init
         self.final_time = final_time
         self.N_iter = N_iter
         self.p_init = np.zeros(2)
