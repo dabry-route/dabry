@@ -127,7 +127,7 @@ class VortexWind(Wind):
         x_omega = self.x_omega
         y_omega = self.y_omega
         return self.gamma / (2 * np.pi * r ** 4) * \
-               np.array([[-2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
+               np.array([[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
                          [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
 
 

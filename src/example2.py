@@ -20,7 +20,7 @@ def example2():
     # UAV goal point x-coordinate in meters
     x_f = 1.
     # The time window upper bound in seconds
-    T = 1.5
+    T = 1.
 
     vortex1 = VortexWind(0.5, 0.7, -1.)
     vortex2 = VortexWind(0.8, 0.2, -0.5)
@@ -29,7 +29,7 @@ def example2():
 
     # Wind allows linear composition
     total_wind = 3. * const_wind + vortex1 + vortex2 + vortex3
-    vortex1.value(np.array([0.3, 0.5]))
+    vortex1.value(np.array([0., 0.]))
     const_wind.value(np.array([0.3, 0.5]))
     total_wind.value(np.array([0.3, 0.5]))
 
@@ -37,20 +37,23 @@ def example2():
     zermelo_model = ZermeloGeneralModel(v_a, x_f)
     zermelo_model.update_wind(total_wind)
 
+    # Initial point
+    x_init = np.array([0.6, -0.1])
+
     # Creates the navigation problem on top of the previous model
     mp = MermozProblem(zermelo_model, T=T)
     mp.display.set_wind_density(2)
 
     # Set a list of initial adjoint states for the shooting method
-    list_p = list(map(lambda theta: np.array([np.cos(theta), np.sin(theta)]),
-                      np.linspace(3 * np.pi / 4. + 1e-3, 5 * np.pi / 4. - 1e-3, 100)))
+    initial_headings = np.linspace(- np.pi + 1e-3, np.pi - 1e-3, 1000)
+    list_p = list(map(lambda theta: -np.array([np.cos(theta), np.sin(theta)]), initial_headings))
 
     # Get time-optimal candidate trajectories as integrals of
     # the augmented system using the shooting method
     # The control law is a result of the integration and is
     # thus implicitly defined
     for p in list_p:
-        shoot = Shooting(zermelo_model.dyn, np.zeros(2), T, N_iter=100)
+        shoot = Shooting(zermelo_model.dyn, x_init, T, N_iter=100)
         shoot.set_adjoint(p)
         aug_traj = shoot.integrate()
         mp.trajs.append(aug_traj)
@@ -62,9 +65,9 @@ def example2():
     list_headings = np.linspace(-0.6, 1.2, 20)
     for heading in list_headings:
         mp.load_feedback(FixedHeadingFB(mp._model.wind, v_a, heading))
-        mp.integrate_trajectory(TimedSC(T), int_step=0.01)
+        mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
 
-    mp.plot_trajs(mode="reachability")
+    mp.plot_trajs(color_mode="reachability")
 
 
 if __name__ == '__main__':

@@ -10,15 +10,30 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from src.trajectory import Trajectory, AugmentedTraj
 
+my_red = np.array([0.8, 0., 0., 1.])
+my_red_t = np.diag((1., 1., 1., 0.2)).dot(my_red)
+my_orange = np.array([0.8, 0.3, 0., 1.])
+my_orange_t = np.diag((1., 1., 1., 0.5)).dot(my_orange)
+my_blue = np.array([0., 0., 0.8, 1.])
+my_blue_t = np.diag((1., 1., 1., 0.5)).dot(my_blue)
+my_black = np.array([0., 0., 0., 1.])
+
 reachability_colors = {
     "pmp": {
         "steps": np.array([0.8, 0.8, 0.8, 0.6]),
-        "last": np.array([0.8, 0., 0., 1.])
+        "last": my_red
     },
     "integral": {
         "steps": np.array([0.75, 0.75, 0.75, 0.6]),
-        "last": np.array([0., 0., 0.8, 1.])
+        "last": my_blue
     }
+}
+
+monocolor_colors = {
+    "pmp": my_red_t,
+    "approx": my_orange_t,
+    "point": my_blue,
+    "integral": my_black
 }
 
 state_names = [r"$x\:[m]$", r"$y\:[m]$"]
@@ -77,7 +92,7 @@ class Visual:
         self.ny_wind = ny_wind
 
         self.x_min, self.x_max = -.1, 1.1
-        self.y_min, self.y_max = -1., 1.
+        self.y_min, self.y_max = -.75, .75
 
         self.fig = None
         self.map = None
@@ -164,15 +179,12 @@ class Visual:
 
         self.map.grid(visible=True, linestyle='-.', linewidth=0.5)
         self.map.tick_params(direction='in')
+        self.map.axis('equal')
 
     def setup_map_adj(self):
         """
-        Sets the display of the map
+        Sets the display of the map for the adjoint state
         """
-        self.map_adjoint.axhline(y=0, color='k', linewidth=0.5)
-        self.map_adjoint.axvline(x=0, color='k', linewidth=0.5)
-        self.map_adjoint.axvline(x=1., color='k', linewidth=0.5)
-
         self.map_adjoint.set_xlim(-1.1, 1.1)
         self.map_adjoint.set_ylim(-1.1, 1.1)
 
@@ -181,6 +193,7 @@ class Visual:
 
         self.map_adjoint.grid(visible=True, linestyle='-.', linewidth=0.5)
         self.map_adjoint.tick_params(direction='in')
+        self.map_adjoint.axis('equal')
 
     def set_wind_density(self, level: int):
         """
@@ -250,7 +263,7 @@ class Visual:
             if k == len(self.control) - 1:
                 control_plot.set_xlabel(r"$t\:[s]$")
 
-    def plot_traj(self, traj: Trajectory, mode="default"):
+    def plot_traj(self, traj: Trajectory, color_mode="default"):
         """
         Plots the given trajectory according to selected display mode
         """
@@ -258,10 +271,13 @@ class Visual:
             self.setup()
         label = None
         s = 0.5 * np.ones(traj.last_index)
-        if mode == "default":
+        if color_mode == "default":
             colors = None
             cmap = None
-        elif mode == "reachability":
+        elif color_mode == "monocolor":
+            colors = np.tile(monocolor_colors[traj.type], traj.last_index).reshape((traj.last_index, 4))
+            cmap = None
+        elif color_mode == "reachability":
             colors = np.ones((traj.last_index, 4))
             colors[:] = np.einsum("ij,j->ij", colors, reachability_colors[traj.type]["steps"])
 
@@ -269,7 +285,7 @@ class Visual:
             s[-1] = 2.
             cmap = plt.get_cmap("YlGn")
         else:
-            raise ValueError(f"Unknown plot mode {mode}")
+            raise ValueError(f"Unknown plot mode {color_mode}")
         s *= 3.
         self.map.scatter(traj.points[:traj.last_index, 0], traj.points[:traj.last_index, 1],
                          s=s,
