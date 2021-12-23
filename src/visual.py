@@ -12,21 +12,35 @@ from src.trajectory import Trajectory, AugmentedTraj
 
 my_red = np.array([0.8, 0., 0., 1.])
 my_red_t = np.diag((1., 1., 1., 0.2)).dot(my_red)
-my_orange = np.array([0.8, 0.3, 0., 1.])
+my_orange = np.array([0.8, 0.5, 0., 1.])
 my_orange_t = np.diag((1., 1., 1., 0.5)).dot(my_orange)
 my_blue = np.array([0., 0., 0.8, 1.])
 my_blue_t = np.diag((1., 1., 1., 0.5)).dot(my_blue)
 my_black = np.array([0., 0., 0., 1.])
+my_grey1 = np.array([0.75, 0.75, 0.75, 0.6])
+my_grey2 = np.array([0.8, 0.8, 0.8, 0.6])
 
 reachability_colors = {
     "pmp": {
-        "steps": np.array([0.8, 0.8, 0.8, 0.6]),
+        "steps": my_grey2,
+        "time-tick": my_orange,
         "last": my_red
     },
     "integral": {
-        "steps": np.array([0.75, 0.75, 0.75, 0.6]),
+        "steps": my_grey1,
+        "time-tick": my_orange,
         "last": my_blue
-    }
+    },
+    "approx": {
+        "steps": my_grey1,
+        "time-tick": my_orange_t,
+        "last": my_orange
+    },
+    "point": {
+        "steps": my_grey1,
+        "time-tick": my_orange,
+        "last": my_orange
+    },
 }
 
 monocolor_colors = {
@@ -263,7 +277,7 @@ class Visual:
             if k == len(self.control) - 1:
                 control_plot.set_xlabel(r"$t\:[s]$")
 
-    def plot_traj(self, traj: Trajectory, color_mode="default"):
+    def plot_traj(self, traj: Trajectory, color_mode="default", controls=False, **kwargs):
         """
         Plots the given trajectory according to selected display mode
         """
@@ -282,23 +296,55 @@ class Visual:
             colors[:] = np.einsum("ij,j->ij", colors, reachability_colors[traj.type]["steps"])
 
             colors[-1, :] = reachability_colors[traj.type]["last"]  # Last point
+            t_count = 0.
+            for k, t in enumerate(traj.timestamps):
+                if t - t_count > 0.5:
+                    t_count = t
+                    try:
+                        colors[k] = reachability_colors[traj.type]["time-tick"]
+                        s[k] = 1.5
+                    except IndexError:
+                        pass
+            s[-1] = 2.
+            cmap = plt.get_cmap("YlGn")
+        elif color_mode == "reachability-enhanced":
+            if "scalar_prods" not in kwargs:
+                raise ValueError('Expected "scalar_prods" argument for "reachability-enhanced" plot mode')
+            _cmap = plt.get_cmap('winter')
+            colors = np.ones((traj.last_index, 4))
+            for k in range(traj.last_index):
+                colors[k:] = _cmap(kwargs['scalar_prods'][k])
+            colors[-1, :] = reachability_colors[traj.type]["last"]  # Last point
+            t_count = 0.
+            for k, t in enumerate(traj.timestamps):
+                if t - t_count > 0.5:
+                    t_count = t
+                    colors[k] = reachability_colors[traj.type]["time-tick"]
+                    s[k] = 2.
+            s *= 1.5
             s[-1] = 2.
             cmap = plt.get_cmap("YlGn")
         else:
             raise ValueError(f"Unknown plot mode {color_mode}")
         s *= 3.
+
         self.map.scatter(traj.points[:traj.last_index, 0], traj.points[:traj.last_index, 1],
                          s=s,
                          c=colors,
                          cmap=cmap,
                          label=label,
                          marker=('x' if traj.optimal else None))
+        if controls:
+            dt = np.mean(traj.timestamps[1:] - traj.timestamps[:-1])
+            for k, point in enumerate(traj.points):
+                u = traj.controls[k]
+                _s = np.array([np.cos(u), np.sin(u)]) * dt
+                self.map.arrow(point[0], point[1], _s[0], _s[1], width=0.0001, color=colors[k])
         if self.mode == "full":
             for k in range(traj.points.shape[1]):
-                self.state[k].scatter(traj.timestamps[:traj.last_index + 1], traj.points[:traj.last_index + 1, k],
-                                      s=0.5)
+                self.state[k].plot(traj.timestamps[:traj.last_index + 1], traj.points[:traj.last_index + 1, k])
             k = 0
-            self.control[k].scatter(traj.timestamps[:traj.last_index + 1], traj.controls[:traj.last_index + 1], s=0.5)
+            self.control[k].plot(traj.timestamps[:traj.last_index + 1], traj.controls[:traj.last_index + 1])
         elif self.mode == "full-adjoint":
             if isinstance(traj, AugmentedTraj):
                 self.map_adjoint.scatter(traj.adjoints[:traj.last_index, 0], traj.adjoints[:traj.last_index, 1],

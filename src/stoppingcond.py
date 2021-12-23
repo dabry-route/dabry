@@ -53,3 +53,8 @@ class TimedSC(StoppingCond):
 
     def value(self, t, x):
         return t >= self.max_time
+
+class DomainSC(StoppingCond):
+    """
+        Stopping condition on the domain
+    """

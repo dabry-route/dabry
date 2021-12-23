@@ -89,8 +89,31 @@ class MermozProblem:
                                   int_step=int_step)
         self.trajs.append(integrator.integrate(x_init))
 
+    def eliminate_trajs(self, tol: float):
+        """
+        Delete trajectories that are too far from the objective point
+        :param tol: The radius tolerance around the objective in meters
+        """
+        delete_index = []
+        for k, traj in enumerate(self.trajs):
+            keep = False
+            for id, p in enumerate(traj.points):
+                if np.linalg.norm(p - np.array([self._model.x_f, 0.])) < tol:
+                    keep = True
+                    break
+            if not keep:
+                delete_index.append(k)
+        for index in sorted(delete_index, reverse=True):
+            del self.trajs[index]
+
+
     def plot_trajs(self, color_mode="default"):
         for traj in self.trajs:
             # print(traj.adjoints[0])
-            self.display.plot_traj(traj, color_mode=color_mode)
+            vect_controls = np.array([np.array([np.cos(u), np.sin(u)]) for u in traj.controls])
+            e_minuses = np.array([self._model.wind.e_minus(x) for x in traj.points])
+            norms = 1/np.linalg.norm(e_minuses, axis=1)
+            e_minuses = np.einsum('ij,i->ij', e_minuses, norms)
+            scalar_prod = np.abs(np.einsum('ij,ij->i', vect_controls, e_minuses))
+            self.display.plot_traj(traj, color_mode=color_mode, controls=False, scalar_prods=scalar_prod)
         plt.show()

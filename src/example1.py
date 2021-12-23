@@ -1,7 +1,7 @@
 import matplotlib as mpl
 import numpy as np
 
-from src.feedback import FixedHeadingFB
+from src.feedback import FixedHeadingFB, WindAlignedFB
 from src.mermoz import MermozProblem
 from src.model import ZermeloGeneralModel
 from src.shooting import Shooting
@@ -43,7 +43,7 @@ def example1():
     mp = MermozProblem(zermelo_model, T=T, visual_mode='full-adjoint')
 
     # Set a list of initial adjoint states for the shooting method
-    initial_headings = np.linspace(- np.pi / 2 + 1e-3, np.pi / 2 - 1e-3, 200)
+    initial_headings = np.linspace(- np.pi + 1e-3, np.pi - 1e-3, 200)
     list_p = list(map(lambda theta: -np.array([np.cos(theta), np.sin(theta)]), initial_headings))
 
     # Get time-optimal candidate trajectories as integrals of
@@ -64,6 +64,9 @@ def example1():
     for heading in list_headings:
         mp.load_feedback(FixedHeadingFB(mp._model.wind, v_a, heading))
         mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
+
+    mp.load_feedback(WindAlignedFB(mp._model.wind))
+    mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
 
     mp.plot_trajs(color_mode="reachability")
 

@@ -42,6 +42,19 @@ class Wind:
     def __rmul__(self, other):
         return self.__mul__(other)
 
+    def e_minus(self, x):
+        """
+        Returns an eigenvector of the vector space associated to the
+        negative eigenvalue of the jacobian of the windfield
+        :param x: The point in space where the eigenvector is computed
+        :return: The eigenvector
+        """
+        d_wind = self.d_value(x)
+        dw_x = d_wind[0, 0]
+        dw_y = d_wind[0, 1]
+        lambda_0 = np.sqrt(dw_x ** 2 + dw_y ** 2)
+        return np.array([- dw_y, lambda_0 + dw_x])
+
 
 class TwoSectorsWind(Wind):
 
@@ -170,3 +183,31 @@ class SourceWind(Wind):
 
     def d_value(self, x):
         raise ValueError("No derivative implemented for source wind")
+
+
+class LinearWind(Wind):
+    """
+    This wind is NOT a potential flow
+    """
+
+    def __init__(self, gradient: ndarray, origin: ndarray, value_origin: ndarray):
+        """
+        :param gradient: The wind gradient
+        :param origin: The origin point for the origin value
+        :param value_origin: The origin value
+        """
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+
+        self.gradient = np.zeros(gradient.shape)
+        self.origin = np.zeros(origin.shape)
+        self.value_origin = np.zeros(value_origin.shape)
+
+        self.gradient[:] = gradient
+        self.origin[:] = origin
+        self.value_origin[:] = value_origin
+
+    def value(self, x):
+        return self.gradient.dot(x - self.origin) + self.value_origin
+
+    def d_value(self, x):
+        return self.gradient
