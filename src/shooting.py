@@ -25,7 +25,7 @@ class Shooting(ABC):
                  final_time,
                  N_iter=1000,
                  adapt_ts=False,
-                 ceil=1e-1,
+                 ceil=3e-2,
                  domain=None,
                  stop_on_failure=False
                  ):

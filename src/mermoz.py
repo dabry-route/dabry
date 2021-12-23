@@ -20,11 +20,13 @@ class MermozProblem:
 
     def __init__(self,
                  model: Model,
+                 domain,
                  max_iter=10000,
                  int_step=0.0001,
                  T=0.,
                  visual_mode="full"):
         self._model = model
+        self.domain = domain
         self._feedback = None
         title = "$v_a=" + str(self._model.v_a) + "\:m/s$, $T=" + str(T) + "\:s$"
         self.display = Visual(visual_mode,

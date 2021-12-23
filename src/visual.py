@@ -342,9 +342,9 @@ class Visual:
                 self.map.arrow(point[0], point[1], _s[0], _s[1], width=0.0001, color=colors[k])
         if self.mode == "full":
             for k in range(traj.points.shape[1]):
-                self.state[k].plot(traj.timestamps[:traj.last_index + 1], traj.points[:traj.last_index + 1, k])
+                self.state[k].plot(traj.timestamps[:traj.last_index], traj.points[:traj.last_index, k])
             k = 0
-            self.control[k].plot(traj.timestamps[:traj.last_index + 1], traj.controls[:traj.last_index + 1])
+            self.control[k].plot(traj.timestamps[:traj.last_index], traj.controls[:traj.last_index])
         elif self.mode == "full-adjoint":
             if isinstance(traj, AugmentedTraj):
                 self.map_adjoint.scatter(traj.adjoints[:traj.last_index, 0], traj.adjoints[:traj.last_index, 1],
