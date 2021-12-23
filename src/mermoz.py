@@ -116,4 +116,3 @@ class MermozProblem:
             e_minuses = np.einsum('ij,i->ij', e_minuses, norms)
             scalar_prod = np.abs(np.einsum('ij,ij->i', vect_controls, e_minuses))
             self.display.plot_traj(traj, color_mode=color_mode, controls=False, scalar_prods=scalar_prod)
-        plt.show()

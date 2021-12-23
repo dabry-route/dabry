@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from numpy import ndarray
 
+from src.wind import Wind
+
 
 class StoppingCond(ABC):
     """
@@ -54,7 +56,19 @@ class TimedSC(StoppingCond):
     def value(self, t, x):
         return t >= self.max_time
 
-class DomainSC(StoppingCond):
+
+class PrecisionSC(StoppingCond):
     """
-        Stopping condition on the domain
+        Stops whenever the integration enters a zone where the characteristic
+        time of the control law is not negligible compared to the integration
+        step. This corresponds to zones where the integration scheme would
+        not be sufficiently precize.
     """
+
+    def __init__(self, wind: Wind, ceil=1e-1, int_stepsize=1.):
+        self.ceil = ceil
+        self.int_stepsize = int_stepsize
+        self.wind = wind
+
+    def value(self, t, x):
+        return 1 / self.wind.grad_norm(x) * self.ceil < self.int_stepsize

@@ -46,6 +46,7 @@ class Wind:
         """
         Returns an eigenvector of the vector space associated to the
         negative eigenvalue of the jacobian of the windfield
+
         :param x: The point in space where the eigenvector is computed
         :return: The eigenvector
         """
@@ -54,6 +55,16 @@ class Wind:
         dw_y = d_wind[0, 1]
         lambda_0 = np.sqrt(dw_x ** 2 + dw_y ** 2)
         return np.array([- dw_y, lambda_0 + dw_x])
+
+    def grad_norm(self, x):
+        """
+        Returns the gradient of the wind norm function at given point
+
+        :param x: The point at which to compute the gradient
+        :return: The gradient
+        """
+        wind = self.value(x)
+        return np.linalg.norm(self.d_value(x).transpose().dot(wind / np.linalg.norm(wind)))
 
 
 class TwoSectorsWind(Wind):
