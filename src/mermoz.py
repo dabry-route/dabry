@@ -20,13 +20,16 @@ class MermozProblem:
 
     def __init__(self,
                  model: Model,
-                 domain,
+                 domain=None,
                  max_iter=10000,
                  int_step=0.0001,
                  T=0.,
                  visual_mode="full"):
         self._model = model
-        self.domain = domain
+        if not domain:
+            self.domain = lambda _: True
+        else:
+            self.domain = domain
         self._feedback = None
         title = "$v_a=" + str(self._model.v_a) + "\:m/s$, $T=" + str(T) + "\:s$"
         self.display = Visual(visual_mode,
@@ -112,9 +115,11 @@ class MermozProblem:
     def plot_trajs(self, color_mode="default"):
         for traj in self.trajs:
             # print(traj.adjoints[0])
-            vect_controls = np.array([np.array([np.cos(u), np.sin(u)]) for u in traj.controls])
-            e_minuses = np.array([self._model.wind.e_minus(x) for x in traj.points])
-            norms = 1/np.linalg.norm(e_minuses, axis=1)
-            e_minuses = np.einsum('ij,i->ij', e_minuses, norms)
-            scalar_prod = np.abs(np.einsum('ij,ij->i', vect_controls, e_minuses))
+            scalar_prod = None
+            if color_mode == 'reachability-enhanced':
+                vect_controls = np.array([np.array([np.cos(u), np.sin(u)]) for u in traj.controls])
+                e_minuses = np.array([self._model.wind.e_minus(x) for x in traj.points])
+                norms = 1/np.linalg.norm(e_minuses, axis=1)
+                e_minuses = np.einsum('ij,i->ij', e_minuses, norms)
+                scalar_prod = np.abs(np.einsum('ij,ij->i', vect_controls, e_minuses))
             self.display.plot_traj(traj, color_mode=color_mode, controls=False, scalar_prods=scalar_prod)

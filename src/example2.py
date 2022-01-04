@@ -102,7 +102,7 @@ def example2():
     print("Plotting trajectories... ", end='')
     mp.plot_trajs(color_mode="reachability")
     t_end = time.time()
-    print(f"Done ({t_end - t_start} s)")
+    print(f"Done ({t_end - t_start:.3f} s)")
     plt.show()
 
 

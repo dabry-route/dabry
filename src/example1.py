@@ -1,5 +1,6 @@
 import matplotlib as mpl
 import numpy as np
+from matplotlib import pyplot as plt
 
 from src.feedback import FixedHeadingFB, WindAlignedFB
 from src.mermoz import MermozProblem
@@ -69,6 +70,7 @@ def example1():
     mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
 
     mp.plot_trajs(color_mode="reachability")
+    plt.show()
 
 
 if __name__ == '__main__':

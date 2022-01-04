@@ -113,10 +113,15 @@ class Shooting(ABC):
                 adjoints[i] = p
                 controls[i] = u
                 i += 1
+            interrupted = False
+            if t < self.final_time:
+                interrupted = True
             if i == self.N_iter:
                 message = f"Adaptative integration reached step limit ({self.N_iter})"
                 if self.stop_on_failure:
                     raise RuntimeError(message)
                 else:
                     warnings.warn(message, stacklevel=2)
-            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type="pmp")
+                    interrupted = True
+            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type="pmp",
+                                 interrupted=interrupted)

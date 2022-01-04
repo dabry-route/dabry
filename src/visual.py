@@ -1,6 +1,7 @@
 import colorsys
 import string
 
+import matplotlib
 import matplotlib.cm as mpl_cm
 import matplotlib.colors as mpl_colors
 import matplotlib.pyplot as plt
@@ -19,6 +20,8 @@ my_blue_t = np.diag((1., 1., 1., 0.5)).dot(my_blue)
 my_black = np.array([0., 0., 0., 1.])
 my_grey1 = np.array([0.75, 0.75, 0.75, 0.6])
 my_grey2 = np.array([0.8, 0.8, 0.8, 0.6])
+my_green = np.array([0., 0.8, 0., 1.])
+my_green_t = np.diag((1., 1., 1., 0.5)).dot(my_green)
 
 reachability_colors = {
     "pmp": {
@@ -40,6 +43,11 @@ reachability_colors = {
         "steps": my_grey1,
         "time-tick": my_orange,
         "last": my_orange
+    },
+    "optimal": {
+        "steps": my_green_t,
+        "time-tick": my_green,
+        "last": my_green
     },
 }
 
@@ -129,6 +137,14 @@ class Visual:
         plt.rc('mathtext', fontset=fsc.mathtext_fontset)
 
         self.fig = plt.figure(num="Mermoz problem", constrained_layout=False)
+        self.fig.subplots_adjust(
+            top=0.93,
+            bottom=0.08,
+            left=0.075,
+            right=0.93,
+            hspace=0.155,
+            wspace=0.13
+        )
         self.fig.suptitle(self.title)
 
         if self.mode == "only-map":
@@ -151,7 +167,7 @@ class Visual:
             """
             gs = GridSpec(1, 2, figure=self.fig, wspace=.25)
             self.map = self.fig.add_subplot(gs[0, 0])
-            self.map_adjoint = self.fig.add_subplot(gs[0, 1]) #, projection="polar")
+            self.map_adjoint = self.fig.add_subplot(gs[0, 1])  # , projection="polar")
         self.setup_cm()
         self.setup_map()
         if self.mode == "full-adjoint":
@@ -295,7 +311,6 @@ class Visual:
             colors = np.ones((traj.last_index, 4))
             colors[:] = np.einsum("ij,j->ij", colors, reachability_colors[traj.type]["steps"])
 
-            colors[-1, :] = reachability_colors[traj.type]["last"]  # Last point
             t_count = 0.
             for k, t in enumerate(traj.timestamps):
                 if t - t_count > 0.5:
@@ -305,6 +320,7 @@ class Visual:
                         s[k] = 1.5
                     except IndexError:
                         pass
+            colors[-1, :] = reachability_colors[traj.type]["last"]  # Last point
             s[-1] = 2.
             cmap = plt.get_cmap("YlGn")
         elif color_mode == "reachability-enhanced":
@@ -312,15 +328,15 @@ class Visual:
                 raise ValueError('Expected "scalar_prods" argument for "reachability-enhanced" plot mode')
             _cmap = plt.get_cmap('winter')
             colors = np.ones((traj.last_index, 4))
-            for k in range(traj.last_index):
-                colors[k:] = _cmap(kwargs['scalar_prods'][k])
-            colors[-1, :] = reachability_colors[traj.type]["last"]  # Last point
             t_count = 0.
             for k, t in enumerate(traj.timestamps):
                 if t - t_count > 0.5:
                     t_count = t
                     colors[k] = reachability_colors[traj.type]["time-tick"]
                     s[k] = 2.
+            for k in range(traj.last_index):
+                colors[k:] = _cmap(kwargs['scalar_prods'][k])
+            colors[-1, :] = reachability_colors[traj.type]["last"]  # Last point
             s *= 1.5
             s[-1] = 2.
             cmap = plt.get_cmap("YlGn")
@@ -328,12 +344,17 @@ class Visual:
             raise ValueError(f"Unknown plot mode {color_mode}")
         s *= 3.
 
-        self.map.scatter(traj.points[:traj.last_index, 0], traj.points[:traj.last_index, 1],
-                         s=s,
-                         c=colors,
+        self.map.scatter(traj.points[:traj.last_index - 1, 0], traj.points[:traj.last_index - 1, 1],
+                         s=s[:-1],
+                         c=colors[:-1],
                          cmap=cmap,
                          label=label,
                          marker=('x' if traj.optimal else None))
+        self.map.scatter(traj.points[traj.last_index - 1, 0], traj.points[traj.last_index - 1, 1],
+                         s=10. if traj.interrupted else s[-1],
+                         c=[colors[-1]],
+                         marker=(r'x' if traj.interrupted else 'o'),
+                         linewidths=1.)
         if controls:
             dt = np.mean(traj.timestamps[1:] - traj.timestamps[:-1])
             for k, point in enumerate(traj.points):
@@ -348,8 +369,8 @@ class Visual:
         elif self.mode == "full-adjoint":
             if isinstance(traj, AugmentedTraj):
                 self.map_adjoint.scatter(traj.adjoints[:traj.last_index, 0], traj.adjoints[:traj.last_index, 1],
-                                 s=s,
-                                 c=colors,
-                                 cmap=cmap,
-                                 label=label,
-                                 marker=('x' if traj.optimal else None))
+                                         s=s,
+                                         c=colors,
+                                         cmap=cmap,
+                                         label=label,
+                                         marker=('x' if traj.optimal else None))
