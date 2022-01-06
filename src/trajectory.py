@@ -41,6 +41,11 @@ class Trajectory:
     def get_final_time(self):
         return self.timestamps[self.last_index]
 
+    def get_dt_stats(self):
+        dt_list = np.zeros(self.timestamps.size - 1)
+        dt_list[:] = self.timestamps[1:] - self.timestamps[:-1]
+        return np.min(dt_list), np.max(dt_list), np.average(dt_list)
+
 
 class AugmentedTraj(Trajectory):
     """

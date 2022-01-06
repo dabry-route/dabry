@@ -65,10 +65,10 @@ class PrecisionSC(StoppingCond):
         not be sufficiently precize.
     """
 
-    def __init__(self, wind: Wind, ceil=1e-1, int_stepsize=1.):
-        self.ceil = ceil
+    def __init__(self, wind: Wind, factor=1e-1, int_stepsize=1.):
+        self.factor = factor
         self.int_stepsize = int_stepsize
         self.wind = wind
 
     def value(self, t, x):
-        return 1 / self.wind.grad_norm(x) * self.ceil < self.int_stepsize
+        return 1 / self.wind.grad_norm(x) * self.factor < self.int_stepsize

@@ -97,7 +97,8 @@ class Visual:
                  windfield,
                  nx_wind=16,
                  ny_wind=20,
-                 title=""):
+                 title="",
+                 axes_equal=True):
         """
             Sets the display of the problem
             :param mode:
@@ -113,8 +114,8 @@ class Visual:
         self.nx_wind = nx_wind
         self.ny_wind = ny_wind
 
-        self.x_min, self.x_max = -.1, 1.1
-        self.y_min, self.y_max = -.75, .75
+        self.x_min, self.x_max = -.1, 1.5
+        self.y_min, self.y_max = -1., 1.
 
         self.fig = None
         self.map = None
@@ -123,6 +124,7 @@ class Visual:
         self.control = []
         self.display_setup = False
         self.title = title
+        self.axes_equal = axes_equal
 
     def setup(self):
 
@@ -209,7 +211,8 @@ class Visual:
 
         self.map.grid(visible=True, linestyle='-.', linewidth=0.5)
         self.map.tick_params(direction='in')
-        self.map.axis('equal')
+        if self.axes_equal:
+            self.map.axis('equal')
 
     def setup_map_adj(self):
         """
@@ -223,7 +226,8 @@ class Visual:
 
         self.map_adjoint.grid(visible=True, linestyle='-.', linewidth=0.5)
         self.map_adjoint.tick_params(direction='in')
-        self.map_adjoint.axis('equal')
+        if self.axes_equal:
+            self.map_adjoint.axis('equal')
 
     def set_wind_density(self, level: int):
         """
@@ -236,7 +240,8 @@ class Visual:
         self.ny_wind *= level
 
     def draw_wind(self):
-        X, Y = np.meshgrid(np.linspace(-0.05, 1.05, self.nx_wind), np.linspace(self.y_min, self.y_max, self.ny_wind))
+        X, Y = np.meshgrid(np.linspace(self.x_min, self.x_max, self.nx_wind),
+                           np.linspace(self.y_min, self.y_max, self.ny_wind))
 
         cartesian = np.dstack((X, Y)).reshape(-1, 2)
 

@@ -68,3 +68,6 @@ class ZermeloDyn(Dynamics):
 
     def d_value__d_state(self, x, u, t):
         return self.wind.d_value(x)
+
+    def __str__(self):
+        return 'Zermelo dynamics'

@@ -25,9 +25,10 @@ class Shooting(ABC):
                  final_time,
                  N_iter=1000,
                  adapt_ts=False,
-                 ceil=3e-2,
+                 factor=3e-2,
                  domain=None,
-                 stop_on_failure=False
+                 abort_on_precision=False,
+                 fail_on_maxiter=False
                  ):
         """
         :param dyn: The dynamics of the problem
@@ -36,9 +37,11 @@ class Shooting(ABC):
         :param N_iter: The number of subdivisions for fixed stepsize integration scheme or the maximum number of
         steps for adaptative integration
         :param adapt_ts: Whether to use adaptation of timestep
-        :param ceil: Factor to use when comparing control law characteristic
+        :param factor: Factor to use when comparing control law characteristic
         time and integration step.
-        :param stop_on_failure: Whether to raise and exception when iteration limit is reached in adaptative
+        :param abort_on_precision: Whether to abort integration when the precision is considered insufficient
+        according to the local control law characteristic time
+        :param fail_on_maxiter: Whether to raise and exception when iteration limit is reached in adaptative
         integration
         """
         self.dyn = dyn
@@ -47,12 +50,13 @@ class Shooting(ABC):
         self.final_time = final_time
         self.N_iter = N_iter
         self.adapt_ts = adapt_ts
-        self.ceil = ceil
+        self.factor = factor
         if not domain:
             self.domain = lambda _: True
         else:
             self.domain = domain
-        self.stop_on_failure = stop_on_failure
+        self.abort_on_precision = abort_on_precision
+        self.fail_on_maxiter = fail_on_maxiter
         self.p_init = np.zeros(2)
 
     def set_adjoint(self, p_init: ndarray):
@@ -65,7 +69,7 @@ class Shooting(ABC):
 
     def integrate(self):
         """
-        Integrate trajctory thanks to the shooting method with an explicit Euler scheme
+        Integrate trajectory thanks to the shooting method with an explicit Euler scheme
         """
         if self.p_init is None:
             raise ValueError("No initial value provided for adjoint state")
@@ -79,11 +83,19 @@ class Shooting(ABC):
         states[0] = x
         adjoints[0] = p
         controls[0] = self.control(x, p, 0.)
+        interrupted = False
+        list_dt = []
         if not self.adapt_ts:
             dt = self.final_time / self.N_iter
-            sc = PrecisionSC(self.dyn.wind, ceil=self.ceil, int_stepsize=dt)
+            sc = PrecisionSC(self.dyn.wind, factor=self.factor, int_stepsize=dt)
+            i = 1
             for i in range(1, self.N_iter):
-                if sc.value(t, x) or not self.domain(x):
+                if self.abort_on_precision:
+                    _sc_value = sc.value(t, x)
+                else:
+                    _sc_value = False
+                if _sc_value or not self.domain(x):
+                    interrupted = True
                     break
                 t += dt
                 u = self.control(x, p, t)
@@ -96,12 +108,14 @@ class Shooting(ABC):
                 states[i] = x
                 adjoints[i] = p
                 controls[i] = u
-            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter, type="pmp")
+            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type="pmp",
+                                 interrupted=interrupted)
         else:
             i = 1
             while t < self.final_time and i < self.N_iter and self.domain(x):
-                dt = 1 / self.dyn.wind.grad_norm(x) * self.ceil
+                dt = 1 / self.dyn.wind.grad_norm(x) * self.factor
                 t += dt
+                list_dt.append(dt)
                 u = self.control(x, p, t)
                 dyn_x = self.dyn.value(x, u, t)
                 A = -self.dyn.d_value__d_state(x, u, t).transpose()
@@ -118,7 +132,7 @@ class Shooting(ABC):
                 interrupted = True
             if i == self.N_iter:
                 message = f"Adaptative integration reached step limit ({self.N_iter})"
-                if self.stop_on_failure:
+                if self.fail_on_maxiter:
                     raise RuntimeError(message)
                 else:
                     warnings.warn(message, stacklevel=2)

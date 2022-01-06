@@ -24,7 +24,8 @@ class MermozProblem:
                  max_iter=10000,
                  int_step=0.0001,
                  T=0.,
-                 visual_mode="full"):
+                 visual_mode="full",
+                 axes_equal=True):
         self._model = model
         if not domain:
             self.domain = lambda _: True
@@ -36,8 +37,12 @@ class MermozProblem:
                               2,
                               1,
                               lambda x: self._model.wind.value(x) / self._model.v_a,
-                              title=title)
+                              title=title,
+                              axes_equal=axes_equal)
         self.trajs = []
+
+    def __str__(self):
+        return str(self._model)
 
     def load_feedback(self, feedback: Feedback):
         """

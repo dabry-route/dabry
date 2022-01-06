@@ -1,10 +1,12 @@
+import math
+
 import numpy as np
 from numpy import ndarray
 
 
 class Wind:
 
-    def __init__(self, value_func=None, d_value_func=None):
+    def __init__(self, value_func=None, d_value_func=None, descr=''):
         """
         Builds a windfield which is a smooth vector field of space
         value_func Function taking a point in space (ndarray) and returning the
@@ -14,6 +16,7 @@ class Wind:
         """
         self.value = value_func
         self.d_value = d_value_func
+        self.descr = descr
 
     def __add__(self, other):
         """
@@ -25,7 +28,8 @@ class Wind:
         if not isinstance(other, Wind):
             raise TypeError(f"Unsupported type for addition : {type(other)}")
         return Wind(value_func=lambda x: self.value(x) + other.value(x),
-                    d_value_func=lambda x: self.d_value(x) + other.d_value(x))
+                    d_value_func=lambda x: self.d_value(x) + other.d_value(x),
+                    descr=self.descr + ', ' + other.descr)
 
     def __mul__(self, other):
         """
@@ -37,7 +41,8 @@ class Wind:
         if not isinstance(other, float):
             raise TypeError(f"Unsupported type for multiplication : {type(other)}")
         return Wind(value_func=lambda x: other * self.value(x),
-                    d_value_func=lambda x: other * self.d_value(x))
+                    d_value_func=lambda x: other * self.d_value(x),
+                    descr=self.descr)
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -66,6 +71,9 @@ class Wind:
         wind = self.value(x)
         return np.linalg.norm(self.d_value(x).transpose().dot(wind / np.linalg.norm(wind)))
 
+    def __str__(self):
+        return self.descr
+
 
 class TwoSectorsWind(Wind):
 
@@ -84,6 +92,7 @@ class TwoSectorsWind(Wind):
         self.v_w1 = v_w1
         self.v_w2 = v_w2
         self.x_switch = x_switch
+        self.descr = f'Two sectors' #({self.v_w1:.2f} m/s, {self.v_w2:.2f} m/s)'
 
     def value(self, x):
         return np.array([0, self.v_w1 * np.heaviside(self.x_switch - x[0], 0.)
@@ -113,6 +122,7 @@ class UniformWind(Wind):
         """
         super().__init__(value_func=self.value, d_value_func=self.d_value)
         self.wind_vector = wind_vector
+        self.descr = f'Uniform' #({np.linalg.norm(self.wind_vector):.2f} m/s, {math.floor(180 / np.pi * np.arctan2(self.wind_vector[1], self.wind_vector[0]))})'
 
     def value(self, x):
         return self.wind_vector
@@ -139,6 +149,7 @@ class VortexWind(Wind):
         self.y_omega = y_omega
         self.omega = np.array([x_omega, y_omega])
         self.gamma = gamma
+        self.descr = f'Vortex' #({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
 
     def value(self, x):
         r = np.linalg.norm(x - self.omega)
@@ -153,19 +164,6 @@ class VortexWind(Wind):
         return self.gamma / (2 * np.pi * r ** 4) * \
                np.array([[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
                          [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
-
-
-class VortexUniformWind(VortexWind, UniformWind):
-
-    def __init__(self, wind_vector, x_omega, y_omega, gamma):
-        VortexWind.__init__(self, x_omega, y_omega, gamma)
-        UniformWind.__init__(self, wind_vector)
-
-    def value(self, x):
-        return VortexWind.value(self, x) + UniformWind.value(self, x)
-
-    def d_value(self, x):
-        return VortexWind.d_value(self, x) + UniformWind.d_value(self, x)
 
 
 class SourceWind(Wind):

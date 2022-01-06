@@ -73,8 +73,8 @@ def test2():
     # The control law is a result of the integration and is
     # thus implicitly defined
     for k, p in enumerate(list_p):
-        shoot = Shooting(zermelo_model.dyn, x_init, T, adapt_ts=True, N_iter=1000, ceil=3e-2, domain=mp.domain,
-                         stop_on_failure=False)
+        shoot = Shooting(zermelo_model.dyn, x_init, T, adapt_ts=True, N_iter=1000, factor=3e-2, domain=mp.domain,
+                         fail_on_maxiter=False)
         shoot.set_adjoint(p)
         aug_traj = shoot.integrate()
         mp.trajs.append(aug_traj)

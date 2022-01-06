@@ -4,7 +4,7 @@ import numpy as np
 from numpy import ndarray
 
 from src.dynamics import ZermeloDyn
-from src.wind import TSEqualWind, VortexWind, SourceWind, VortexUniformWind, UniformWind, Wind
+from src.wind import TSEqualWind, VortexWind, SourceWind, UniformWind, Wind
 
 
 class Model(ABC):
@@ -123,3 +123,6 @@ class ZermeloGeneralModel(Model):
     def update_wind(self, wind: Wind):
         self.wind = wind
         self.dyn = ZermeloDyn(self.wind, self.v_a)
+
+    def __str__(self):
+        return str(self.dyn) + ' with ' + str(self.wind)

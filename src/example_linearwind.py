@@ -1,19 +1,19 @@
 import matplotlib as mpl
 import numpy as np
-
-from src.feedback import FixedHeadingFB, WindAlignedFB
+from matplotlib import pyplot as plt
+import scipy.optimize
 from src.mermoz import MermozProblem
 from src.model import ZermeloGeneralModel
-from src.shooting import Shooting
-from src.stoppingcond import TimedSC
-from wind import VortexWind, UniformWind, LinearWind
+from src.solver import Solver
+from wind import LinearWind
 
 mpl.style.use('seaborn-notebook')
 
 
 def example_linear_wind():
     """
-    Example of the shooting method on a vortex wind
+    Example of the PMP-based solver for the time-optimal Zermelo
+    control problem with a linear windfield
     """
     # UAV airspeed in m/s
     v_a = 1.
@@ -22,53 +22,62 @@ def example_linear_wind():
     # The time window upper bound in seconds
     T = 2.
     # The wind gradient
-    gradient = np.array([[0., v_a/10.],
+    gradient = np.array([[0., v_a / 10.],
                          [0., 0.]])
     origin = np.array([0., 0.])
     value_origin = np.array([0., 0.])
 
-    linear_wind = LinearWind(gradient, origin, value_origin)
+    total_wind = LinearWind(gradient, origin, value_origin)
 
     # Creates the cinematic model
     zermelo_model = ZermeloGeneralModel(v_a, x_f)
-    zermelo_model.update_wind(linear_wind)
+    zermelo_model.update_wind(total_wind)
 
     # Initial point
     x_init = np.array([0., 0.])
 
     # Creates the navigation problem on top of the previous model
-    mp = MermozProblem(zermelo_model, T=T, visual_mode='only-map')
+    mp = MermozProblem(zermelo_model, T=T, visual_mode='only-map', axes_equal=False)
+    mp.display.set_wind_density(2)
 
-    # Set a list of initial adjoint states for the shooting method
-    initial_headings = np.linspace(- np.pi/16. + 1e-3, np.pi/16. - 1e-3, 30)
-    list_p = list(map(lambda theta: -np.array([np.cos(theta), np.sin(theta)]), initial_headings))
+    solver = Solver(mp,
+                    x_init,
+                    np.array([x_f, 0.]),
+                    T,
+                    0.,
+                    np.pi / 16.,
+                    N_disc_init=2,
+                    opti_ceil=1e-3,
+                    neighb_ceil=1e-4,
+                    n_min_opti=1,
+                    adaptive_int_step=False)
+    solver.setup()
+    solver.solve()
 
-    # Get time-optimal candidate trajectories as integrals of
-    # the augmented system using the shooting method
-    # The control law is a result of the integration and is
-    # thus implicitly defined
-    for p in list_p:
-        shoot = Shooting(zermelo_model.dyn, x_init, T, N_iter=100)
-        shoot.set_adjoint(p)
-        aug_traj = shoot.integrate()
-        mp.trajs.append(aug_traj)
+    # Analytic optimal trajectory
+    w = -gradient[0, 1]
+    theta_f = 0.01
 
-    # Get also explicit control law traejctories
-    # Here we add trajectories trying to steer the UAV
-    # on a straight line starting from (0, 0) and with a given
-    # heading angle
-    list_headings = np.linspace(-0.6, 1.2, 10)
-    for heading in list_headings:
-        mp.load_feedback(FixedHeadingFB(mp._model.wind, v_a, heading))
-        mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
+    def analytic_traj(theta, theta_f):
+        x = 0.5 * v_a / w * (-1 / np.cos(theta_f) * (np.tan(theta_f) - np.tan(theta)) +
+                             np.tan(theta) * (1 / np.cos(theta_f) - 1 / np.cos(theta)) -
+                             np.log((np.tan(theta_f)
+                                     + 1 / np.cos(theta_f)) / (
+                                            np.tan(theta) + 1 / np.cos(theta))))
+        y = v_a / w * (1 / np.cos(theta) - 1 / np.cos(theta_f))
+        return x + x_f, y
 
-    mp.load_feedback(WindAlignedFB(mp._model.wind))
-    mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
+    def residual(theta_f):
+        return analytic_traj(-theta_f, theta_f)[0]
 
-    mp.eliminate_trajs(1e-1)
+    theta_f = scipy.optimize.newton_krylov(residual, 0.01)
+    print(f'theta_f : {theta_f}')
 
-    mp.plot_trajs(color_mode="reachability")
+    points = np.array(list(map(lambda theta: analytic_traj(theta, theta_f), np.linspace(-theta_f, theta_f, 1000))))
+    solver.mp.display.map.plot(points[:, 0], points[:, 1], label='analytic')
+    solver.mp.display.map.legend()
 
 
 if __name__ == '__main__':
     example_linear_wind()
+    plt.show()
