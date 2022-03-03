@@ -209,10 +209,8 @@ class Visual:
     def set_wind_density(self, level: int):
         """
         Sets the wind vector density in the plane.
-        :param level: The density level (1 or 2)
+        :param level: The density level
         """
-        if level not in [1, 2]:
-            raise ValueError(f"Unsupported wind density level {level}")
         self.nx_wind *= level
         self.ny_wind *= level
 

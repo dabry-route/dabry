@@ -48,14 +48,24 @@ def test_solver():
     x_init = np.array([0., 0.])
 
     # Creates the navigation problem on top of the previous model
-    mp = MermozProblem(zermelo_model, T=T, domain=domain, visual_mode='full')
+    mp = MermozProblem(zermelo_model, T=T, domain=domain, visual_mode='only-map')
     mp.display.set_wind_density(2)
 
-    solver = Solver(mp, x_init, T, -3 * np.pi / 8., 3 * np.pi / 8., n_min_opti=3, adaptive_int_step=False)
+    solver = Solver(mp,
+                    x_init,
+                    np.array([x_f, 0.]),
+                    T,
+                    -3 * np.pi / 8.,
+                    3 * np.pi / 8.,
+                    N_disc_init=10,
+                    opti_ceil=5e-2,
+                    neighb_ceil=1e-1,
+                    n_min_opti=2,
+                    adaptive_int_step=False)
     solver.log_config()
 
-    # solver.setup()
-    # solver.solve()
+    solver.setup()
+    solver.solve()
 
 
 def test_solver2():
@@ -123,5 +133,5 @@ def test_solver2():
 
 
 if __name__ == '__main__':
-    test_solver2()
+    test_solver()
     plt.show()

@@ -22,9 +22,7 @@ def run():
             t += dt
             t_list.append(t)
 
-        plt.plot(t_list, theta_list, label=f'$theta_0=${theta_0:.2f}')
-
-    theta_0 = -1.5
+        # plt.plot(t_list, theta_list, label=f'$theta_0=${theta_0:.2f}')
 
     def model(theta_0, t, lambda_0):
         const = 0.
@@ -34,11 +32,14 @@ def run():
             const = np.pi
         return const + atan(tan(theta_0) * exp(-lambda_0 * t))
 
-    for theta_0 in [-2., -1., 1., 2., 3., 4., 5.]:
+    fig, ax = plt.subplots()
+    for theta_0 in [0., 1., 1.5, 1.6, 2., 3.]:
         model_list = []
         for t in t_list:
             model_list.append(model(theta_0, t, lambda_0))
-        plt.plot(t_list, model_list, label=f'model for $theta_0=${theta_0:.2f}')
+        ax.plot(t_list, model_list, label=rf'$\theta_0=${theta_0:.2f}')
+    ax.set_xlabel('$t$')
+    ax.set_ylabel(r'$\theta$')
     plt.legend()
     plt.show()
 

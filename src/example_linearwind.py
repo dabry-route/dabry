@@ -16,7 +16,7 @@ def example_linear_wind():
     control problem with a linear windfield
     """
     # UAV airspeed in m/s
-    v_a = 1.
+    v_a = 0.5
     # UAV goal point x-coordinate in meters
     x_f = 1.
     # The time window upper bound in seconds
@@ -45,9 +45,9 @@ def example_linear_wind():
                     np.array([x_f, 0.]),
                     T,
                     0.,
-                    np.pi / 16.,
+                    np.pi / 16. - 5e-2,
                     N_disc_init=2,
-                    opti_ceil=1e-3,
+                    opti_ceil=5e-3,
                     neighb_ceil=1e-4,
                     n_min_opti=1,
                     adaptive_int_step=False)

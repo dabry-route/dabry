@@ -1,7 +1,11 @@
-import math
+import os
+import sys
 
 import numpy as np
 from numpy import ndarray
+
+sys.path.append(os.path.join(os.path.join(os.path.join(os.getcwd(), '..'), '..'), 'wind-properties'))
+from utils import WindHandler
 
 
 class Wind:
@@ -38,6 +42,8 @@ class Wind:
         :param other: A real number (float)
         :return: The scaled windfield
         """
+        if isinstance(other, int):
+            other = float(other)
         if not isinstance(other, float):
             raise TypeError(f"Unsupported type for multiplication : {type(other)}")
         return Wind(value_func=lambda x: other * self.value(x),
@@ -75,6 +81,36 @@ class Wind:
         return self.descr
 
 
+class RealWind(Wind):
+
+    def __init__(self, path):
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        self.wl = WindHandler()
+        self.wl.load(path)  # e.g. '../../extractWindData/saved_wind/Dakar-Natal-0.5'
+        self.wl.compute_derivatives()
+
+    def value(self, x):
+        n, m, _ = self.wl.uv.shape
+        if x[0] < 0. or x[0] > 1. or x[1] < 0. or x[1] > 1.:
+            # print(f"Real windfield undefined at ({x[0]:.3f}, {x[1]:.3f})")
+            return np.array([0., 0.])
+        return self.wl.uv[int((n-1) * x[0] + 0.5), int((m-1) * x[1] + 0.5)]
+
+    def d_value(self, x):
+        n, m, _ = self.wl.uv.shape
+        if x[0] < 1 / (2 * n) or x[0] > 1. - 1 / (2 * n) or x[1] < 1 / (2 * m) or x[1] > 1. - 1 / (2 * m):
+            # print(f"Real windfield jacobian undefined at ({x[0]:.3f}, {x[1]:.3f})")
+            return np.array([[0., 0.],
+                             [0., 0.]])
+        i, j = int((n-1) * x[0] - 0.5), int((m-1) * x[1] - 0.5)
+        try:
+            return np.array([[self.wl.d_u__d_x[i, j], self.wl.d_u__d_y[i, j]],
+                             [self.wl.d_v__d_x[i, j], self.wl.d_v__d_y[i, j]]])
+        except IndexError:
+            return np.array([[0., 0.],
+                             [0., 0.]])
+
+
 class TwoSectorsWind(Wind):
 
     def __init__(self,
@@ -92,7 +128,7 @@ class TwoSectorsWind(Wind):
         self.v_w1 = v_w1
         self.v_w2 = v_w2
         self.x_switch = x_switch
-        self.descr = f'Two sectors' #({self.v_w1:.2f} m/s, {self.v_w2:.2f} m/s)'
+        self.descr = f'Two sectors'  # ({self.v_w1:.2f} m/s, {self.v_w2:.2f} m/s)'
 
     def value(self, x):
         return np.array([0, self.v_w1 * np.heaviside(self.x_switch - x[0], 0.)
@@ -122,7 +158,7 @@ class UniformWind(Wind):
         """
         super().__init__(value_func=self.value, d_value_func=self.d_value)
         self.wind_vector = wind_vector
-        self.descr = f'Uniform' #({np.linalg.norm(self.wind_vector):.2f} m/s, {math.floor(180 / np.pi * np.arctan2(self.wind_vector[1], self.wind_vector[0]))})'
+        self.descr = f'Uniform'  # ({np.linalg.norm(self.wind_vector):.2f} m/s, {math.floor(180 / np.pi * np.arctan2(self.wind_vector[1], self.wind_vector[0]))})'
 
     def value(self, x):
         return self.wind_vector
@@ -149,7 +185,7 @@ class VortexWind(Wind):
         self.y_omega = y_omega
         self.omega = np.array([x_omega, y_omega])
         self.gamma = gamma
-        self.descr = f'Vortex' #({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
+        self.descr = f'Vortex'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
 
     def value(self, x):
         r = np.linalg.norm(x - self.omega)
