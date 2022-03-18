@@ -206,6 +206,10 @@ class Visual:
         if self.axes_equal:
             self.map_adjoint.axis('equal')
 
+    def set_title(self, title):
+        self.title = title
+        self.fig.suptitle(self.title)
+
     def set_wind_density(self, level: int):
         """
         Sets the wind vector density in the plane.

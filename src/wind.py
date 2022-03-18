@@ -164,7 +164,8 @@ class UniformWind(Wind):
         return self.wind_vector
 
     def d_value(self, x):
-        return 0.
+        return np.array([[0., 0.],
+                         [0., 0.]])
 
 
 class VortexWind(Wind):
