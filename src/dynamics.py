@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
-from wind import Wind
+from wind import Wind, LinearWind
 from numpy import ndarray
+from math import cos, sin
 
 
 class Dynamics(ABC):
@@ -71,3 +72,46 @@ class ZermeloDyn(Dynamics):
 
     def __str__(self):
         return 'Zermelo dynamics'
+
+
+class PCZermeloDyn(Dynamics):
+    """
+    Zermelo dynamics for plate-carree spherical projection.
+
+    The state vector is the 2D vector (x,y) in R^2.
+    x is the longitude and y the latitude.
+    The control is the real-valued heading of the drone.
+    """
+
+    def __init__(self, wind: Wind, v_a: float):
+        """
+        :param v_a: Aircraft speed relative to the air in m/s
+        """
+        super().__init__(wind)
+        self.v_a = v_a
+
+    def value(self, x, psi, t):
+        return np.diag([1 / cos(x[1]), 1.]) @ (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(x))
+
+    def d_value__d_state(self, x, psi, t):
+        wind_gradient = np.zeros((x.size, x.size))
+        wind_gradient[:] = self.wind.d_value(x)
+        res = np.vstack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
+                         np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
+                         (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(x)) +
+                         np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1])).transpose()
+        return res
+
+    def __str__(self):
+        return 'Zermelo dynamics on plate carree projection'
+
+
+if __name__ == '__main__':
+    wind = LinearWind(np.array([[1., 2.],
+                                [-3., 4.]]), np.array([0., 0.]), np.array([0., 0.]))
+    pczd = PCZermeloDyn(wind, 1.2)
+    print(pczd.value(np.array([2., 3.]), 0., 0.))
+    print(pczd.value(np.array([0., 0.]), 0., 0.))
+    print(pczd.value(np.array([0., 0.]), 0.5, 0.))
+    print(pczd.value(np.array([0., 0.]), np.pi / 2., 0.))
+    print(pczd.d_value__d_state(np.array([0., np.pi/2. - 1e-3]), np.pi / 2., 0.))

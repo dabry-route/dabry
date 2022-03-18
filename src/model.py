@@ -3,7 +3,7 @@ from abc import ABC
 import numpy as np
 from numpy import ndarray
 
-from src.dynamics import ZermeloDyn
+from src.dynamics import ZermeloDyn, PCZermeloDyn
 from src.wind import TSEqualWind, VortexWind, SourceWind, UniformWind, Wind
 
 
@@ -115,14 +115,25 @@ class ZermeloGeneralModel(Model):
 
     def __init__(self,
                  v_a: float,
-                 x_f: float):
+                 x_f: float,
+                 mode='euclidean'):
+        self.mode = mode
         super().__init__(v_a, x_f)
         self.wind = UniformWind(np.zeros(2))
-        self.dyn = ZermeloDyn(self.wind, self.v_a)
+        if self.mode == 'euclidean':
+            self.dyn = ZermeloDyn(self.wind, self.v_a)
+        elif self.mode == 'plate-carree':
+            self.dyn = PCZermeloDyn(self.wind, self.v_a)
+        else:
+            print(f'Unknown mode : {mode}')
+            exit(1)
 
     def update_wind(self, wind: Wind):
         self.wind = wind
-        self.dyn = ZermeloDyn(self.wind, self.v_a)
+        if self.mode == 'euclidean':
+            self.dyn = ZermeloDyn(self.wind, self.v_a)
+        elif self.mode == 'plate-carree':
+            self.dyn = PCZermeloDyn(self.wind, self.v_a)
 
     def __str__(self):
         return str(self.dyn) + ' with ' + str(self.wind)

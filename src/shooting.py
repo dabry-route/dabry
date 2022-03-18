@@ -1,5 +1,6 @@
 import warnings
 from abc import ABC
+from math import cos
 
 import numpy as np
 from numpy import ndarray
@@ -12,6 +13,10 @@ from src.trajectory import AugmentedTraj
 class AdaptIntLimitWarning(Warning):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+
+EUCLIDEAN = 'euclidean'
+PLANE_CARREE = 'plane-carree'
 
 
 class Shooting(ABC):
@@ -28,7 +33,8 @@ class Shooting(ABC):
                  factor=3e-2,
                  domain=None,
                  abort_on_precision=False,
-                 fail_on_maxiter=False
+                 fail_on_maxiter=False,
+                 mode='euclidean'
                  ):
         """
         :param dyn: The dynamics of the problem
@@ -43,6 +49,8 @@ class Shooting(ABC):
         according to the local control law characteristic time
         :param fail_on_maxiter: Whether to raise and exception when iteration limit is reached in adaptative
         integration
+        :param mode: 'euclidean' if working in 2D planar space, 'plane-carree' if working on plane-carree projection
+        of the sphere
         """
         self.dyn = dyn
         self.x_init = np.zeros(2)
@@ -58,13 +66,24 @@ class Shooting(ABC):
         self.abort_on_precision = abort_on_precision
         self.fail_on_maxiter = fail_on_maxiter
         self.p_init = np.zeros(2)
+        self.mode = mode
+        if self.mode not in [EUCLIDEAN, PLANE_CARREE]:
+            print(f"Unknown shooting mode : {mode}")
+            exit(1)
 
     def set_adjoint(self, p_init: ndarray):
         self.p_init[:] = p_init
 
     def control(self, x, p, t):
-        v = -p / np.linalg.norm(p)
-        res = np.arctan2(v[1], v[0])
+        if self.mode == EUCLIDEAN:
+            v = -p / np.linalg.norm(p)
+            res = np.arctan2(v[1], v[0])
+        elif self.mode == PLANE_CARREE:
+            v = - np.diag([1 / cos(x[1]), 1.]) @ p
+            v = v / np.linalg.norm(v)
+            res = np.pi/2. - np.arctan2(v[1], v[0])
+        else:
+            exit(1)
         return res
 
     def integrate(self):
