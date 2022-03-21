@@ -36,16 +36,19 @@ def example3():
         b4 = (0 - eps < x[0] < 1 + eps and -1 - eps < x[1] < 1. + eps)
         return b4
 
-    total_wind = 2 * RealWind('../../extractWindData/saved_wind/Vancouver-Honolulu-1.0')
+    #total_wind = 2 * RealWind('../../extractWindData/saved_wind/Vancouver-Honolulu-1.0')
+    #total_wind = 2 * RealWind("/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5-tweaked/data.h5")
+    total_wind = 2 * RealWind("/home/bastien/Documents/data/wind/mermoz/linear-example/data.h5")
 
-    print(total_wind.value(np.array([0.5, 0.5])))
+    print(total_wind.value(np.array([-20, 0])))
 
     # Creates the cinematic model
     zermelo_model = ZermeloGeneralModel(v_a, x_f)
     zermelo_model.update_wind(total_wind)
 
     # Initial point
-    x_init = np.array([0.99, 0.99])
+    # x_init = np.array([0.99, 0.99])
+    x_init = np.array([0.01, 0.01])
 
     # Creates the navigation problem on top of the previous model
     mp = MermozProblem(zermelo_model, T=T, visual_mode='only-map')
@@ -54,7 +57,8 @@ def example3():
     print(f"Done ({t_end - t_start:.3f} s)")
 
     # Set a list of initial adjoint states for the shooting method
-    initial_headings = np.linspace(np.pi, 3*np.pi/2, 20)
+    #initial_headings = np.linspace(np.pi, 3*np.pi/2, 20)
+    initial_headings = np.linspace(0., np.pi / 2, 20)
     list_p = list(map(lambda theta: -np.array([np.cos(theta), np.sin(theta)]), initial_headings))
 
     print(f"Shooting PMP trajectories ({len(list_p)})... ", end='')

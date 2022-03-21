@@ -4,8 +4,7 @@ import sys
 import numpy as np
 from numpy import ndarray
 
-sys.path.append(os.path.join(os.path.join(os.path.join(os.getcwd(), '..'), '..'), 'wind-properties'))
-from utils import WindHandler
+# sys.path.append(os.path.join(os.path.join(os.path.join(os.getcwd(), '..'), '..'), 'wind-properties'))
 
 
 class Wind:
@@ -85,27 +84,52 @@ class RealWind(Wind):
 
     def __init__(self, path):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
+        from utils.windy2h5 import WindHandler
         self.wl = WindHandler()
-        self.wl.load(path)  # e.g. '../../extractWindData/saved_wind/Dakar-Natal-0.5'
+        self.wl.load(path)  # e.g. '/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5'
+        print(path)
+
+        # Take max to be conservative when computing the wind value
+        self.x_min = np.max(self.wl.grid[0, :, 0])
+        self.x_max = np.min(self.wl.grid[-1, :, 0])
+        self.y_min = np.max(self.wl.grid[:, 0, 1])
+        self.y_max = np.min(self.wl.grid[:, -1, 1])
+
+        print(self.x_min)
+        print(self.x_max)
+        print(self.y_min)
+        print(self.y_max)
+
         self.wl.compute_derivatives()
 
     def value(self, x):
-        n, m, _ = self.wl.uv.shape
-        if x[0] < 0. or x[0] > 1. or x[1] < 0. or x[1] > 1.:
+        nx = self.wl.nx
+        ny = self.wl.ny
+
+        xx = (x[0] - self.x_min) / (self.x_max - self.x_min)
+        yy = (x[1] - self.y_min) / (self.y_max - self.y_min)
+
+        if xx < 0. or xx > 1. or yy < 0. or yy > 1.:
             # print(f"Real windfield undefined at ({x[0]:.3f}, {x[1]:.3f})")
             return np.array([0., 0.])
-        return self.wl.uv[int((n-1) * x[0] + 0.5), int((m-1) * x[1] + 0.5)]
+
+        return self.wl.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
 
     def d_value(self, x):
-        n, m, _ = self.wl.uv.shape
-        if x[0] < 1 / (2 * n) or x[0] > 1. - 1 / (2 * n) or x[1] < 1 / (2 * m) or x[1] > 1. - 1 / (2 * m):
+        nx = self.wl.nx
+        ny = self.wl.ny
+
+        xx = (x[0] - self.x_min) / (self.x_max - self.x_min)
+        yy = (x[1] - self.y_min) / (self.y_max - self.y_min)
+
+        if xx < 1 / (2 * nx) or xx > 1. - 1 / (2 * nx) or yy < 1 / (2 * ny) or yy > 1. - 1 / (2 * ny):
             # print(f"Real windfield jacobian undefined at ({x[0]:.3f}, {x[1]:.3f})")
             return np.array([[0., 0.],
                              [0., 0.]])
-        i, j = int((n-1) * x[0] - 0.5), int((m-1) * x[1] - 0.5)
+        i, j = int((nx - 1) * xx - 0.5), int((ny - 1) * yy - 0.5)
         try:
-            return np.array([[self.wl.d_u__d_x[i, j], self.wl.d_u__d_y[i, j]],
-                             [self.wl.d_v__d_x[i, j], self.wl.d_v__d_y[i, j]]])
+            return np.array([[self.wl.d_u__d_x[0, i, j], self.wl.d_u__d_y[0, i, j]],
+                             [self.wl.d_v__d_x[0, i, j], self.wl.d_v__d_y[0, i, j]]])
         except IndexError:
             return np.array([[0., 0.],
                              [0., 0.]])

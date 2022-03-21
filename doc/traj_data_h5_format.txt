@@ -1,0 +1,9 @@
+/
+['coords' : {'cartesian', 'gcs'}, 'type' : {'integral', 'pmp'}]
+	data : (nt, 2)
+	ts : (nt, )
+	(OPT) control : (nt, )
+	(OPT) adjoint : (nt, 2)
+	
+	
+	

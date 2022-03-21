@@ -1,0 +1,8 @@
+/
+['coords' : {'cartesian', 'gcs'}]
+	data : (nt, nx, ny)
+	ts : (nt, )
+	grid : (nx, ny, 2)
+	
+	
+	
