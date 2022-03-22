@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
-
 import numpy as np
-from wind import Wind, LinearWind
 from numpy import ndarray
 from math import cos, sin
+
+from mermoz.wind import Wind, LinearWind
 
 
 class Dynamics(ABC):
@@ -88,18 +88,21 @@ class PCZermeloDyn(Dynamics):
         :param v_a: Aircraft speed relative to the air in m/s
         """
         super().__init__(wind)
+        self.earth_radius = 6.4e6  # [m]
         self.v_a = v_a
+        self.factor = 1/self.earth_radius
 
     def value(self, x, psi, t):
-        return np.diag([1 / cos(x[1]), 1.]) @ (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(x))
+        return self.factor * (
+                np.diag([1 / cos(x[1]), 1.]) @ (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(x)))
 
     def d_value__d_state(self, x, psi, t):
         wind_gradient = np.zeros((x.size, x.size))
         wind_gradient[:] = self.wind.d_value(x)
-        res = np.vstack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
-                         np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
-                         (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(x)) +
-                         np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1])).transpose()
+        res = self.factor * np.vstack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
+                                       np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
+                                       (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(x)) +
+                                       np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1])).transpose()
         return res
 
     def __str__(self):
@@ -114,4 +117,4 @@ if __name__ == '__main__':
     print(pczd.value(np.array([0., 0.]), 0., 0.))
     print(pczd.value(np.array([0., 0.]), 0.5, 0.))
     print(pczd.value(np.array([0., 0.]), np.pi / 2., 0.))
-    print(pczd.d_value__d_state(np.array([0., np.pi/2. - 1e-3]), np.pi / 2., 0.))
+    print(pczd.d_value__d_state(np.array([0., np.pi / 2. - 1e-3]), np.pi / 2., 0.))

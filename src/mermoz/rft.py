@@ -1,9 +1,13 @@
+import os
+
+import h5py
 import numpy as np
 from matplotlib import pyplot as plt
 from numpy import ndarray
 from math import sin, cos
 
-from src.mermoz import MermozProblem
+from mermoz.misc import COORD_CARTESIAN
+from mermoz.problem import MermozProblem
 
 
 def upwind_diff(field, axis, delta):
@@ -239,6 +243,22 @@ class RFT:
             print(f'Unknown update method for phi : {method}')
 
         self.t += 1
+
+    def dump_rff(self, filepath):
+        with h5py.File(os.path.join(filepath, 'rff.h5'), 'w') as f:
+            nx, ny, nt = self.phi.shape
+            f.attrs['coords'] = COORD_CARTESIAN
+            dset = f.create_dataset('data', (nt, nx, ny), dtype='f8')
+            dset[:, :, :] = self.phi.transpose((2, 0, 1))
+
+            dset = f.create_dataset('ts', (nt, ), dtype='f8')
+            dset[:] = self.delta_t * np.arange(nt)
+
+            dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
+            X, Y = np.meshgrid(self.origin[0] + self.delta_x * np.arange(nx),
+                               self.origin[1] + self.delta_y * np.arange(ny), indexing='ij')
+            dset[:, :, 0] = X
+            dset[:, :, 1] = Y
 
 
 def time_to_go(self,

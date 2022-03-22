@@ -1,6 +1,5 @@
 import colorsys
 import string
-
 import matplotlib
 import matplotlib.cm as mpl_cm
 import matplotlib.colors as mpl_colors
@@ -9,9 +8,9 @@ import numpy as np
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from src.font_config import FontsizeConf
-from src.trajectory import Trajectory, AugmentedTraj
-from misc import TRAJ_INT, TRAJ_PMP
+from .font_config import FontsizeConf
+from .trajectory import Trajectory, AugmentedTraj
+from .misc import TRAJ_INT, TRAJ_PMP
 
 my_red = np.array([0.8, 0., 0., 1.])
 my_red_t = np.diag((1., 1., 1., 0.2)).dot(my_red)
@@ -335,7 +334,7 @@ class Visual:
                          c=colors[:-1],
                          cmap=cmap,
                          label=label,
-                         marker=('x' if traj.optimal else None))
+                         marker=None)
         self.map.scatter(traj.points[traj.last_index - 1, 0], traj.points[traj.last_index - 1, 1],
                          s=10. if traj.interrupted else s[-1],
                          c=[colors[-1]],
@@ -359,4 +358,4 @@ class Visual:
                                          c=colors,
                                          cmap=cmap,
                                          label=label,
-                                         marker=('x' if traj.optimal else None))
+                                         marker=None)

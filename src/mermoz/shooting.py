@@ -1,14 +1,13 @@
 import warnings
 from abc import ABC
 from math import cos
-
 import numpy as np
 from numpy import ndarray
 
-from src.dynamics import Dynamics
-from src.stoppingcond import PrecisionSC
-from src.trajectory import AugmentedTraj
-from misc import COORD_CARTESIAN, COORD_GCS, TRAJ_PMP
+from .dynamics import Dynamics
+from .stoppingcond import PrecisionSC
+from .trajectory import AugmentedTraj
+from .misc import COORD_CARTESIAN, COORD_GCS, TRAJ_PMP
 
 
 class Shooting(ABC):

@@ -4,13 +4,13 @@ import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 
-from src.feedback import FixedHeadingFB
-from src.mermoz import MermozProblem
-from src.model import ZermeloGeneralModel
-from src.shooting import Shooting
-from src.stoppingcond import TimedSC
-from src.trajectory import dump_trajs
-from src.wind import VortexWind, UniformWind, RealWind
+from mermoz.feedback import FixedHeadingFB
+from mermoz.problem import MermozProblem
+from mermoz.model import ZermeloGeneralModel
+from mermoz.shooting import Shooting
+from mermoz.stoppingcond import TimedSC
+from mermoz.trajectory import dump_trajs
+from mermoz.wind import VortexWind, UniformWind, RealWind
 
 mpl.style.use('seaborn-notebook')
 
@@ -37,9 +37,9 @@ def example3():
         b4 = (0 - eps < x[0] < 1 + eps and -1 - eps < x[1] < 1. + eps)
         return b4
 
-    #total_wind = 2 * RealWind('../../extractWindData/saved_wind/Vancouver-Honolulu-1.0')
+    total_wind = 2 * RealWind('../../extractWindData/saved_wind/Vancouver-Honolulu-1.0')
     #total_wind = 2 * RealWind("/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5-tweaked/data.h5")
-    total_wind = 2 * RealWind("/home/bastien/Documents/data/wind/mermoz/linear-example/data.h5")
+    #total_wind = 2 * RealWind("/home/bastien/Documents/data/wind/mermoz/linear-example/data.h5")
 
     print(total_wind.value(np.array([-20, 0])))
 

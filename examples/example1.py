@@ -2,12 +2,12 @@ import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 
-from src.feedback import FixedHeadingFB, WindAlignedFB
-from src.mermoz import MermozProblem
-from src.model import ZermeloGeneralModel
-from src.shooting import Shooting
-from src.stoppingcond import TimedSC
-from src.wind import VortexWind, UniformWind
+from mermoz.feedback import FixedHeadingFB, WindAlignedFB
+from mermoz.problem import MermozProblem
+from mermoz.model import ZermeloGeneralModel
+from mermoz.shooting import Shooting
+from mermoz.stoppingcond import TimedSC
+from mermoz.wind import VortexWind, UniformWind
 
 mpl.style.use('seaborn-notebook')
 

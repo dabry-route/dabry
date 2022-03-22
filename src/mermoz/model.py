@@ -1,10 +1,9 @@
 from abc import ABC
-
 import numpy as np
 
-from src.dynamics import ZermeloDyn, PCZermeloDyn
-from src.wind import UniformWind, Wind
-from src.misc import COORD_GCS, COORD_CARTESIAN
+from .dynamics import ZermeloDyn, PCZermeloDyn
+from .wind import UniformWind, Wind
+from .misc import COORD_GCS, COORD_CARTESIAN
 
 
 class Model(ABC):

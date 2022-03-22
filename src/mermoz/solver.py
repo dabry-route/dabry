@@ -1,14 +1,12 @@
 import math
 import os
 import time
-
 import numpy as np
 from matplotlib import pyplot as plt
-import matplotlib
 
-from src.mermoz import MermozProblem
-from src.shooting import Shooting
-from src.trajectory import Trajectory
+from .problem import MermozProblem
+from .shooting import Shooting
+from .trajectory import Trajectory
 
 
 class Solver:
@@ -43,7 +41,7 @@ class Solver:
         self.N_iter = N_iter
         self.opti_ceil = opti_ceil
 
-        self.output_dir = os.path.join(os.getcwd(), '..', 'output', '.tmp')
+        self.output_dir = os.path.join(os.getcwd(), '../..', 'output', '.tmp')
 
         self.min_init_angle = min_init_angle
         self.max_init_angle = max_init_angle

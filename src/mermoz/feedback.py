@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
-
 import numpy as np
 from numpy import ndarray
 import random
 
-from src.wind import Wind
+from .wind import Wind
 
 
 class Feedback(ABC):

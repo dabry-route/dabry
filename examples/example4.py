@@ -4,13 +4,13 @@ import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 
-from src.feedback import FixedHeadingFB
-from src.mermoz import MermozProblem
-from src.model import ZermeloGeneralModel
-from src.rft import RFT
-from src.shooting import Shooting
-from src.stoppingcond import TimedSC
-from src.wind import VortexWind, UniformWind, RealWind, TSEqualWind
+from mermoz.feedback import FixedHeadingFB
+from mermoz.problem import MermozProblem
+from mermoz.model import ZermeloGeneralModel
+from mermoz.rft import RFT
+from mermoz.shooting import Shooting
+from mermoz.stoppingcond import TimedSC
+from mermoz.wind import VortexWind, UniformWind, RealWind, TSEqualWind
 
 mpl.style.use('seaborn-notebook')
 
@@ -81,8 +81,8 @@ def example4():
     t_end = time.time()
     print(f"Done ({t_end - t_start:.3f} s)")
 
-    nx = 128
-    ny = 128
+    nx = 80
+    ny = 80
     nts = 50
     showstep = nts - 1
     delta_x = 1 / nx
@@ -107,6 +107,7 @@ def example4():
 
     t_end = time.time()
     print(f"Done ({t_end - t_start:.3f} s)")
+    rft.dump_rff('/home/bastien/Documents/work/mermoz/output/rff')
 
     # Set a list of initial adjoint states for the shooting method
     initial_headings = np.linspace(-np.pi + 1e-3, np.pi - 1e-3, 20)

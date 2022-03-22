@@ -1,13 +1,13 @@
 import json
 import time
-
+import argparse
 import h5py
 import os
 import parse
 import numpy as np
 from datetime import datetime, timedelta
 
-from src.wind import LinearWind
+from mermoz.wind import LinearWind
 
 
 class WindConverter:
@@ -192,10 +192,14 @@ class WindHandler:
 
 
 if __name__ == '__main__':
-    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument('src', type=str)
+    parser.add_argument('dst', type=str)
+    args = parser.parse_args()
     wc = WindConverter()
-    wc.load('/home/bastien/Documents/data/wind/windy/Dakar-Natal-0.5')
-    wc.dump('/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5')
+    wc.load(args.src)
+    wc.dump(args.dst)
     """
     lw = LinearWindExample()
     lw.dump('/home/bastien/Documents/data/wind/mermoz/linear-example')
+    """

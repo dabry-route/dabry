@@ -1,11 +1,11 @@
 import numpy as np
 from numpy import ndarray
 
-from src.feedback import Feedback
-from src.integration import IntEulerExpl
-from src.model import Model
-from src.stoppingcond import StoppingCond
-from src.visual import Visual
+from mermoz.feedback import Feedback
+from mermoz.integration import IntEulerExpl
+from mermoz.model import Model
+from mermoz.stoppingcond import StoppingCond
+from mermoz.visual import Visual
 
 
 class MermozProblem:

@@ -1,15 +1,14 @@
 import random
-
 import matplotlib as mpl
 import numpy as np
 
-from src.feedback import FixedHeadingFB
-from src.mermoz import MermozProblem
-from src.model import ZermeloGeneralModel
-from src.shooting import Shooting
-from src.stoppingcond import TimedSC
-from src.trajectory import Trajectory, AugmentedTraj
-from src.wind import VortexWind, UniformWind
+from .feedback import FixedHeadingFB
+from .problem import MermozProblem
+from .model import ZermeloGeneralModel
+from .shooting import Shooting
+from .stoppingcond import TimedSC
+from .trajectory import Trajectory, AugmentedTraj
+from .wind import VortexWind, UniformWind
 
 mpl.style.use('seaborn-notebook')
 

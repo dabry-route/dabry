@@ -2,7 +2,7 @@ import numpy as np
 from numpy import ndarray
 import h5py
 import os
-from misc import TRAJ_INT, COORD_GCS, COORD_CARTESIAN
+from .misc import TRAJ_INT, COORD_GCS, COORD_CARTESIAN
 
 
 def dump_trajs(traj_list, filepath):
@@ -12,9 +12,11 @@ def dump_trajs(traj_list, filepath):
             trajgroup = f.create_group(str(i))
             trajgroup.attrs['type'] = traj.type
             trajgroup.attrs['coords'] = traj.coords
+            trajgroup.attrs['interrupted'] = traj.interrupted
+            trajgroup.attrs['last_index'] = traj.last_index
 
             dset = trajgroup.create_dataset('data', (nt, 2), dtype='f8')
-            dset[:, :] = traj.points
+            dset[:, :] = traj.points * 180 / np.pi
 
             dset = trajgroup.create_dataset('ts', (nt,), dtype='f8')
             dset[:] = traj.timestamps
@@ -48,8 +50,8 @@ class Trajectory:
         :param last_index: The index of the last significant value
         :param optimal: Indicates if trajectory is optimal or not (for plotting)
         :param interrupted: Indicates if trajectory was interrupted during construction
-        :param type: Gives the type of the trajectory : TRAJ_INT or TRAJ_PMP
-        :param coords: Type of coordinates (either COORD_CARTESIAN or COORD_GCS)
+        :param type: Gives the type of the trajectory : 'integral' or 'pmp'
+        :param coords: Type of coordinates : 'cartesian or 'gcs'
         """
         self.timestamps = np.zeros(timestamps.shape)
         self.timestamps[:] = timestamps

@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
-
 import numpy as np
 from numpy import ndarray
 
-from src.trajectory import Trajectory
-from misc import TRAJ_INT
+from .trajectory import Trajectory
+from .misc import TRAJ_INT
 
 
 class Integration(ABC):

@@ -2,10 +2,11 @@ import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 import scipy.optimize
-from src.mermoz import MermozProblem
-from src.model import ZermeloGeneralModel
-from src.solver import Solver
-from src.wind import LinearWind
+
+from mermoz.problem import MermozProblem
+from mermoz.model import ZermeloGeneralModel
+from mermoz.solver import Solver
+from mermoz.wind import LinearWind
 
 mpl.style.use('seaborn-notebook')
 

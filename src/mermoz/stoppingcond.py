@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from numpy import ndarray
 
-from src.wind import Wind
+from .wind import Wind
 
 
 class StoppingCond(ABC):

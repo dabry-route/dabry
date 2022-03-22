@@ -1,10 +1,5 @@
-import os
-import sys
-
 import numpy as np
 from numpy import ndarray
-
-# sys.path.append(os.path.join(os.path.join(os.path.join(os.getcwd(), '..'), '..'), 'wind-properties'))
 
 
 class Wind:
@@ -84,16 +79,16 @@ class RealWind(Wind):
 
     def __init__(self, path):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
-        from utils.windy2h5 import WindHandler
+        from mermoz.utils.windy2h5 import WindHandler
         self.wl = WindHandler()
         self.wl.load(path)  # e.g. '/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5'
         print(path)
 
         # Take max to be conservative when computing the wind value
-        self.x_min = np.max(self.wl.grid[0, :, 0])
-        self.x_max = np.min(self.wl.grid[-1, :, 0])
-        self.y_min = np.max(self.wl.grid[:, 0, 1])
-        self.y_max = np.min(self.wl.grid[:, -1, 1])
+        self.x_min = np.max(self.wl.grid[0, :, 0]) / 180. * np.pi
+        self.x_max = np.min(self.wl.grid[-1, :, 0]) / 180. * np.pi
+        self.y_min = np.max(self.wl.grid[:, 0, 1]) / 180. * np.pi
+        self.y_max = np.min(self.wl.grid[:, -1, 1]) / 180. * np.pi
 
         print(self.x_min)
         print(self.x_max)
