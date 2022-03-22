@@ -4,6 +4,7 @@ import numpy as np
 from numpy import ndarray
 
 from src.trajectory import Trajectory
+from misc import TRAJ_INT
 
 
 class Integration(ABC):
@@ -59,4 +60,4 @@ class IntEulerExpl(Integration):
             timestamps[i] = t
             points[i] = x
             controls[i] = u
-        return Trajectory(timestamps, points, controls, last_index=i, type="integral")
+        return Trajectory(timestamps, points, controls, last_index=i, type=TRAJ_INT)

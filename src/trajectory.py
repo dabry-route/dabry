@@ -1,5 +1,30 @@
 import numpy as np
 from numpy import ndarray
+import h5py
+import os
+from misc import TRAJ_INT, COORD_GCS, COORD_CARTESIAN
+
+
+def dump_trajs(traj_list, filepath):
+    with h5py.File(os.path.join(filepath, 'trajectories.h5'), "w") as f:
+        for i, traj in enumerate(traj_list):
+            nt = traj.timestamps.shape[0]
+            trajgroup = f.create_group(str(i))
+            trajgroup.attrs['type'] = traj.type
+            trajgroup.attrs['coords'] = traj.coords
+
+            dset = trajgroup.create_dataset('data', (nt, 2), dtype='f8')
+            dset[:, :] = traj.points
+
+            dset = trajgroup.create_dataset('ts', (nt,), dtype='f8')
+            dset[:] = traj.timestamps
+
+            dset = trajgroup.create_dataset('controls', (nt,), dtype='f8')
+            dset[:] = traj.controls
+
+            if hasattr(traj, 'adjoints'):
+                dset = trajgroup.create_dataset('adjoints', (nt, 2), dtype='f8')
+                dset[:, :] = traj.adjoints
 
 
 class Trajectory:
@@ -14,7 +39,8 @@ class Trajectory:
                  last_index: int,
                  optimal=False,
                  interrupted=False,
-                 type="integral"):
+                 type=TRAJ_INT,
+                 coords=COORD_GCS):
         """
         :param timestamps: A list of timestamps (t_0, ..., t_N) at which the following values were computed
         :param points: A list of points ((x_0, y_0), ..., (x_N, y_N)) describing the trajectory
@@ -22,7 +48,8 @@ class Trajectory:
         :param last_index: The index of the last significant value
         :param optimal: Indicates if trajectory is optimal or not (for plotting)
         :param interrupted: Indicates if trajectory was interrupted during construction
-        :param type: Gives the type of the trajectory : "integral" or "pmp"
+        :param type: Gives the type of the trajectory : TRAJ_INT or TRAJ_PMP
+        :param coords: Type of coordinates (either COORD_CARTESIAN or COORD_GCS)
         """
         self.timestamps = np.zeros(timestamps.shape)
         self.timestamps[:] = timestamps
@@ -37,6 +64,7 @@ class Trajectory:
         self.interrupted = interrupted
         self.optimal = optimal
         self.type = type
+        self.coords = coords
 
     def get_final_time(self):
         return self.timestamps[self.last_index]
@@ -60,10 +88,11 @@ class AugmentedTraj(Trajectory):
                  last_index: int,
                  optimal=False,
                  interrupted=False,
-                 type="integral"):
+                 type=TRAJ_INT,
+                 coords=COORD_GCS):
         """
         :param adjoints: A list of adjoint states ((p_x0, p_y0), ..., (p_xN, p_yN))
         """
-        super().__init__(timestamps, points, controls, last_index, optimal, interrupted, type)
+        super().__init__(timestamps, points, controls, last_index, optimal, interrupted, type, coords)
         self.adjoints = np.zeros(adjoints.shape)
         self.adjoints[:] = adjoints

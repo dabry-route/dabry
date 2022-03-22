@@ -10,7 +10,11 @@ from datetime import datetime, timedelta
 from src.wind import LinearWind
 
 
-class WindConverter():
+class WindConverter:
+    """
+    Handles conversion from Windy JSON wind format to
+    Mermoz-specific H5 wind format (see docs/)
+    """
 
     def __init__(self):
         self.lons = None
@@ -96,7 +100,7 @@ class WindConverter():
             dset[:, :, :] = self.grid
 
 
-class LinearWindExample():
+class LinearWindExample:
     def __init__(self):
         self.gradient = np.array([[0., 23. / 10.],
                                   [0., 0.]])
@@ -119,7 +123,7 @@ class LinearWindExample():
                 self.grid[i, j, :] = np.array([x, y])
 
     def dump(self, filepath):
-        with h5py.File(os.path.join(filepath, 'data.h5'), "w") as f:
+        with h5py.File(os.path.join(filepath, 'wind.h5'), "w") as f:
             dset = f.create_dataset("data", (self.nt, self.nx, self.ny, 2), dtype='f8')
             dset[:, :, :, :] = self.data
 
@@ -130,7 +134,10 @@ class LinearWindExample():
             dset[:, :, :] = self.grid
 
 
-class WindHandler():
+class WindHandler:
+    """
+    Handles wind loading from H5 format and derivative computation
+    """
 
     def __init__(self):
         self.nt = None
@@ -163,7 +170,8 @@ class WindHandler():
 
     def compute_derivatives(self):
         """
-        Computes the derivatives of the windfield
+        Computes the derivatives of the windfield with a central difference scheme
+        on the wind native grid
         """
         if self.uv is None:
             raise RuntimeError("Derivative computation failed : wind not yet loaded")
@@ -191,4 +199,3 @@ if __name__ == '__main__':
     """
     lw = LinearWindExample()
     lw.dump('/home/bastien/Documents/data/wind/mermoz/linear-example')
-

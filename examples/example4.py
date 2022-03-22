@@ -10,7 +10,7 @@ from src.model import ZermeloGeneralModel
 from src.rft import RFT
 from src.shooting import Shooting
 from src.stoppingcond import TimedSC
-from wind import VortexWind, UniformWind, RealWind, TSEqualWind
+from src.wind import VortexWind, UniformWind, RealWind, TSEqualWind
 
 mpl.style.use('seaborn-notebook')
 

@@ -1,12 +1,10 @@
 import numpy as np
-from matplotlib import pyplot as plt
 from numpy import ndarray
 
 from src.feedback import Feedback
 from src.integration import IntEulerExpl
 from src.model import Model
 from src.stoppingcond import StoppingCond
-from src.trajectory import Trajectory
 from src.visual import Visual
 
 
@@ -20,13 +18,14 @@ class MermozProblem:
 
     def __init__(self,
                  model: Model,
+                 coords='cartesian',
                  domain=None,
-                 max_iter=10000,
-                 int_step=0.0001,
                  T=0.,
                  visual_mode="full",
                  axes_equal=True):
         self._model = model
+
+        self.coords = coords
         if not domain:
             self.domain = lambda _: True
         else:
@@ -51,22 +50,6 @@ class MermozProblem:
         :param feedback: A feedback law
         """
         self._feedback = feedback
-
-    # def reachability(self,
-    #                  T: float,
-    #                  N_samples=100,
-    #                  max_iter=20000,
-    #                  int_step=0.01):
-    #     """
-    #     Compute sample trajectories for a reachability analysis of the problem
-    #
-    #     :param T: Stop time
-    #     :param N_samples: Number of sample trajectories
-    #     """
-    #     for ns in range(N_samples):
-    #         self.load_feedback(RandomFB(-np.pi, np.pi, seed=42 + ns))
-    #         stop_cond = TimedSC(T)
-    #         self.integrate_trajectory(stop_cond, max_iter=max_iter, int_step=int_step)
 
     def stop_cond(self, x: ndarray):
         """
@@ -116,7 +99,6 @@ class MermozProblem:
         for index in sorted(delete_index, reverse=True):
             del self.trajs[index]
 
-
     def plot_trajs(self, color_mode="default"):
         for traj in self.trajs:
             # print(traj.adjoints[0])
@@ -124,7 +106,7 @@ class MermozProblem:
             if color_mode == 'reachability-enhanced':
                 vect_controls = np.array([np.array([np.cos(u), np.sin(u)]) for u in traj.controls])
                 e_minuses = np.array([self._model.wind.e_minus(x) for x in traj.points])
-                norms = 1/np.linalg.norm(e_minuses, axis=1)
+                norms = 1 / np.linalg.norm(e_minuses, axis=1)
                 e_minuses = np.einsum('ij,i->ij', e_minuses, norms)
                 scalar_prod = np.abs(np.einsum('ij,ij->i', vect_controls, e_minuses))
             self.display.plot_traj(traj, color_mode=color_mode, controls=False, scalar_prods=scalar_prod)

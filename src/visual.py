@@ -11,6 +11,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from src.font_config import FontsizeConf
 from src.trajectory import Trajectory, AugmentedTraj
+from misc import TRAJ_INT, TRAJ_PMP
 
 my_red = np.array([0.8, 0., 0., 1.])
 my_red_t = np.diag((1., 1., 1., 0.2)).dot(my_red)
@@ -25,12 +26,12 @@ my_green = np.array([0., 0.8, 0., 1.])
 my_green_t = np.diag((1., 1., 1., 0.5)).dot(my_green)
 
 reachability_colors = {
-    "pmp": {
+    TRAJ_PMP: {
         "steps": my_grey2,
         "time-tick": my_orange,
         "last": my_red
     },
-    "integral": {
+    TRAJ_INT: {
         "steps": my_grey1,
         "time-tick": my_orange,
         "last": my_blue
@@ -53,14 +54,15 @@ reachability_colors = {
 }
 
 monocolor_colors = {
-    "pmp": my_red_t,
+    TRAJ_PMP: my_red_t,
     "approx": my_orange_t,
     "point": my_blue,
-    "integral": my_black
+    TRAJ_INT: my_black
 }
 
 state_names = [r"$x\:[m]$", r"$y\:[m]$"]
 control_names = [r"$u\:[rad]$"]
+
 
 class Visual:
     """

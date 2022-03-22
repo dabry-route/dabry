@@ -108,10 +108,12 @@ class FixedHeadingFB(Feedback):
         res += self.theta_0
         return res
 
+
 class WindAlignedFB(Feedback):
     """
     Defines a control law to align the airspeed vector with the wind vector
     """
+
     def __init__(self, wind):
         super().__init__(1, wind)
 

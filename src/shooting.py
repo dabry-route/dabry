@@ -8,15 +8,7 @@ from numpy import ndarray
 from src.dynamics import Dynamics
 from src.stoppingcond import PrecisionSC
 from src.trajectory import AugmentedTraj
-
-
-class AdaptIntLimitWarning(Warning):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-EUCLIDEAN = 'euclidean'
-PLANE_CARREE = 'plane-carree'
+from misc import COORD_CARTESIAN, COORD_GCS, TRAJ_PMP
 
 
 class Shooting(ABC):
@@ -34,7 +26,7 @@ class Shooting(ABC):
                  domain=None,
                  abort_on_precision=False,
                  fail_on_maxiter=False,
-                 mode='euclidean'
+                 coords=COORD_CARTESIAN
                  ):
         """
         :param dyn: The dynamics of the problem
@@ -49,8 +41,8 @@ class Shooting(ABC):
         according to the local control law characteristic time
         :param fail_on_maxiter: Whether to raise and exception when iteration limit is reached in adaptative
         integration
-        :param mode: 'euclidean' if working in 2D planar space, 'plane-carree' if working on plane-carree projection
-        of the sphere
+        :param coords: COORD_CARTESIAN if working in 2D planar space, COORD_GCS if working on plane-carree projection
+        of earth
         """
         self.dyn = dyn
         self.x_init = np.zeros(2)
@@ -66,19 +58,19 @@ class Shooting(ABC):
         self.abort_on_precision = abort_on_precision
         self.fail_on_maxiter = fail_on_maxiter
         self.p_init = np.zeros(2)
-        self.mode = mode
-        if self.mode not in [EUCLIDEAN, PLANE_CARREE]:
-            print(f"Unknown shooting mode : {mode}")
+        self.coords = coords
+        if self.coords not in [COORD_CARTESIAN, COORD_GCS]:
+            print(f"Unknown shooting mode : {coords}")
             exit(1)
 
     def set_adjoint(self, p_init: ndarray):
         self.p_init[:] = p_init
 
     def control(self, x, p, t):
-        if self.mode == EUCLIDEAN:
+        if self.coords == COORD_CARTESIAN:
             v = -p / np.linalg.norm(p)
             res = np.arctan2(v[1], v[0])
-        elif self.mode == PLANE_CARREE:
+        elif self.coords == COORD_GCS:
             v = - np.diag([1 / cos(x[1]), 1.]) @ p
             v = v / np.linalg.norm(v)
             res = np.pi/2. - np.arctan2(v[1], v[0])
@@ -127,8 +119,8 @@ class Shooting(ABC):
                 states[i] = x
                 adjoints[i] = p
                 controls[i] = u
-            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type="pmp",
-                                 interrupted=interrupted)
+            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type=TRAJ_PMP,
+                                 interrupted=interrupted, coords=self.coords)
         else:
             i = 1
             while t < self.final_time and i < self.N_iter and self.domain(x):
@@ -156,5 +148,5 @@ class Shooting(ABC):
                 else:
                     warnings.warn(message, stacklevel=2)
                     interrupted = True
-            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type="pmp",
-                                 interrupted=interrupted)
+            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type=TRAJ_PMP,
+                                 interrupted=interrupted, coords=self.coords)

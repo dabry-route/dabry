@@ -5,7 +5,7 @@ import scipy.optimize
 from src.mermoz import MermozProblem
 from src.model import ZermeloGeneralModel
 from src.solver import Solver
-from wind import LinearWind
+from src.wind import LinearWind
 
 mpl.style.use('seaborn-notebook')
 

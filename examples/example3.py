@@ -9,7 +9,8 @@ from src.mermoz import MermozProblem
 from src.model import ZermeloGeneralModel
 from src.shooting import Shooting
 from src.stoppingcond import TimedSC
-from wind import VortexWind, UniformWind, RealWind
+from src.trajectory import dump_trajs
+from src.wind import VortexWind, UniformWind, RealWind
 
 mpl.style.use('seaborn-notebook')
 
@@ -104,7 +105,9 @@ def example3():
     mp.display.map.set_ylim(-0.1, 1.1)
     t_end = time.time()
     print(f"Done ({t_end - t_start:.3f} s)")
-    plt.show()
+    print(len(mp.trajs))
+    dump_trajs(mp.trajs, '/output/traj_test')
+    # plt.show()
 
 
 if __name__ == '__main__':

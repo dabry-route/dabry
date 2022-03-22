@@ -9,7 +9,7 @@ from src.model import ZermeloGeneralModel
 from src.shooting import Shooting
 from src.stoppingcond import TimedSC
 from src.trajectory import Trajectory, AugmentedTraj
-from wind import VortexWind, UniformWind
+from src.wind import VortexWind, UniformWind
 
 mpl.style.use('seaborn-notebook')
 
@@ -174,7 +174,7 @@ def example1():
     for k, s in enumerate(unit_sphere):
         fast_approx[k, :] = x_init + T * (v_a + V_v) * s
     mp.trajs.append(Trajectory(np.zeros(len(fast_approx)), fast_approx, np.zeros(len(fast_approx)), len(fast_approx),
-                               type="integral"))
+                               type=TRAJ_INT))
     """
 
     grad_vw = mp._model.wind.d_value(x_init)
