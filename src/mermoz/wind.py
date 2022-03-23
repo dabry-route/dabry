@@ -82,13 +82,14 @@ class RealWind(Wind):
         from mermoz.utils.windy2h5 import WindHandler
         self.wl = WindHandler()
         self.wl.load(path)  # e.g. '/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5'
-        print(path)
+
+        factor = (np.pi / 180. if self.wl.coords == 'gcs' else 1.)
 
         # Take max to be conservative when computing the wind value
-        self.x_min = np.max(self.wl.grid[0, :, 0]) / 180. * np.pi
-        self.x_max = np.min(self.wl.grid[-1, :, 0]) / 180. * np.pi
-        self.y_min = np.max(self.wl.grid[:, 0, 1]) / 180. * np.pi
-        self.y_max = np.min(self.wl.grid[:, -1, 1]) / 180. * np.pi
+        self.x_min = np.max(self.wl.grid[0, :, 0]) * factor
+        self.x_max = np.min(self.wl.grid[-1, :, 0]) * factor
+        self.y_min = np.max(self.wl.grid[:, 0, 1]) * factor
+        self.y_max = np.min(self.wl.grid[:, -1, 1]) * factor
 
         print(self.x_min)
         print(self.x_max)

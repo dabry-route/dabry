@@ -30,23 +30,23 @@ class ZermeloGeneralModel(Model):
     def __init__(self,
                  v_a: float,
                  x_f: float,
-                 mode=COORD_CARTESIAN):
-        self.mode = mode
+                 coords=COORD_CARTESIAN):
+        self.coords = coords
         super().__init__(v_a, x_f)
         self.wind = UniformWind(np.zeros(2))
-        if self.mode == COORD_CARTESIAN:
+        if self.coords == COORD_CARTESIAN:
             self.dyn = ZermeloDyn(self.wind, self.v_a)
-        elif self.mode == COORD_GCS:
+        elif self.coords == COORD_GCS:
             self.dyn = PCZermeloDyn(self.wind, self.v_a)
         else:
-            print(f'Unknown mode : {mode}')
+            print(f'Unknown mode : {coords}')
             exit(1)
 
     def update_wind(self, wind: Wind):
         self.wind = wind
-        if self.mode == COORD_CARTESIAN:
+        if self.coords == COORD_CARTESIAN:
             self.dyn = ZermeloDyn(self.wind, self.v_a)
-        elif self.mode == COORD_GCS:
+        elif self.coords == COORD_GCS:
             self.dyn = PCZermeloDyn(self.wind, self.v_a)
 
     def __str__(self):

@@ -146,6 +146,7 @@ class WindHandler:
 
         self.uv = None
         self.grid = None
+        self.coords = None
 
         self.d_u__d_x = None
         self.d_u__d_y = None
@@ -166,6 +167,7 @@ class WindHandler:
             self.uv[:, :, :, :] = wind_data['data']
             self.grid = np.zeros((self.nx, self.ny, 2))
             self.grid[:] = wind_data['grid']
+            self.coords = wind_data.attrs['coords']
         print('Done')
 
     def compute_derivatives(self):

@@ -1,3 +1,4 @@
+import h5py
 import matplotlib as mpl
 import numpy as np
 
@@ -5,8 +6,8 @@ from mermoz.problem import MermozProblem
 from mermoz.model import ZermeloGeneralModel
 from mermoz.shooting import Shooting
 from mermoz.trajectory import dump_trajs
-from mermoz.wind import UniformWind
-from mermoz.misc import COORD_GCS
+from mermoz.wind import UniformWind, RealWind
+from mermoz.misc import COORD_GCS, COORD_CARTESIAN
 
 mpl.style.use('seaborn-notebook')
 
@@ -18,12 +19,13 @@ def example5():
     # UAV airspeed in m/s
     v_a = 23.
     # The time window upper bound in seconds
-    T = 40 * 3600.
+    T = 10 * 3600. / 2000e3
 
     const_wind = UniformWind(np.array([0., 0.]))
 
-    # total_wind = 2 * RealWind('/home/bastien/Documents/data/wind/mermoz/Vancouver-Honolulu-1.0/data.h5')
-    total_wind = const_wind
+    total_wind = RealWind('/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5-tweaked/data2.h5')#  * (1 / 2000e3)
+
+    coords = COORD_CARTESIAN
 
     x_van = -123.
     y_van = 49.
@@ -35,17 +37,21 @@ def example5():
     #     return -np.pi / 2. + margin < x[1] < np.pi / 2. - margin
 
     # Creates the cinematic model
-    zermelo_model = ZermeloGeneralModel(v_a, 1., mode=COORD_GCS)
+    zermelo_model = ZermeloGeneralModel(v_a, 1., coords=coords)
     zermelo_model.update_wind(total_wind)
 
+
     # Initial point
-    x_init = np.array([-74. / 180. * np.pi, 40. / 180. * np.pi])
+    x_init = np.array([0.495, 0.57])
+    print(zermelo_model.wind.value(np.array([0.6, 0.6])))
+    # with h5py.File('/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5-tweaked/data.h5') as f:
+    #     print(f['data'][:, :, 0])
 
     # Creates the navigation problem on top of the previous model
     mp = MermozProblem(zermelo_model, T=T, visual_mode='only-map')
 
     # Set a list of initial adjoint states for the shooting method
-    initial_headings = np.linspace(np.pi / 4.,  np.pi / 3., 20)
+    initial_headings = np.linspace(1e-3, 2 * np.pi - 1e-3, 50)
     list_p = list(map(lambda theta: -np.array([np.sin(theta), np.cos(theta)]), initial_headings))
 
     # Get time-optimal candidate trajectories as integrals of
@@ -53,7 +59,7 @@ def example5():
     # The control law is a result of the integration and is
     # thus implicitly defined
     for p in list_p:
-        shoot = Shooting(zermelo_model.dyn, x_init, T, N_iter=100, coords=COORD_GCS)
+        shoot = Shooting(zermelo_model.dyn, x_init, T, N_iter=100, coords=coords)
         shoot.set_adjoint(p)
         aug_traj = shoot.integrate()
         mp.trajs.append(aug_traj)
@@ -71,10 +77,17 @@ def example5():
     mp.load_feedback(WindAlignedFB(mp._model.wind))
     mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
     '''
-    print(mp.trajs[5].points[50, :])
     dump_trajs(mp.trajs, '/home/bastien/Documents/work/mermoz/output/trajs')
     # mp.plot_trajs(color_mode="reachability")
     # plt.show()
+
+    d = Display(coords='gcs')
+    d.setup(x_min=-76., x_max=5., y_min=35., y_max=52.)
+    # d.draw_wind('/home/bastien/Documents/data/wind/mermoz/Vancouver-Honolulu-1.0/data.h5')
+    d.draw_trajs('/home/bastien/Documents/work/mermoz/output/trajs/trajectories.h5')
+    d.map.drawgreatcircle(-75., 40., 2., 48., linewidth=1, color='b', alpha=0.4,
+                          linestyle='--',
+                          label='Great circle')
 
 
 if __name__ == '__main__':

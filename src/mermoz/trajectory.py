@@ -15,8 +15,10 @@ def dump_trajs(traj_list, filepath):
             trajgroup.attrs['interrupted'] = traj.interrupted
             trajgroup.attrs['last_index'] = traj.last_index
 
+            factor = (180 / np.pi if traj.coords == COORD_GCS else 1.)
+
             dset = trajgroup.create_dataset('data', (nt, 2), dtype='f8')
-            dset[:, :] = traj.points * 180 / np.pi
+            dset[:, :] = traj.points * factor
 
             dset = trajgroup.create_dataset('ts', (nt,), dtype='f8')
             dset[:] = traj.timestamps
