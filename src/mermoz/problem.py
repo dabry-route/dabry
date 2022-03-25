@@ -51,13 +51,6 @@ class MermozProblem:
         """
         self._feedback = feedback
 
-    def stop_cond(self, x: ndarray):
-        """
-        Provide a stopping condition for integration
-        :return: A boolean telling whether to stop the integration or not given the state
-        """
-        return x[0] < self._model.x_f
-
     def integrate_trajectory(self,
                              x_init: ndarray,
                              stop_cond: StoppingCond,
@@ -82,7 +75,7 @@ class MermozProblem:
                                   int_step=int_step)
         self.trajs.append(integrator.integrate(x_init))
 
-    def eliminate_trajs(self, tol: float):
+    def eliminate_trajs(self, target, tol: float):
         """
         Delete trajectories that are too far from the objective point
         :param tol: The radius tolerance around the objective in meters
@@ -91,7 +84,7 @@ class MermozProblem:
         for k, traj in enumerate(self.trajs):
             keep = False
             for id, p in enumerate(traj.points):
-                if np.linalg.norm(p - np.array([self._model.x_f, 0.])) < tol:
+                if np.linalg.norm(p - target) < tol:
                     keep = True
                     break
             if not keep:

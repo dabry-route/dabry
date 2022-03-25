@@ -4,10 +4,10 @@ from math import cos
 import numpy as np
 from numpy import ndarray
 
-from .dynamics import Dynamics
-from .stoppingcond import PrecisionSC
-from .trajectory import AugmentedTraj
-from .misc import COORD_CARTESIAN, COORD_GCS, TRAJ_PMP
+from mermoz.dynamics import Dynamics
+from mermoz.stoppingcond import PrecisionSC
+from mermoz.trajectory import AugmentedTraj
+from mermoz.misc import *
 
 
 class Shooting(ABC):
@@ -29,7 +29,7 @@ class Shooting(ABC):
                  ):
         """
         :param dyn: The dynamics of the problem
-        :param x_init: The initial state vector
+        :param x_init: The initial state vector. In cartesian, must be in meters; in GCS, must be radians
         :param final_time: The final time for integration
         :param N_iter: The number of subdivisions for fixed stepsize integration scheme or the maximum number of
         steps for adaptative integration
@@ -58,9 +58,7 @@ class Shooting(ABC):
         self.fail_on_maxiter = fail_on_maxiter
         self.p_init = np.zeros(2)
         self.coords = coords
-        if self.coords not in [COORD_CARTESIAN, COORD_GCS]:
-            print(f"Unknown shooting mode : {coords}")
-            exit(1)
+        ensure_coords(coords)
 
     def set_adjoint(self, p_init: ndarray):
         self.p_init[:] = p_init
@@ -77,10 +75,18 @@ class Shooting(ABC):
             exit(1)
         return res
 
-    def integrate(self):
+    def integrate(self, verbose=False):
         """
         Integrate trajectory thanks to the shooting method with an explicit Euler scheme
         """
+        def sumup(i, t, x, p, u):
+            res = ''
+            res += f'Step {i}, t = {t}\n'
+            res += f'x : {x}\n'
+            res += f'p : {p}\n'
+            res += f'u : {u}\n\n'
+            return res
+
         if self.p_init is None:
             raise ValueError("No initial value provided for adjoint state")
         timestamps = np.zeros(self.N_iter)
@@ -92,9 +98,11 @@ class Shooting(ABC):
         p = self.p_init
         states[0] = x
         adjoints[0] = p
-        controls[0] = self.control(x, p, 0.)
+        u = controls[0] = self.control(x, p, 0.)
         interrupted = False
         list_dt = []
+        if verbose:
+            print(sumup(0, t, x, p, u))
         if not self.adapt_ts:
             dt = self.final_time / self.N_iter
             sc = PrecisionSC(self.dyn.wind, factor=self.factor, int_stepsize=dt)
@@ -118,6 +126,8 @@ class Shooting(ABC):
                 states[i] = x
                 adjoints[i] = p
                 controls[i] = u
+                if verbose:
+                    print(sumup(i, t, x, p, u))
             return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type=TRAJ_PMP,
                                  interrupted=interrupted, coords=self.coords)
         else:
@@ -136,6 +146,8 @@ class Shooting(ABC):
                 states[i] = x
                 adjoints[i] = p
                 controls[i] = u
+                if verbose:
+                    print(sumup(i, t, x, p, u))
                 i += 1
             interrupted = False
             if t < self.final_time:

@@ -44,7 +44,7 @@ def example3():
     print(total_wind.value(np.array([-20, 0])))
 
     # Creates the cinematic model
-    zermelo_model = ZermeloGeneralModel(v_a, x_f)
+    zermelo_model = ZermeloGeneralModel(v_a)
     zermelo_model.update_wind(total_wind)
 
     # Initial point

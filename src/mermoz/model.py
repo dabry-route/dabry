@@ -14,25 +14,21 @@ class Model(ABC):
         - the dynamics of the model
     """
 
-    def __init__(self, v_a: float, x_f: float):
+    def __init__(self, v_a: float):
         """
         :param v_a: The UAV airspeed in meters per seconds
         :param x_f: The target x-coordinate in meters
         """
         self.v_a = v_a
-        self.x_f = x_f
         self.dyn = None
         self.wind = None
 
 
 class ZermeloGeneralModel(Model):
 
-    def __init__(self,
-                 v_a: float,
-                 x_f: float,
-                 coords=COORD_CARTESIAN):
+    def __init__(self, v_a: float, coords=COORD_CARTESIAN):
         self.coords = coords
-        super().__init__(v_a, x_f)
+        super().__init__(v_a)
         self.wind = UniformWind(np.zeros(2))
         if self.coords == COORD_CARTESIAN:
             self.dyn = ZermeloDyn(self.wind, self.v_a)

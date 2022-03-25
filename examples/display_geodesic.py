@@ -10,4 +10,6 @@ if __name__ == '__main__':
     d.map.drawgreatcircle(-75., 40., 2., 48., linewidth=1, color='b', alpha=0.4,
                           linestyle='--',
                           label='Great circle', zorder=4)
+    d.draw_point_by_name('New York')
+    d.draw_point_by_name('Paris')
     plt.show()

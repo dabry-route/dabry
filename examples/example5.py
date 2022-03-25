@@ -37,7 +37,7 @@ def example5():
     #     return -np.pi / 2. + margin < x[1] < np.pi / 2. - margin
 
     # Creates the cinematic model
-    zermelo_model = ZermeloGeneralModel(v_a, 1., coords=coords)
+    zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
     zermelo_model.update_wind(total_wind)
 
 
@@ -80,14 +80,6 @@ def example5():
     dump_trajs(mp.trajs, '/home/bastien/Documents/work/mermoz/output/trajs')
     # mp.plot_trajs(color_mode="reachability")
     # plt.show()
-
-    d = Display(coords='gcs')
-    d.setup(x_min=-76., x_max=5., y_min=35., y_max=52.)
-    # d.draw_wind('/home/bastien/Documents/data/wind/mermoz/Vancouver-Honolulu-1.0/data.h5')
-    d.draw_trajs('/home/bastien/Documents/work/mermoz/output/trajs/trajectories.h5')
-    d.map.drawgreatcircle(-75., 40., 2., 48., linewidth=1, color='b', alpha=0.4,
-                          linestyle='--',
-                          label='Great circle')
 
 
 if __name__ == '__main__':

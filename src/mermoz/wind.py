@@ -1,5 +1,8 @@
+import h5py
 import numpy as np
 from numpy import ndarray
+
+from mermoz.misc import *
 
 
 class Wind:
@@ -76,59 +79,179 @@ class Wind:
 
 
 class RealWind(Wind):
+    """
+    Handles wind loading from H5 format and derivative computation
+    """
 
-    def __init__(self, path):
+    def __init__(self):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
-        from mermoz.utils.windy2h5 import WindHandler
-        self.wl = WindHandler()
-        self.wl.load(path)  # e.g. '/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5'
+        self.nt = None
+        self.nx = None
+        self.ny = None
 
-        factor = (np.pi / 180. if self.wl.coords == 'gcs' else 1.)
+        self.uv = None
+        self.grid = None
+        self.coords = None
+        self.ts = None
 
-        # Take max to be conservative when computing the wind value
-        self.x_min = np.max(self.wl.grid[0, :, 0]) * factor
-        self.x_max = np.min(self.wl.grid[-1, :, 0]) * factor
-        self.y_min = np.max(self.wl.grid[:, 0, 1]) * factor
-        self.y_max = np.min(self.wl.grid[:, -1, 1]) * factor
+        self.x_min = None
+        self.x_max = None
+        self.y_min = None
+        self.y_max = None
 
-        print(self.x_min)
-        print(self.x_max)
-        print(self.y_min)
-        print(self.y_max)
+        self.units_grid = None
 
-        self.wl.compute_derivatives()
+        self.d_u__d_x = None
+        self.d_u__d_y = None
+        self.d_v__d_x = None
+        self.d_v__d_y = None
 
-    def value(self, x):
-        nx = self.wl.nx
-        ny = self.wl.ny
+        self.clipping_tol = 1e-2
 
-        xx = (x[0] - self.x_min) / (self.x_max - self.x_min)
-        yy = (x[1] - self.y_min) / (self.y_max - self.y_min)
+    def load(self, filepath, nodiff=False):
+        """
+        Loads wind data from H5 wind data
+        :param filepath: The H5 file contaning wind data
+        :param nodiff: Do not compute wind derivatives
+        """
 
-        if xx < 0. or xx > 1. or yy < 0. or yy > 1.:
+        # Fill the wind data array
+        print(f'{"Loading wind values...":<30}', end='')
+        with h5py.File(filepath, 'r') as wind_data:
+            self.coords = wind_data.attrs['coords']
+            self.units_grid = wind_data.attrs['units_grid']
+
+            # Checking consistency before loading
+            ensure_coords(self.coords)
+            ensure_units(self.units_grid)
+            ensure_compatible(self.coords, self.units_grid)
+
+            # Loading
+            self.nt, self.nx, self.ny, _ = wind_data['data'].shape
+            self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
+            self.uv[:, :, :, :] = wind_data['data']
+            self.grid = np.zeros((self.nx, self.ny, 2))
+            self.grid[:] = wind_data['grid']
+            self.ts = np.zeros((self.nt,))
+            self.ts[:] = wind_data['ts']
+
+        # Post processing
+        if self.units_grid == U_DEG:
+            self.grid[:] = DEG_TO_RAD * self.grid
+
+        self.x_min = np.max(self.grid[0, :, 0])
+        self.x_max = np.min(self.grid[-1, :, 0])
+        self.y_min = np.max(self.grid[:, 0, 1])
+        self.y_max = np.min(self.grid[:, -1, 1])
+
+        if not nodiff:
+            self.compute_derivatives()
+
+        print('Done')
+
+    def value(self, x, units=U_METERS):
+        """
+        :param x: Point at which to give wind interpolation
+        :param units: Units in which x is given
+        :return: The interpolated wind value at x
+        """
+        # ensure_units(units)
+        # ensure_compatible(self.coords, units)
+
+        nx = self.nx
+        ny = self.ny
+
+        factor = 1.  # (DEG_TO_RAD if self.coords == COORD_GCS and units == U_DEG else 1.)
+
+        xx = (factor * x[0] - self.x_min) / (self.x_max - self.x_min)
+        yy = (factor * x[1] - self.y_min) / (self.y_max - self.y_min)
+
+        eps = self.clipping_tol
+        if xx < 0. - eps or xx > 1. + eps or yy < 0. - eps or yy > 1. + eps:
             # print(f"Real windfield undefined at ({x[0]:.3f}, {x[1]:.3f})")
             return np.array([0., 0.])
 
-        return self.wl.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
+        return self.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
 
-    def d_value(self, x):
-        nx = self.wl.nx
-        ny = self.wl.ny
+    def d_value(self, x, units=U_METERS):
+        """
+        :param x: Point at which to give wind interpolation
+        :param units: Units in which x is given
+        :return: The interpolated wind value at x
+        """
+        # ensure_units(units)
+        # ensure_compatible(self.coords, units)
+
+        nx = self.nx
+        ny = self.ny
+
+        factor = 1.  # (DEG_TO_RAD if self.coords == COORD_GCS and units == U_DEG else 1.)
 
         xx = (x[0] - self.x_min) / (self.x_max - self.x_min)
         yy = (x[1] - self.y_min) / (self.y_max - self.y_min)
 
-        if xx < 1 / (2 * nx) or xx > 1. - 1 / (2 * nx) or yy < 1 / (2 * ny) or yy > 1. - 1 / (2 * ny):
+        eps = self.clipping_tol
+        if xx < 1 / (2 * (nx - 1)) - eps or \
+                xx >= 1. - 1 / (2 * (nx - 1)) + eps or \
+                yy < 1 / (2 * (ny - 1)) - eps or yy >= 1. - 1 / (2 * (ny - 1)) + eps:
             # print(f"Real windfield jacobian undefined at ({x[0]:.3f}, {x[1]:.3f})")
             return np.array([[0., 0.],
                              [0., 0.]])
-        i, j = int((nx - 1) * xx - 0.5), int((ny - 1) * yy - 0.5)
+        i, j = int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)
         try:
-            return np.array([[self.wl.d_u__d_x[0, i, j], self.wl.d_u__d_y[0, i, j]],
-                             [self.wl.d_v__d_x[0, i, j], self.wl.d_v__d_y[0, i, j]]])
+            return np.array([[self.d_u__d_x[0, i, j], self.d_u__d_y[0, i, j]],
+                             [self.d_v__d_x[0, i, j], self.d_v__d_y[0, i, j]]])
         except IndexError:
             return np.array([[0., 0.],
                              [0., 0.]])
+
+    def compute_derivatives(self):
+        """
+        Computes the derivatives of the windfield with a central difference scheme
+        on the wind native grid
+        """
+        if self.uv is None:
+            raise RuntimeError("Derivative computation failed : wind not yet loaded")
+        self.d_u__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+        self.d_u__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+        self.d_v__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+        self.d_v__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+
+        # Use order 2 precision derivative
+        factor = 1 / EARTH_RADIUS if self.coords == 'gcs' else 1.
+        self.d_u__d_x[:] = factor * 0.5 * (self.uv[:, 2:, 1:-1, 0] - self.uv[:, :-2, 1:-1, 0]) / (
+                self.grid[2:, 1:-1, 0] - self.grid[:-2, 1:-1, 0])
+        self.d_u__d_y[:] = factor * 0.5 * (self.uv[:, 1:-1, 2:, 0] - self.uv[:, 1:-1, :-2, 0]) / (
+                self.grid[1:-1, 2:, 1] - self.grid[1:-1, :-2, 1])
+        self.d_v__d_x[:] = factor * 0.5 * (self.uv[:, 2:, 1:-1, 1] - self.uv[:, :-2, 1:-1, 1]) / (
+                self.grid[2:, 1:-1, 0] - self.grid[:-2, 1:-1, 0])
+        self.d_v__d_y[:] = factor * 0.5 * (self.uv[:, 1:-1, 2:, 1] - self.uv[:, 1:-1, :-2, 1]) / (
+                self.grid[1:-1, 2:, 1] - self.grid[1:-1, :-2, 1])
+
+    def dump(self, filepath, f=False):
+        proceed = False
+        if not f and os.path.exists(filepath):
+            print(f'Cannot dump wind, already existing file : {filepath}')
+            ans = input(f"Do you want to overwrite {filepath} ? [y/n]")
+            try:
+                if ans[0] == 'y':
+                    proceed = True
+                else:
+                    pass
+            except:
+                exit(1)
+        if not f and not proceed:
+            exit(1)
+        with h5py.File(filepath, 'w') as f:
+            f.attrs['coords'] = self.coords
+            f.attrs['units_grid'] = U_DEG
+            dset = f.create_dataset('data', (self.nt, self.nx, self.ny, 2), dtype='f8')
+            dset[:] = self.uv
+            dset = f.create_dataset('ts', (self.nt,), dtype='f8')
+            dset[:] = self.ts
+            factor = (1 / DEG_TO_RAD if self.coords == COORD_GCS else 1.)
+            dset = f.create_dataset('grid', (self.nx, self.ny, 2), dtype='f8')
+            dset[:] = factor * self.grid
 
 
 class TwoSectorsWind(Wind):

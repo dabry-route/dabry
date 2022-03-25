@@ -42,7 +42,7 @@ def test_solver():
     total_wind = 3. * const_wind + vortex1 + vortex2 + vortex3
 
     # Creates the cinematic model
-    zermelo_model = ZermeloGeneralModel(v_a, x_f)
+    zermelo_model = ZermeloGeneralModel(v_a)
     zermelo_model.update_wind(total_wind)
 
     # Initial point
@@ -85,7 +85,7 @@ def test_solver2():
     total_wind = LinearWind(gradient, origin, value_origin)
 
     # Creates the cinematic model
-    zermelo_model = ZermeloGeneralModel(v_a, x_f)
+    zermelo_model = ZermeloGeneralModel(v_a)
     zermelo_model.update_wind(total_wind)
 
     # Initial point

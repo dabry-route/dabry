@@ -6,7 +6,7 @@ from .misc import TRAJ_INT, COORD_GCS, COORD_CARTESIAN
 
 
 def dump_trajs(traj_list, filepath):
-    with h5py.File(os.path.join(filepath, 'trajectories.h5'), "w") as f:
+    with h5py.File(filepath, "w") as f:
         for i, traj in enumerate(traj_list):
             nt = traj.timestamps.shape[0]
             trajgroup = f.create_group(str(i))

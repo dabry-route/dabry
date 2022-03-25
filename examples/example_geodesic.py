@@ -35,7 +35,7 @@ def example_geodesic():
     lat_par = 48.864716
 
     # Creates the cinematic model
-    zermelo_model = ZermeloGeneralModel(v_a, 1., coords=coords)
+    zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
     zermelo_model.update_wind(total_wind)
 
     # Initial point at NY

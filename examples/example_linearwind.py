@@ -31,7 +31,7 @@ def example_linear_wind():
     total_wind = LinearWind(gradient, origin, value_origin)
 
     # Creates the cinematic model
-    zermelo_model = ZermeloGeneralModel(v_a, x_f)
+    zermelo_model = ZermeloGeneralModel(v_a)
     zermelo_model.update_wind(total_wind)
 
     # Initial point

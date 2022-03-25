@@ -3,6 +3,7 @@ import numpy as np
 from numpy import ndarray
 from math import cos, sin
 
+from mermoz.misc import *
 from mermoz.wind import Wind, LinearWind
 
 
@@ -88,9 +89,8 @@ class PCZermeloDyn(Dynamics):
         :param v_a: Aircraft speed relative to the air in m/s
         """
         super().__init__(wind)
-        self.earth_radius = 6.4e6  # [m]
         self.v_a = v_a
-        self.factor = 1/self.earth_radius
+        self.factor = 1/EARTH_RADIUS
 
     def value(self, x, psi, t):
         return self.factor * (

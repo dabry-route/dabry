@@ -1,4 +1,6 @@
+import json
 import os
+import sys
 
 import h5py
 import numpy as np
@@ -6,7 +8,7 @@ from matplotlib import pyplot as plt
 from numpy import ndarray
 from math import sin, cos
 
-from mermoz.misc import COORD_CARTESIAN
+from mermoz.misc import *
 from mermoz.problem import MermozProblem
 
 
@@ -175,41 +177,152 @@ class RFT:
     Reachability front tracker
     """
 
-    def __init__(self, origin, delta_x, delta_y, delta_t, nx, ny, n_ts, mp: MermozProblem, x_init):
+    def __init__(self, bl, tr, max_time, nx, ny, mp: MermozProblem, x_init, nt=None, kernel='base',
+                 method='sethian', coords=COORD_CARTESIAN):
         """
-        :param origin: Grid bottom left origin point
-        :param delta_x: Discretization step in the x-axis direction
-        :param delta_y: Discretization step in the y-axis direction
-        :param delta_t: Discretization step in the time direction
+        :param bl: Grid bottom left point
+        :param tr: Grid top right point
+        :param max_time: Time window upper bound
         :param nx: Number of points in the x-axis direction
         :param ny: Number of points in the y-axis direction
-        :param n_ts: Number of points in the time direction
         :param mp: The mermoz problem instance containing the analytic wind
         :param x_init: The problem starting point
+        :param nt: Number of points in the time direction. Unused with matlab kernel.
+        :param kernel: 'base' for Python implementation of level set methods or 'matlab'
+        to use ToolboxLS (https://www.cs.ubc.ca/~mitchell/ToolboxLS)
+        :param method: With 'base' kernel, select numerical scheme ('sethian' or 'lolla')
+        :param coords: Coordinate type ('cartesian' or 'gcs')
         """
-        self.delta_x = delta_x
-        self.delta_y = delta_y
-        self.delta_t = delta_t
+        ensure_coords(coords)
+        self.coords = coords
+
+        self.bl = np.zeros(2)
+        self.bl[:] = bl
+        self.tr = np.zeros(2)
+        self.tr[:] = tr
+        self.max_time = max_time
+
+        self.nx = nx
+        self.ny = ny
+        self.nt = nt
+
+        self.delta_x = (self.tr[0] - self.bl[0]) / (self.nx - 1)
+        self.delta_y = (self.tr[1] - self.bl[1]) / (self.ny - 1)
+        if self.nt is not None:
+            self.delta_t = self.max_time / (self.nt - 1)
+        else:
+            self.delta_t = None
+
         self.mp = mp
         self.speed = mp._model.v_a
-        self.origin = np.zeros(2)
-        self.origin[:] = origin
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
-        self.wind = np.zeros((nx, ny, n_ts, 2))
-        for i in range(nx):
-            for j in range(ny):
-                for k in range(n_ts):
-                    self.wind[i, j, k, :] = self.mp._model.wind.value(origin + np.array([delta_x * i, delta_y * j]))
-        self.phi = np.zeros((nx, ny, n_ts))
-        for i in range(nx):
-            for j in range(ny):
-                point = origin + np.array([delta_x * i, delta_y * j])
-                self.phi[i, j, 0] = np.linalg.norm(self.x_init - point) - 5e-3
-        self.t = 0
+        self.wind = None
+        self.phi = None
 
-    def update_phi(self, method='lolla'):
-        if method == 'lolla':
+        self.ts = None
+        self.flatten = False
+        self.flatten_factor = EARTH_RADIUS
+
+        self.method = method
+
+        self.matlabLS_path = '/home/bastien/Documents/work/level-set/'
+
+        self.t = 0
+        self.kernel = kernel
+        if self.kernel not in ['base', 'matlab']:
+            print(f'Unknown kernel : {self.kernel}')
+            exit(1)
+
+    def compute(self):
+        if self.kernel == 'base':
+            # Setting up wind array
+            for i in range(self.nx):
+                for j in range(self.ny):
+                    for k in range(self.nt):
+                        self.wind[i, j, k, :] = self.mp._model.wind.value(
+                            self.bl + np.array([self.delta_x * i, self.delta_y * j]))
+            # Setting RF function to distance function at t=0
+            for i in range(self.nx):
+                for j in range(self.ny):
+                    point = self.bl + np.array([self.delta_x * i, self.delta_y * j])
+                    self.phi[i, j, 0] = np.linalg.norm(self.x_init - point) - 5e-3
+            # Integrate
+            for k in range(self.nt - 1):
+                self.update_phi()
+        elif self.kernel == 'matlab':
+            # Matlab only processes 2D problem so first flatten the problem
+            # if working in GCS
+            if self.coords == COORD_GCS:
+                self.toggle_flatten()
+
+            # Give all arguments to matlab in a JSON file
+            args = {
+                "nx": self.nx,
+                "ny": self.ny,
+                "x_min": self.bl[0],
+                "x_max": self.bl[0] + self.delta_x * (self.nx - 1),
+                "y_min": self.bl[1],
+                "y_max": self.bl[1] + self.delta_y * (self.ny - 1),
+                "x_init": self.x_init[0],
+                "y_init": self.x_init[1],
+                "airspeed": self.mp._model.v_a,
+                "max_time": self.max_time
+            }
+            with open(os.path.join(self.matlabLS_path, 'args.json'), 'w') as f:
+                json.dump(args, f)
+
+            # Give also the wind to the matlab script
+            u = np.zeros((self.nx, self.ny))
+            v = np.zeros((self.nx, self.ny))
+            factor = 1 / EARTH_RADIUS
+            for i in range(self.nx - 1):
+                for j in range(self.ny - 1):
+                    point = factor * np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
+                    value = self.mp._model.wind.value(point)
+                    u[i, j] = value[0]
+                    v[i, j] = value[1]
+            np.savetxt(os.path.join(self.matlabLS_path, 'input', 'u.txt'), u, delimiter=",")
+            np.savetxt(os.path.join(self.matlabLS_path, 'input', 'v.txt'), v, delimiter=",")
+
+            # Run matlab script
+            os.system(f'matlab -sd {self.matlabLS_path} -batch "main; exit"')
+
+            # Load matlab output in corresponding fields
+            self.ts = np.genfromtxt(os.path.join(self.matlabLS_path, 'output', 'timesteps.txt'), delimiter=',')
+            self.nt = self.ts.shape[0]
+            self.nx, self.ny = np.genfromtxt(os.path.join(self.matlabLS_path, 'output', 'rff_0.txt'),
+                                             delimiter=',').shape
+            self.phi = np.zeros((self.nx, self.ny, self.nt))
+            for k in range(self.nt):
+                self.phi[:, :, k] = np.genfromtxt(os.path.join(self.matlabLS_path, 'output', f'rff_{k}.txt'),
+                                                  delimiter=',')
+
+            # Unflatten data if needed
+            if self.coords == COORD_GCS:
+                self.toggle_flatten()
+
+    def toggle_flatten(self):
+        """
+        Change GCS coordinates to planar approximation considering
+        parallels are great circles
+        """
+        if not self.flatten:
+            factor = self.flatten_factor
+            self.flatten = True
+        else:
+            factor = 1 / self.flatten_factor
+            self.flatten = False
+        self.bl[:] = factor * self.bl
+        self.tr[:] = factor * self.tr
+
+        self.delta_x *= factor
+        self.delta_y *= factor
+
+        self.x_init[:] = factor * self.x_init
+
+    def update_phi(self):
+        if self.method == 'lolla':
             # Copy current phi
             phi_cur = np.zeros(self.phi.shape[:-1])
             phi_cur[:] = self.phi[:, :, self.t]
@@ -231,16 +344,16 @@ class RFT:
                                                                                                 self.delta_y,
                                                                                                 method='central')
 
-        elif method == 'sethian':
+        elif self.method == 'sethian':
             phi_cur = np.zeros(self.phi.shape[:-1])
             phi_cur[:] = self.phi[:, :, self.t]
 
             self.phi[:, :, self.t + 1] = phi_cur - self.delta_t * (
                     self.speed * norm_grad(phi_cur, self.delta_x, self.delta_y, method='central') + wind_dot_phi(
-                    phi_cur, self.wind[:, :, self.t, :], self.delta_x))
+                phi_cur, self.wind[:, :, self.t, :], self.delta_x))
 
         else:
-            print(f'Unknown update method for phi : {method}')
+            print(f'Unknown update method for phi : {self.method}')
 
         self.t += 1
 
@@ -251,14 +364,14 @@ class RFT:
             dset = f.create_dataset('data', (nt, nx, ny), dtype='f8')
             dset[:, :, :] = self.phi.transpose((2, 0, 1))
 
-            dset = f.create_dataset('ts', (nt, ), dtype='f8')
-            dset[:] = self.delta_t * np.arange(nt)
+            dset = f.create_dataset('ts', (nt,), dtype='f8')
+            dset[:] = np.linspace(0., self.max_time, nt)
 
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
-            X, Y = np.meshgrid(self.origin[0] + self.delta_x * np.arange(nx),
-                               self.origin[1] + self.delta_y * np.arange(ny), indexing='ij')
-            dset[:, :, 0] = X
-            dset[:, :, 1] = Y
+            X, Y = np.meshgrid(self.bl[0] + self.delta_x * np.arange(self.nx),
+                               self.bl[1] + self.delta_y * np.arange(self.ny), indexing='ij')
+            dset[:, :, 0] = 1 / DEG_TO_RAD * X
+            dset[:, :, 1] = 1 / DEG_TO_RAD * Y
 
 
 def time_to_go(self,

@@ -6,7 +6,10 @@ import os
 import parse
 import numpy as np
 from datetime import datetime, timedelta
+import shutil
 
+from mermoz.misc import EARTH_RADIUS, COORDS, ensure_coords, COORD_CARTESIAN, U_METERS, COORD_GCS, U_RAD, U_DEG, \
+    DEG_TO_RAD, ensure_units, ensure_compatible
 from mermoz.wind import LinearWind
 
 
@@ -35,7 +38,7 @@ class WindConverter:
         self.lons = []
         self.lats = []
         # Parse files to get all longitudes and latitudes
-        print('{:<30}'.format('Getting data points...'), end='')
+        print('{:<30}'.format('Listing data points...'), end='')
         for file in os.listdir(path_to_wind):
             expr = r'wind_{}_{}.txt'
             parsed = parse.parse(expr, file)
@@ -48,7 +51,7 @@ class WindConverter:
         self.lats = sorted(self.lats)
         self.nx = len(self.lons)
         self.ny = len(self.lats)
-        print('Done')
+        print(f'Done ({self.nx}x{self.ny}, total {self.nx * self.ny})')
         # Fill the wind data array
         print(f'{"Loading wind values...":<30}', end='')
         # Getting number of timestamps
@@ -75,7 +78,19 @@ class WindConverter:
             for j in range(self.ny):
                 self.grid[i, j, :] = np.array([self.lons[i], self.lats[j]])
 
+    def convert(self, filepath):
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f'Source not found : {filepath}')
+        self.load(filepath)
+        dst = os.path.realpath(filepath) + '.mz'
+        if os.path.isdir(dst):
+            shutil.rmtree(dst)
+        os.mkdir(dst)
+        self.dump(dst)
+
     def dump(self, filepath):
+
+        print(f'{f"Dumping to {filepath}...":<30}', end='')
         config = ""
         config += '### Wind data collection\n'
         config += f'Generated on {datetime.fromtimestamp(time.time()).ctime()}\n\n'
@@ -84,11 +99,13 @@ class WindConverter:
             f"| First timestamp   | {datetime.fromtimestamp(self.ts[0] / 1000)} |\n" + \
             f"| Time window width | {timedelta(seconds=(self.ts[-1] - self.ts[0]) / 1000)} |\n"
         config += table
+
         with open(os.path.join(filepath, 'config.md'), 'w') as f:
             f.writelines(config)
 
         with h5py.File(os.path.join(filepath, 'data.h5'), "w") as f:
-            f.attrs.create('type', 'gcs')
+            f.attrs.create('coords', 'gcs')
+            f.attrs.create('units_grid', 'degrees')
 
             dset = f.create_dataset("data", (self.nt, self.nx, self.ny, 2), dtype='f8')
             dset[:, :, :, :] = self.data
@@ -98,6 +115,8 @@ class WindConverter:
 
             dset = f.create_dataset("grid", (self.nx, self.ny, 2), dtype='f8')
             dset[:, :, :] = self.grid
+
+        print('Done')
 
 
 class LinearWindExample:
@@ -134,74 +153,9 @@ class LinearWindExample:
             dset[:, :, :] = self.grid
 
 
-class WindHandler:
-    """
-    Handles wind loading from H5 format and derivative computation
-    """
-
-    def __init__(self):
-        self.nt = None
-        self.nx = None
-        self.ny = None
-
-        self.uv = None
-        self.grid = None
-        self.coords = None
-
-        self.d_u__d_x = None
-        self.d_u__d_y = None
-        self.d_v__d_x = None
-        self.d_v__d_y = None
-
-    def load(self, filepath):
-        """
-        Loads wind data from H5 wind data
-        :param filepath: The H5 file contaning wind data
-        """
-
-        # Fill the wind data array
-        print(f'{"Loading wind values...":<30}', end='')
-        with h5py.File(filepath, 'r') as wind_data:
-            self.nt, self.nx, self.ny, _ = wind_data['data'].shape
-            self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
-            self.uv[:, :, :, :] = wind_data['data']
-            self.grid = np.zeros((self.nx, self.ny, 2))
-            self.grid[:] = wind_data['grid']
-            self.coords = wind_data.attrs['coords']
-        print('Done')
-
-    def compute_derivatives(self):
-        """
-        Computes the derivatives of the windfield with a central difference scheme
-        on the wind native grid
-        """
-        if self.uv is None:
-            raise RuntimeError("Derivative computation failed : wind not yet loaded")
-        self.d_u__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-        self.d_u__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-        self.d_v__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-        self.d_v__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-
-        # Use order 2 precision derivative
-        self.d_u__d_x = 0.5 * (self.uv[:, 2:, 1:-1, 0] - self.uv[:, :-2, 1:-1, 0]) / (
-                self.grid[2:, 1:-1, 0] - self.grid[:-2, 1:-1, 0])
-        self.d_u__d_y = 0.5 * (self.uv[:, 1:-1, 2:, 0] - self.uv[:, 1:-1, :-2, 0]) / (
-                self.grid[1:-1, 2:, 1] - self.grid[1:-1, :-2, 1])
-        self.d_v__d_x = 0.5 * (self.uv[:, 2:, 1:-1, 1] - self.uv[:, :-2, 1:-1, 1]) / (
-                self.grid[2:, 1:-1, 0] - self.grid[:-2, 1:-1, 0])
-        self.d_v__d_y = 0.5 * (self.uv[:, 1:-1, 2:, 1] - self.uv[:, 1:-1, :-2, 1]) / (
-                self.grid[1:-1, 2:, 1] - self.grid[1:-1, :-2, 1])
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('src', type=str)
-    parser.add_argument('dst', type=str)
     args = parser.parse_args()
     wc = WindConverter()
-    wc.load(args.src)
-    wc.dump(args.dst)
-    """
-    lw = LinearWindExample()
-    lw.dump('/home/bastien/Documents/data/wind/mermoz/linear-example')
-    """
+    wc.convert(args.src)
