@@ -6,7 +6,7 @@ import markdown
 import webbrowser
 
 if __name__ == '__main__':
-    output_path = '../output/example_front_tracking'
+    output_path = '../output/example_front_tracking2'
     d = Display(coords='gcs', title='Front tracking example')
     d.set_output_path(output_path)
 

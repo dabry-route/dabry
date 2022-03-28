@@ -4,27 +4,28 @@ import time
 
 import matplotlib as mpl
 import numpy as np
+from matplotlib import pyplot as plt
 
 from mermoz.misc import *
 from mermoz.problem import MermozProblem
 from mermoz.model import ZermeloGeneralModel
 from mermoz.rft import RFT
 from mermoz.shooting import Shooting
-from mermoz.wind import RealWind
+from mermoz.wind import VortexWind, UniformWind, RealWind, TSEqualWind
 from mermoz.trajectory import dump_trajs
 from geopy import Nominatim
 
 mpl.style.use('seaborn-notebook')
 
 
-def example():
+def example4():
     """
     Example of reachability front tracking
     """
 
     coords = COORD_GCS
 
-    output_dir = '../output/example_front_tracking/'
+    output_dir = '../output/example_front_tracking2/'
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
@@ -36,10 +37,10 @@ def example():
     # UAV airspeed in m/s
     v_a = 23.
     # The time window upper bound in seconds
-    T = 20 * 3600.
+    T = 30 * 3600.
 
     total_wind = RealWind()
-    total_wind.load('/home/bastien/Documents/data/wind/windy/Dakar-Natal-0.5-padded.mz/data.h5')
+    total_wind.load('/home/bastien/Documents/data/wind/windy/Tripoli-Athenes-0.5-padded.mz/data.h5')
     total_wind.dump(os.path.join(output_dir, 'wind.h5'), f=True)
 
     # Creates the cinematic model
@@ -53,8 +54,8 @@ def example():
     tr[:] = total_wind.grid[-2, -2]
 
     # Initial point
-    init_point_name = 'dakar'
-    offset = np.array([-5., -5.])  # Degrees
+    init_point_name = 'tripoli'
+    offset = np.array([5., 5.])  # Degrees
 
     x_init = DEG_TO_RAD * (
                 np.array([loc.geocode(init_point_name).longitude, loc.geocode(init_point_name).latitude]) + offset)
@@ -132,4 +133,4 @@ def example():
 
 
 if __name__ == '__main__':
-    example()
+    example4()
