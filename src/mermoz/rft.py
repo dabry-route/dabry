@@ -214,7 +214,7 @@ class RFT:
             self.delta_t = None
 
         self.mp = mp
-        self.speed = mp._model.v_a
+        self.speed = mp.model.v_a
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
         self.wind = None
@@ -240,7 +240,7 @@ class RFT:
             for i in range(self.nx):
                 for j in range(self.ny):
                     for k in range(self.nt):
-                        self.wind[i, j, k, :] = self.mp._model.wind.value(
+                        self.wind[i, j, k, :] = self.mp.model.wind.value(
                             self.bl + np.array([self.delta_x * i, self.delta_y * j]))
             # Setting RF function to distance function at t=0
             for i in range(self.nx):
@@ -266,7 +266,7 @@ class RFT:
                 "y_max": self.bl[1] + self.delta_y * (self.ny - 1),
                 "x_init": self.x_init[0],
                 "y_init": self.x_init[1],
-                "airspeed": self.mp._model.v_a,
+                "airspeed": self.mp.model.v_a,
                 "max_time": self.max_time
             }
             with open(os.path.join(self.matlabLS_path, 'args.json'), 'w') as f:
@@ -279,7 +279,7 @@ class RFT:
             for i in range(self.nx - 1):
                 for j in range(self.ny - 1):
                     point = factor * np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
-                    value = self.mp._model.wind.value(point)
+                    value = self.mp.model.wind.value(point)
                     u[i, j] = value[0]
                     v[i, j] = value[1]
             np.savetxt(os.path.join(self.matlabLS_path, 'input', 'u.txt'), u, delimiter=",")

@@ -6,7 +6,7 @@ from mermoz.problem import MermozProblem
 from mermoz.model import ZermeloGeneralModel
 from mermoz.shooting import Shooting
 from mermoz.trajectory import dump_trajs
-from mermoz.wind import UniformWind, RealWind
+from mermoz.wind import UniformWind, DiscreteWind
 from mermoz.misc import COORD_GCS, COORD_CARTESIAN
 
 mpl.style.use('seaborn-notebook')
@@ -23,7 +23,7 @@ def example5():
 
     const_wind = UniformWind(np.array([0., 0.]))
 
-    total_wind = RealWind('/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5-tweaked/data2.h5')#  * (1 / 2000e3)
+    total_wind = DiscreteWind('/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5-tweaked/data2.h5')#  * (1 / 2000e3)
 
     coords = COORD_CARTESIAN
 

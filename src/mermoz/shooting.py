@@ -128,7 +128,7 @@ class Shooting(ABC):
                 controls[i] = u
                 if verbose:
                     print(sumup(i, t, x, p, u))
-            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type=TRAJ_PMP,
+            return AugmentedTraj(timestamps, states, adjoints, controls, i, type=TRAJ_PMP,
                                  interrupted=interrupted, coords=self.coords)
         else:
             i = 1

@@ -3,6 +3,7 @@ from numpy import ndarray
 
 from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
+from mermoz.mdf_manager import MDFmanager
 from mermoz.model import Model
 from mermoz.stoppingcond import StoppingCond
 from mermoz.visual import Visual
@@ -23,7 +24,7 @@ class MermozProblem:
                  T=0.,
                  visual_mode="full",
                  axes_equal=True):
-        self._model = model
+        self.model = model
 
         self.coords = coords
         if not domain:
@@ -31,17 +32,17 @@ class MermozProblem:
         else:
             self.domain = domain
         self._feedback = None
-        title = "$v_a=" + str(self._model.v_a) + "\:m/s$, $T=" + str(T) + "\:s$"
+        title = "$v_a=" + str(self.model.v_a) + "\:m/s$, $T=" + str(T) + "\:s$"
         self.display = Visual(visual_mode,
                               2,
                               1,
-                              lambda x: self._model.wind.value(x) / self._model.v_a,
+                              lambda x: self.model.wind.value(x) / self.model.v_a,
                               title=title,
                               axes_equal=axes_equal)
         self.trajs = []
 
     def __str__(self):
-        return str(self._model)
+        return str(self.model)
 
     def load_feedback(self, feedback: Feedback):
         """
@@ -67,8 +68,8 @@ class MermozProblem:
         """
         if self._feedback is None:
             raise ValueError("No feedback provided for integration")
-        integrator = IntEulerExpl(self._model.wind,
-                                  self._model.dyn,
+        integrator = IntEulerExpl(self.model.wind,
+                                  self.model.dyn,
                                   self._feedback,
                                   stop_cond=stop_cond,
                                   max_iter=max_iter,
@@ -98,7 +99,7 @@ class MermozProblem:
             scalar_prod = None
             if color_mode == 'reachability-enhanced':
                 vect_controls = np.array([np.array([np.cos(u), np.sin(u)]) for u in traj.controls])
-                e_minuses = np.array([self._model.wind.e_minus(x) for x in traj.points])
+                e_minuses = np.array([self.model.wind.e_minus(x) for x in traj.points])
                 norms = 1 / np.linalg.norm(e_minuses, axis=1)
                 e_minuses = np.einsum('ij,i->ij', e_minuses, norms)
                 scalar_prod = np.abs(np.einsum('ij,ij->i', vect_controls, e_minuses))

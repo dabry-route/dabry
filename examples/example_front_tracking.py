@@ -5,16 +5,19 @@ import time
 import matplotlib as mpl
 import numpy as np
 
+from mdisplay.geodata import GeoData
+
 from mermoz.misc import *
 from mermoz.problem import MermozProblem
 from mermoz.model import ZermeloGeneralModel
 from mermoz.rft import RFT
 from mermoz.shooting import Shooting
-from mermoz.wind import RealWind
-from mermoz.trajectory import dump_trajs
-from geopy import Nominatim
+from mermoz.wind import DiscreteWind
+from mermoz.mdf_manager import MDFmanager
 
 mpl.style.use('seaborn-notebook')
+
+
 
 
 def example():
@@ -28,8 +31,6 @@ def example():
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
-    loc = Nominatim(user_agent='openstreetmaps')
-
     print("Example : Reachability front tracking")
     print("Building model... ", end='')
     t_start = time.time()
@@ -38,9 +39,8 @@ def example():
     # The time window upper bound in seconds
     T = 20 * 3600.
 
-    total_wind = RealWind()
+    total_wind = DiscreteWind()
     total_wind.load('/home/bastien/Documents/data/wind/windy/Dakar-Natal-0.5-padded.mz/data.h5')
-    total_wind.dump(os.path.join(output_dir, 'wind.h5'), f=True)
 
     # Creates the cinematic model
     zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
@@ -53,14 +53,19 @@ def example():
     tr[:] = total_wind.grid[-2, -2]
 
     # Initial point
+    gd = GeoData()
     init_point_name = 'dakar'
     offset = np.array([-5., -5.])  # Degrees
-
     x_init = DEG_TO_RAD * (
-                np.array([loc.geocode(init_point_name).longitude, loc.geocode(init_point_name).latitude]) + offset)
+                np.array(gd.get_coords(init_point_name)) + offset)
 
     # Creates the navigation problem on top of the previous model
     mp = MermozProblem(zermelo_model, T=T, visual_mode='only-map')
+    # Create a file manager to dump problem data
+    mdfm = MDFmanager()
+    mdfm.set_output_dir(output_dir)
+    mdfm.dump_wind(mp.model.wind)
+
     t_end = time.time()
     print(f"Done ({t_end - t_start:.3f} s)")
 
@@ -109,7 +114,8 @@ def example():
     t_end = time.time()
     time_pmp = t_end - t_start
     print(f"Done ({time_pmp:.3f} s)")
-    dump_trajs(mp.trajs, os.path.join(output_dir, 'trajs.h5'))
+
+    mdfm.dump_trajs(mp.trajs)
 
     params = {
         'coords': 'gcs',

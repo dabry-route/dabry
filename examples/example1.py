@@ -63,10 +63,10 @@ def example1():
     # heading angle
     list_headings = np.linspace(-0.6, 1.2, 10)
     for heading in list_headings:
-        mp.load_feedback(FixedHeadingFB(mp._model.wind, v_a, heading))
+        mp.load_feedback(FixedHeadingFB(mp.model.wind, v_a, heading))
         mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
 
-    mp.load_feedback(WindAlignedFB(mp._model.wind))
+    mp.load_feedback(WindAlignedFB(mp.model.wind))
     mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.01)
 
     mp.plot_trajs(color_mode="reachability")

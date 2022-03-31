@@ -5,32 +5,6 @@ import os
 from .misc import TRAJ_INT, COORD_GCS, COORD_CARTESIAN
 
 
-def dump_trajs(traj_list, filepath):
-    with h5py.File(filepath, "w") as f:
-        for i, traj in enumerate(traj_list):
-            nt = traj.timestamps.shape[0]
-            trajgroup = f.create_group(str(i))
-            trajgroup.attrs['type'] = traj.type
-            trajgroup.attrs['coords'] = traj.coords
-            trajgroup.attrs['interrupted'] = traj.interrupted
-            trajgroup.attrs['last_index'] = traj.last_index
-
-            factor = (180 / np.pi if traj.coords == COORD_GCS else 1.)
-
-            dset = trajgroup.create_dataset('data', (nt, 2), dtype='f8')
-            dset[:, :] = traj.points * factor
-
-            dset = trajgroup.create_dataset('ts', (nt,), dtype='f8')
-            dset[:] = traj.timestamps
-
-            dset = trajgroup.create_dataset('controls', (nt,), dtype='f8')
-            dset[:] = traj.controls
-
-            if hasattr(traj, 'adjoints'):
-                dset = trajgroup.create_dataset('adjoints', (nt, 2), dtype='f8')
-                dset[:, :] = traj.adjoints
-
-
 class Trajectory:
     """
     The definition of a trajectory for the Mermoz problem
@@ -44,6 +18,7 @@ class Trajectory:
                  optimal=False,
                  interrupted=False,
                  type=TRAJ_INT,
+                 label=0,
                  coords=COORD_GCS):
         """
         :param timestamps: A list of timestamps (t_0, ..., t_N) at which the following values were computed
@@ -53,6 +28,7 @@ class Trajectory:
         :param optimal: Indicates if trajectory is optimal or not (for plotting)
         :param interrupted: Indicates if trajectory was interrupted during construction
         :param type: Gives the type of the trajectory : 'integral' or 'pmp'
+        :param label: An optional integer label
         :param coords: Type of coordinates : 'cartesian or 'gcs'
         """
         self.timestamps = np.zeros(timestamps.shape)
@@ -68,6 +44,7 @@ class Trajectory:
         self.interrupted = interrupted
         self.optimal = optimal
         self.type = type
+        self.label = label
         self.coords = coords
 
     def get_final_time(self):
@@ -93,10 +70,12 @@ class AugmentedTraj(Trajectory):
                  optimal=False,
                  interrupted=False,
                  type=TRAJ_INT,
+                 label=0,
                  coords=COORD_GCS):
         """
         :param adjoints: A list of adjoint states ((p_x0, p_y0), ..., (p_xN, p_yN))
         """
-        super().__init__(timestamps, points, controls, last_index, optimal, interrupted, type, coords)
+        super().__init__(timestamps, points, controls, last_index, optimal=optimal, interrupted=interrupted, type=type,
+                         label=label, coords=coords)
         self.adjoints = np.zeros(adjoints.shape)
         self.adjoints[:] = adjoints

@@ -1,7 +1,8 @@
 /
 ['coords' : {'cartesian', 'gcs'}, 
  'type' : {'integral', 'pmp'},
- 'last_index',
+ 'last_index' : integer,
+ 'label' : integer,
  'interrupted' : {False, True}]
 	data : (nt, 2)
 	ts : (nt, )

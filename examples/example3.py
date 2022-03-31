@@ -10,7 +10,7 @@ from mermoz.model import ZermeloGeneralModel
 from mermoz.shooting import Shooting
 from mermoz.stoppingcond import TimedSC
 from mermoz.trajectory import dump_trajs
-from mermoz.wind import VortexWind, UniformWind, RealWind
+from mermoz.wind import VortexWind, UniformWind, DiscreteWind
 
 mpl.style.use('seaborn-notebook')
 
@@ -37,7 +37,7 @@ def example3():
         b4 = (0 - eps < x[0] < 1 + eps and -1 - eps < x[1] < 1. + eps)
         return b4
 
-    total_wind = 2 * RealWind('../../extractWindData/saved_wind/Vancouver-Honolulu-1.0')
+    total_wind = 2 * DiscreteWind('../../extractWindData/saved_wind/Vancouver-Honolulu-1.0')
     #total_wind = 2 * RealWind("/home/bastien/Documents/data/wind/mermoz/Dakar-Natal-0.5-tweaked/data.h5")
     #total_wind = 2 * RealWind("/home/bastien/Documents/data/wind/mermoz/linear-example/data.h5")
 
@@ -87,7 +87,7 @@ def example3():
     print(f"Shooting explicit control laws ({list_headings.size})... ", end='')
     t_start = time.time()
     for heading in list_headings:
-        mp.load_feedback(FixedHeadingFB(mp._model.wind, v_a, heading))
+        mp.load_feedback(FixedHeadingFB(mp.model.wind, v_a, heading))
         mp.integrate_trajectory(x_init, TimedSC(T), int_step=0.05)
     t_end = time.time()
     print(f"Done ({t_end - t_start:.3f} s)")

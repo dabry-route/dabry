@@ -3,6 +3,7 @@ import os
 import time
 import numpy as np
 from matplotlib import pyplot as plt
+from heapq import heappush, heappop
 
 from .problem import MermozProblem
 from .shooting import Shooting
@@ -21,6 +22,7 @@ class Solver:
                  T,
                  min_init_angle,
                  max_init_angle,
+                 output_dir,
                  N_disc_init=20,
                  neighb_ceil=1e-1,
                  int_prec_factor=1e-2,
@@ -41,7 +43,7 @@ class Solver:
         self.N_iter = N_iter
         self.opti_ceil = opti_ceil
 
-        self.output_dir = os.path.join(os.getcwd(), '../..', 'output', '.tmp')
+        self.output_dir = output_dir
 
         self.min_init_angle = min_init_angle
         self.max_init_angle = max_init_angle
@@ -64,16 +66,24 @@ class Solver:
                 if j > i:
                     self.distances_queue.append((i, j))
         self.to_shoot = [True for _ in range(self.N_disc_init)]
+        # Values in queue are in format
+        # (Direction to shoot, index, lower parent direction, its index, its depth,
+        # upper parent direction, its index, its depth)
+        self.shoot_queue = []
+
         self.trajs = {}
         self.last_points = {}
         self.parents = {}
         self.opti_test = []
+        self.opti_test_dict = {}
         self.opti_indexes = []
         self.opti_time = {}
 
+        self.iter = 0
+
     def setup(self):
-        for f in os.listdir(self.output_dir):
-            os.remove(os.path.join(self.output_dir, f))
+        if not os.path.isdir(self.output_dir):
+            os.mkdir(self.output_dir)
         self.log_config()
 
     def add_neighbour(self, k, i, j):
@@ -88,7 +98,7 @@ class Solver:
     def is_opti(self, traj: Trajectory):
         b = False
         k = -1
-        for k in range(traj.last_index):
+        for k in range(traj.last_index - 1, -1, -1):
             if np.linalg.norm(traj.points[k] - self.x_target) < self.opti_ceil:
                 b = True
                 break
@@ -103,7 +113,7 @@ class Solver:
             'mode': 'Mode',
             'steps': 'Max. steps' if self.adaptive_int_step else 'Steps',
             'neighb_ceil': 'Neighbour distance ceil',
-            'int_prec_factor' : 'Integration precision factor'
+            'int_prec_factor': 'Integration precision factor'
         }
         padding = max(map(len, ln.values()))
 
@@ -129,7 +139,7 @@ class Solver:
         with open(os.path.join(self.output_dir, 'config.txt'), 'w') as f:
             f.writelines(self.config_to_string())
 
-    def solve(self):
+    def solve(self, plotting=True):
 
         quit = False
         t_start = time.time()
@@ -148,7 +158,7 @@ class Solver:
             int_steps = []
             for k, d in self.dirs.items():
                 if self.to_shoot[k]:
-                    shoot = Shooting(self.mp._model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
+                    shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
                                      N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
                                      factor=self.int_prec_factor)
                     shoot.set_adjoint(np.array([-np.cos(d), -np.sin(d)]))
@@ -218,14 +228,15 @@ class Solver:
             print(f"Done ({duration:.3f} s)")
             iter += 1
             t_start2 = time.time()
-            print(f'    * Plotting results...', end='')
-            self.mp.trajs = self.trajs.values()
-            self.mp.plot_trajs(color_mode="reachability")
-            plt.savefig(os.path.join(self.output_dir, f'solver_{iter}.png'), dpi=300)
-            t_end2 = time.time()
-            duration = t_end2 - t_start2
-            d_post_proc += duration
-            print(f"Done ({duration:.3f} s)")
+            self.mp.trajs = list(self.trajs.values())
+            if plotting:
+                print(f'    * Plotting results...', end='')
+                self.mp.plot_trajs(color_mode="reachability")
+                plt.savefig(os.path.join(self.output_dir, f'solver_{iter}.png'), dpi=300)
+                t_end2 = time.time()
+                duration = t_end2 - t_start2
+                d_post_proc += duration
+                print(f"Done ({duration:.3f} s)")
         t_end = time.time()
         print('')
         print(f'* End of loop')
@@ -239,7 +250,104 @@ class Solver:
                 print(k)
                 print(self.opti_time[k])
                 self.trajs[k].type = 'optimal'
-            self.mp.trajs = self.trajs.values()
-            self.mp.plot_trajs(color_mode="reachability")
-            iter += 1
-            plt.savefig(os.path.join(self.output_dir, f'solver_{iter}.png'), dpi=300)
+            self.mp.trajs = list(self.trajs.values())
+            if plotting:
+                self.mp.plot_trajs(color_mode="reachability")
+                iter += 1
+                plt.savefig(os.path.join(self.output_dir, f'solver_{iter}.png'), dpi=300)
+
+    def print_iteration(self, n_trajs):
+        print(f'* Iteration {self.iter} - {n_trajs} trajectories - {len(self.opti_indexes)}/{self.n_min_opti} optima')
+
+    def solve_fancy(self, max_depth=10):
+
+        t_start = time.time()
+        self.iter = 0
+        int_steps = []
+        k_max = len(self.dirs.keys())
+        for k, d in self.dirs.items():
+            shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
+                             N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                             factor=self.int_prec_factor)
+            shoot.set_adjoint(np.array([-np.cos(d), -np.sin(d)]))
+            traj = shoot.integrate()
+            self.trajs[k] = traj
+            lp = np.zeros(2)
+            lp[:] = traj.points[traj.last_index - 1]
+            self.last_points[k] = lp
+            int_steps.append(traj.last_index)
+            if k != 0:
+                d1 = self.dirs[k - 1]
+                d2 = self.dirs[k]
+                heappush(self.shoot_queue,
+                         (
+                             np.linalg.norm(self.x_target - self.x_init),
+                             (0.5 * (d1 + d2), k_max, d1, 0, k - 1, d2, k, 0)))
+        t_end = time.time()
+        t_start2 = time.time()
+        try:
+            while len(self.shoot_queue) != 0:
+                self.iter += 1
+                print(f"Iteration {self.iter} - ", end='')
+                _, obj = heappop(self.shoot_queue)
+                d, k, d_l, k_l, depth_l, d_u, k_u, depth_u = obj
+                my_depth = max(depth_l, depth_u) + 1
+                bl = False
+                bu = False
+                shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
+                                 N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                                 factor=self.int_prec_factor)
+                shoot.set_adjoint(np.array([-np.cos(d), -np.sin(d)]))
+                traj = shoot.integrate()
+                traj.label = self.iter
+                self.trajs[k] = traj
+                int_steps.append(traj.last_index)
+                lp = np.zeros(2)
+                lp[:] = traj.points[traj.last_index - 1]
+                self.last_points[k] = lp
+                b, index = self.is_opti(traj)
+                if b:
+                    print('Optimum found')
+                    self.opti_indexes.append(k)
+                    self.trajs[k].type = 'optimal'
+                    self.opti_time[k] = self.trajs[k].timestamps[index]
+                    break
+                lp_l = self.last_points[k_l]
+                lp_u = self.last_points[k_u]
+                if my_depth <= max_depth:
+                    if np.linalg.norm(lp - lp_l) > self.neighb_ceil:
+                        bl = True
+                        d1 = np.linalg.norm(lp - self.x_target)
+                        d2 = np.linalg.norm(lp_l - self.x_target)
+                        heappush(self.shoot_queue,
+                                 (0.5 * (d1 + d2), (0.5 * (d + d_l), k_max, d_l, k_l, depth_l, d, k, my_depth)))
+                        k_max += 1
+                    if np.linalg.norm(lp - lp_u) > self.neighb_ceil:
+                        bu = True
+                        d1 = np.linalg.norm(lp - self.x_target)
+                        d2 = np.linalg.norm(lp_u - self.x_target)
+                        heappush(self.shoot_queue,
+                                 (0.5 * (d1 + d2), (0.5 * (d + d_u), k_max, d, k, my_depth, d_u, k_u, depth_u)))
+                        k_max += 1
+                    if bl or bu:
+                        print(f'Branching {"L" if bl else ""}{"U" if bu else ""}')
+                    else:
+                        print('No branching')
+                else:
+                    print(f'Max depth ({max_depth}) reached, no branching')
+        except KeyboardInterrupt:
+            pass
+        t_end2 = time.time()
+        d_pre_proc = t_end - t_start
+        d_proc = t_end2 - t_start2
+
+        self.mp.trajs = list(self.trajs.values())
+        print(f'    * Pre-processing :  {d_pre_proc:.3f} s')
+        print(f'    * Processing      :  {d_proc:.3f} s')
+        print(f'    * Total           :  {d_proc + d_pre_proc:.3f} s')
+        if len(self.opti_indexes) == 0:
+            print("No optimum found")
+        else:
+            for k in self.opti_indexes:
+                print(self.opti_time[k])
+                self.trajs[k].type = 'optimal'

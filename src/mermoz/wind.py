@@ -1,3 +1,5 @@
+import os
+
 import h5py
 import numpy as np
 from numpy import ndarray
@@ -18,6 +20,7 @@ class Wind:
         self.value = value_func
         self.d_value = d_value_func
         self.descr = descr
+        self.is_dumpable = False
 
     def __add__(self, other):
         """
@@ -78,13 +81,16 @@ class Wind:
         return self.descr
 
 
-class RealWind(Wind):
+class DiscreteWind(Wind):
     """
     Handles wind loading from H5 format and derivative computation
     """
 
     def __init__(self):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
+
+        self.is_dumpable = True
+
         self.nt = None
         self.nx = None
         self.ny = None
@@ -148,6 +154,49 @@ class RealWind(Wind):
             self.compute_derivatives()
 
         print('Done')
+
+    def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False):
+        self.coords = coords
+        self.units_grid = 'meters'
+
+        # Checking consistency before loading
+        ensure_coords(self.coords)
+        ensure_units(self.units_grid)
+        ensure_compatible(self.coords, self.units_grid)
+
+        self.x_min = bl[0]
+        self.x_max = tr[0]
+        self.y_min = bl[1]
+        self.y_max = tr[1]
+
+        self.nt, self.nx, self.ny = 1, nx, ny
+        self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
+        self.grid = np.zeros((self.nx, self.ny, 2))
+        delta_x = (self.x_max - self.x_min) / (self.nx - 1)
+        delta_y = (self.y_max - self.y_min) / (self.ny - 1)
+        for i in range(self.nx):
+            for j in range(self.ny):
+                point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
+                self.uv[0, i, j, :] = wind.value(point)
+                self.grid[i, j, :] = point
+
+        self.ts = np.zeros((self.nt,))
+
+        # Post processing
+        # Loading derivatives
+        if not nodiff:
+            self.d_u__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+            self.d_u__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+            self.d_v__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+            self.d_v__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+            for i in range(1, self.nx - 1):
+                for j in range(1, self.ny - 1):
+                    point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
+                    diff = wind.d_value(point)
+                    self.d_u__d_x[0, i - 1, j - 1] = diff[0, 0]
+                    self.d_u__d_y[0, i - 1, j - 1] = diff[0, 1]
+                    self.d_v__d_x[0, i - 1, j - 1] = diff[1, 0]
+                    self.d_v__d_y[0, i - 1, j - 1] = diff[1, 1]
 
     def value(self, x, units=U_METERS):
         """
@@ -227,31 +276,6 @@ class RealWind(Wind):
                 self.grid[2:, 1:-1, 0] - self.grid[:-2, 1:-1, 0])
         self.d_v__d_y[:] = factor * 0.5 * (self.uv[:, 1:-1, 2:, 1] - self.uv[:, 1:-1, :-2, 1]) / (
                 self.grid[1:-1, 2:, 1] - self.grid[1:-1, :-2, 1])
-
-    def dump(self, filepath, f=False):
-        proceed = False
-        if not f and os.path.exists(filepath):
-            print(f'Cannot dump wind, already existing file : {filepath}')
-            ans = input(f"Do you want to overwrite {filepath} ? [y/n]")
-            try:
-                if ans[0] == 'y':
-                    proceed = True
-                else:
-                    pass
-            except:
-                exit(1)
-        if not f and not proceed:
-            exit(1)
-        with h5py.File(filepath, 'w') as f:
-            f.attrs['coords'] = self.coords
-            f.attrs['units_grid'] = U_DEG
-            dset = f.create_dataset('data', (self.nt, self.nx, self.ny, 2), dtype='f8')
-            dset[:] = self.uv
-            dset = f.create_dataset('ts', (self.nt,), dtype='f8')
-            dset[:] = self.ts
-            factor = (1 / DEG_TO_RAD if self.coords == COORD_GCS else 1.)
-            dset = f.create_dataset('grid', (self.nx, self.ny, 2), dtype='f8')
-            dset[:] = factor * self.grid
 
 
 class TwoSectorsWind(Wind):
@@ -344,6 +368,64 @@ class VortexWind(Wind):
         return self.gamma / (2 * np.pi * r ** 4) * \
                np.array([[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
                          [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
+
+
+class RankineVortexWind(Wind):
+
+    def __init__(self,
+                 x_omega: float,
+                 y_omega: float,
+                 gamma: float,
+                 radius: float):
+        """
+        A vortex from potential theory
+
+        :param x_omega: x_coordinate of vortex center in m
+        :param y_omega: y_coordinate of vortex center in m
+        :param gamma: Circulation of the vortex in m^2/s. Positive is ccw vortex.
+        :param radius: Radius of the vortex core in meters.
+        """
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        self.x_omega = x_omega
+        self.y_omega = y_omega
+        self.omega = np.array([x_omega, y_omega])
+        self.gamma = gamma
+        self.radius = radius
+        self.descr = f'Rankine vortex'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
+
+    def max_speed(self):
+        return self.gamma / (self.radius * 2 * np.pi)
+
+    def value(self, x):
+        r = np.linalg.norm(x - self.omega)
+        e_theta = np.array([-(x - self.omega)[1] / r,
+                            (x - self.omega)[0] / r])
+        f = self.gamma / (2 * np.pi)
+        if r <= self.radius:
+            return f * r / (self.radius ** 2) * e_theta
+        else:
+            return f * 1 / r * e_theta
+
+    def d_value(self, x):
+        r = np.linalg.norm(x - self.omega)
+        x_omega = self.x_omega
+        y_omega = self.y_omega
+        e_r = np.array([(x - self.omega)[0] / r,
+                        (x - self.omega)[1] / r])
+        e_theta = np.array([-(x - self.omega)[1] / r,
+                            (x - self.omega)[0] / r])
+        f = self.gamma / (2 * np.pi)
+        if r <= self.radius:
+            a = (x - self.omega)[0]
+            b = (x - self.omega)[1]
+            d_e_theta__d_x = np.array([a * b / r ** 3, (r ** 2 - a ** 2) / r ** 3])
+            d_e_theta__d_y = np.array([(r ** 2 - b ** 2) / r ** 3, a * b / r ** 3])
+            return f / self.radius ** 2 * np.stack((a / r * e_theta + r * d_e_theta__d_x,
+                                                    b / r * e_theta + r * d_e_theta__d_y), axis=1)
+        else:
+            return f / r ** 4 * \
+                   np.array([[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
+                             [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
 
 
 class SourceWind(Wind):
