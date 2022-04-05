@@ -7,12 +7,13 @@ import numpy as np
 from matplotlib import pyplot as plt
 import scipy.optimize
 
+from mermoz.mdf_manager import MDFmanager
 from mermoz.misc import *
 from mermoz.params_summary import ParamsSummary
 from mermoz.problem import MermozProblem
 from mermoz.model import ZermeloGeneralModel
 from mermoz.solver import Solver
-from mermoz.trajectory import dump_trajs, Trajectory
+from mermoz.trajectory import Trajectory
 from mermoz.wind import LinearWind, DiscreteWind, UniformWind
 
 mpl.style.use('seaborn-notebook')
@@ -25,6 +26,10 @@ def example_linear_wind():
     analytical solution.
     """
     output_dir = '/home/bastien/Documents/work/mermoz/output/example_linearwind'
+    # Create a file manager to dump problem data
+    mdfm = MDFmanager()
+    mdfm.set_output_dir(output_dir)
+
     # UAV airspeed in m/s
     v_a = 23.
 
@@ -48,7 +53,7 @@ def example_linear_wind():
     total_wind = DiscreteWind()
     # Sample analytic linear wind to a grid
     total_wind.load_from_wind(linear_wind, 51, 51, bl, tr, 'cartesian')
-    total_wind.dump(os.path.join(output_dir, 'wind.h5'), f=True)
+    mdfm.dump_wind(total_wind)
 
     # Creates the cinematic model
     zermelo_model = ZermeloGeneralModel(v_a)
@@ -68,8 +73,8 @@ def example_linear_wind():
                     x_init,
                     x_target,
                     T,
-                    -np.pi / 2.,
-                    np.pi / 2.,
+                    -np.pi / 2. + 5e-2,
+                    np.pi / 2. - 5e-2,
                     output_dir,
                     N_disc_init=2,
                     opti_ceil=1e6/30,
@@ -109,7 +114,7 @@ def example_linear_wind():
                            points.shape[0] - 1,
                            coords=COORD_CARTESIAN)
     mp.trajs.append(alyt_traj)
-    dump_trajs(mp.trajs, os.path.join(output_dir, 'trajectories.h5'))
+    mdfm.dump_trajs(mp.trajs)
 
     params = {
         'coords': 'cartesian',

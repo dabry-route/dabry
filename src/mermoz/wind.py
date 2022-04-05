@@ -86,7 +86,7 @@ class DiscreteWind(Wind):
     Handles wind loading from H5 format and derivative computation
     """
 
-    def __init__(self):
+    def __init__(self, interp='pwc'):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
 
         self.is_dumpable = True
@@ -111,6 +111,9 @@ class DiscreteWind(Wind):
         self.d_u__d_y = None
         self.d_v__d_x = None
         self.d_v__d_y = None
+
+        # Either 'pwc' for piecewise constant wind or 'linear' for linear interpolation
+        self.interp = interp
 
         self.clipping_tol = 1e-2
 
@@ -210,17 +213,28 @@ class DiscreteWind(Wind):
         nx = self.nx
         ny = self.ny
 
-        factor = 1.  # (DEG_TO_RAD if self.coords == COORD_GCS and units == U_DEG else 1.)
-
-        xx = (factor * x[0] - self.x_min) / (self.x_max - self.x_min)
-        yy = (factor * x[1] - self.y_min) / (self.y_max - self.y_min)
+        xx = (x[0] - self.x_min) / (self.x_max - self.x_min)
+        yy = (x[1] - self.y_min) / (self.y_max - self.y_min)
 
         eps = self.clipping_tol
         if xx < 0. - eps or xx > 1. + eps or yy < 0. - eps or yy > 1. + eps:
             # print(f"Real windfield undefined at ({x[0]:.3f}, {x[1]:.3f})")
             return np.array([0., 0.])
 
-        return self.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
+        if self.interp == 'pwc':
+            return self.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
+
+        elif self.interp == 'linear':
+            delta_x = (self.x_max - self.x_min) / (nx - 1)
+            delta_y = (self.y_max - self.y_min) / (ny - 1)
+            i = int((nx - 1) * xx)
+            j = int((ny - 1) * yy)
+            xij = delta_x * i + self.x_min
+            a = (x[0] - xij) / delta_x
+            yij = delta_y * j + self.y_min
+            b = (x[1] - yij) / delta_y
+            return (1 - b) * ((1 - a) * self.uv[0, i, j] + a * self.uv[0, i + 1, j]) + \
+                   b * ((1 - a) * self.uv[0, i, j + 1] + a * self.uv[0, i + 1, j + 1])
 
     def d_value(self, x, units=U_METERS):
         """
@@ -246,13 +260,28 @@ class DiscreteWind(Wind):
             # print(f"Real windfield jacobian undefined at ({x[0]:.3f}, {x[1]:.3f})")
             return np.array([[0., 0.],
                              [0., 0.]])
-        i, j = int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)
-        try:
-            return np.array([[self.d_u__d_x[0, i, j], self.d_u__d_y[0, i, j]],
-                             [self.d_v__d_x[0, i, j], self.d_v__d_y[0, i, j]]])
-        except IndexError:
-            return np.array([[0., 0.],
-                             [0., 0.]])
+        if self.interp == 'pwc':
+            i, j = int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)
+            try:
+                return np.array([[self.d_u__d_x[0, i, j], self.d_u__d_y[0, i, j]],
+                                 [self.d_v__d_x[0, i, j], self.d_v__d_y[0, i, j]]])
+            except IndexError:
+                return np.array([[0., 0.],
+                                 [0., 0.]])
+        elif self.interp == 'linear':
+            delta_x = (self.x_max - self.x_min) / (nx - 1)
+            delta_y = (self.y_max - self.y_min) / (ny - 1)
+            i = int((nx - 1) * xx)
+            j = int((ny - 1) * yy)
+            xij = delta_x * i + self.x_min
+            a = (x[0] - xij) / delta_x
+            yij = delta_y * j + self.y_min
+            b = (x[1] - yij) / delta_y
+            d_uv__d_x = x[0] / delta_x * ((1 - b) * (self.uv[0, i + 1, j] - self.uv[0, i, j]) +
+                                       b * (self.uv[0, i + 1, j + 1] - self.uv[0, i, j + 1]))
+            d_uv__d_y = x[1] / delta_y * ((1 - a) * (self.uv[0, i, j + 1] - self.uv[0, i, j]) +
+                                       a * (self.uv[0, i + 1, j + 1] - self.uv[0, i + 1, j]))
+            return np.stack((d_uv__d_x, d_uv__d_y), axis=1)
 
     def compute_derivatives(self):
         """

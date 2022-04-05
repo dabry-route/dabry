@@ -8,6 +8,7 @@ from mdisplay.geodata import GeoData
 
 from mermoz.mdf_manager import MDFmanager
 from mermoz.misc import *
+from mermoz.params_summary import ParamsSummary
 from mermoz.problem import MermozProblem
 from mermoz.model import ZermeloGeneralModel
 from mermoz.rft import RFT
@@ -25,7 +26,7 @@ def example4():
 
     coords = COORD_GCS
 
-    output_dir = '../output/example_front_tracking2/'
+    output_dir = '../output/example_front_tracking_linearinterp/'
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
@@ -39,7 +40,7 @@ def example4():
     # The time window upper bound in seconds
     T = 30 * 3600.
 
-    total_wind = DiscreteWind()
+    total_wind = DiscreteWind(interp='linear')
     total_wind.load('/home/bastien/Documents/data/wind/windy/Vancouver-Honolulu-0.5.mz/data.h5')
 
     # Creates the cinematic model
@@ -58,9 +59,10 @@ def example4():
     offset = np.array([5., 5.])  # Degrees
     x_init = DEG_TO_RAD * (
             np.array(gd.get_coords(init_point_name)) + offset)
+    # x_init = DEG_TO_RAD * np.array([-55., 60.])
 
     # Creates the navigation problem on top of the previous model
-    mp = MermozProblem(zermelo_model, T=T, visual_mode='only-map')
+    mp = MermozProblem(zermelo_model, T=T)
     # Create a file manager to dump problem data
     mdfm = MDFmanager()
     mdfm.set_output_dir(output_dir)
@@ -133,8 +135,9 @@ def example4():
         'rft_time': time_rft,
         'pmp_time': time_pmp
     }
-    with open(os.path.join(output_dir, 'params.json'), 'w') as f:
-        json.dump(params, f)
+
+    ps = ParamsSummary(params, output_dir)
+    ps.dump()
 
 
 if __name__ == '__main__':

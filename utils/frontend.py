@@ -37,7 +37,7 @@ def configure(d: Display, case_name: str):
         d.set_coords('gcs')
         d.set_title('Front tracking example')
 
-        d.setup()
+        d.setup(projection='lcc')
 
         d.load_params()
         d.draw_wind()
@@ -46,7 +46,35 @@ def configure(d: Display, case_name: str):
         d.draw_point_by_name('Dakar')
         d.draw_point_by_name('Natal')
 
-    elif case_name == 'example_front_tracking2':
+    elif case_name == 'example_front_tracking2' or case_name == 'example_front_tracking_linearinterp':
+        d.set_coords('gcs')
+        d.set_title('Front tracking example')
+
+        d.setup(projection='lcc')
+
+        d.load_params()
+        d.draw_wind()
+        d.draw_rff()
+        d.draw_trajs(nolabels=True)
+
+        d.draw_point_by_name('Tripoli')
+        d.draw_point_by_name('Athenes')
+
+    elif case_name == 'example_front_tracking3':
+        d.set_coords('gcs')
+        d.set_title('Front tracking example')
+
+        d.setup(projection='lcc')
+
+        d.load_params()
+        d.draw_wind()
+        d.draw_rff()
+        d.draw_trajs(nolabels=True)
+
+        d.draw_point_by_name('New York')
+        d.draw_point_by_name('Paris')
+
+    elif case_name == 'example_front_tracking4':
         d.set_coords('gcs')
         d.set_title('Front tracking example')
 
@@ -57,9 +85,6 @@ def configure(d: Display, case_name: str):
         d.draw_rff()
         d.draw_trajs(nolabels=True)
 
-        d.draw_point_by_name('Tripoli')
-        d.draw_point_by_name('Athenes')
-
     elif case_name == 'example_solver':
         d.set_coords('cartesian')
         d.set_title('Solver test')
@@ -69,17 +94,49 @@ def configure(d: Display, case_name: str):
         d.draw_wind()
         d.draw_trajs(nolabels=True)
         d.draw_point(1e6, 0., label='Target')
+        # d.legend()
 
     else:
         raise FileNotFoundError(f'No setup script provided for case "{case_name}"')
 
 
+def select_example():
+    from ipywidgets import Dropdown
+    from IPython.core.display import display
+    option_list = sorted(os.listdir(os.path.join('..', 'output')))
+    new_ol = []
+    for e in option_list:
+        if not e.startswith('example_'):
+            del e
+        else:
+            new_ol.append(e.split('example_')[1])
+    dropdown = Dropdown(description="Choose one:", options=new_ol)
+    dropdown.observe(lambda _: 0., names='value')
+    display(dropdown)
+    return dropdown
+
+
+def run_frontend(mode='default', ex_name=None):
+    if mode == 'default':
+        output_path = easygui.diropenbox(default='../output')
+        if output_path is None:
+            exit(0)
+        bn = os.path.basename(output_path)
+        d = Display()
+        d.set_output_path(output_path)
+        configure(d, bn)
+        d.show()
+    elif mode == 'notebook':
+        output_path = os.path.join('..', 'output', ex_name)
+        bn = os.path.basename(output_path)
+        d = Display()
+        d.set_output_path(output_path)
+        configure(d, bn)
+        d.show(noparams=True)
+    else:
+        print(f'Unknown mode {mode}', file=sys.stderr)
+        exit(1)
+
+
 if __name__ == '__main__':
-    output_path = easygui.diropenbox(default='../output')
-    if output_path is None:
-        exit(0)
-    bn = os.path.basename(output_path)
-    d = Display()
-    d.set_output_path(output_path)
-    configure(d, bn)
-    d.show()
+    run_frontend()
