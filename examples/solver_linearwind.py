@@ -19,13 +19,15 @@ from mermoz.wind import LinearWind, DiscreteWind, UniformWind
 mpl.style.use('seaborn-notebook')
 
 
-def example_linear_wind():
+def run():
     """
     Example of the PMP-based solver for the time-optimal Zermelo
     control problem with a linear windfield. Comparison to the
     analytical solution.
     """
-    output_dir = '/home/bastien/Documents/work/mermoz/output/example_linearwind'
+    output_dir = '/home/bastien/Documents/work/mermoz/output/example_solver_linearwind'
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
     # Create a file manager to dump problem data
     mdfm = MDFmanager()
     mdfm.set_output_dir(output_dir)
@@ -134,4 +136,4 @@ def example_linear_wind():
 
 
 if __name__ == '__main__':
-    example_linear_wind()
+    run()

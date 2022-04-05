@@ -277,9 +277,9 @@ class DiscreteWind(Wind):
             a = (x[0] - xij) / delta_x
             yij = delta_y * j + self.y_min
             b = (x[1] - yij) / delta_y
-            d_uv__d_x = x[0] / delta_x * ((1 - b) * (self.uv[0, i + 1, j] - self.uv[0, i, j]) +
+            d_uv__d_x = 1. / delta_x * ((1 - b) * (self.uv[0, i + 1, j] - self.uv[0, i, j]) +
                                        b * (self.uv[0, i + 1, j + 1] - self.uv[0, i, j + 1]))
-            d_uv__d_y = x[1] / delta_y * ((1 - a) * (self.uv[0, i, j + 1] - self.uv[0, i, j]) +
+            d_uv__d_y = 1. / delta_y * ((1 - a) * (self.uv[0, i, j + 1] - self.uv[0, i, j]) +
                                        a * (self.uv[0, i + 1, j + 1] - self.uv[0, i + 1, j]))
             return np.stack((d_uv__d_x, d_uv__d_y), axis=1)
 
@@ -420,6 +420,7 @@ class RankineVortexWind(Wind):
         self.omega = np.array([x_omega, y_omega])
         self.gamma = gamma
         self.radius = radius
+        self.zero_ceil = 1e-3
         self.descr = f'Rankine vortex'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
 
     def max_speed(self):
@@ -427,6 +428,8 @@ class RankineVortexWind(Wind):
 
     def value(self, x):
         r = np.linalg.norm(x - self.omega)
+        if r < self.zero_ceil * self.radius:
+            return np.zeros(2)
         e_theta = np.array([-(x - self.omega)[1] / r,
                             (x - self.omega)[0] / r])
         f = self.gamma / (2 * np.pi)
@@ -437,6 +440,8 @@ class RankineVortexWind(Wind):
 
     def d_value(self, x):
         r = np.linalg.norm(x - self.omega)
+        if r < self.zero_ceil * self.radius:
+            return np.zeros((2, 2))
         x_omega = self.x_omega
         y_omega = self.y_omega
         e_r = np.array([(x - self.omega)[0] / r,

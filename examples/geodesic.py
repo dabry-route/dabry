@@ -3,6 +3,7 @@ import matplotlib as mpl
 import numpy as np
 
 from mermoz.mdf_manager import MDFmanager
+from mermoz.params_summary import ParamsSummary
 from mermoz.problem import MermozProblem
 from mermoz.model import ZermeloGeneralModel
 from mermoz.shooting import Shooting
@@ -14,7 +15,7 @@ from mdisplay.geodata import GeoData
 mpl.style.use('seaborn-notebook')
 
 
-def example_geodesic():
+def run():
     """
     Example of geodesic approximation with extremals
     """
@@ -63,6 +64,15 @@ def example_geodesic():
 
     mdfm.dump_trajs(mp.trajs)
 
+    params = {
+        'coords': 'cartesian',
+        'point_init': (x_init[0], x_init[1]),
+        'max_time': T,
+    }
+
+    ps = ParamsSummary(params, output_dir)
+    ps.dump()
+
 
 if __name__ == '__main__':
-    example_geodesic()
+    run()

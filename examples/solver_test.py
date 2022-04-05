@@ -16,7 +16,7 @@ from mermoz.misc import *
 mpl.style.use('seaborn-notebook')
 
 
-def test_solver():
+def run():
     output_dir = '/home/bastien/Documents/work/mermoz/output/example_solver'
     # Create a file manager to dump problem data
     mdfm = MDFmanager()
@@ -44,7 +44,7 @@ def test_solver():
     print(vortex1.max_speed())
     print(vortex2.max_speed())
     print(vortex3.max_speed())
-    const_wind = UniformWind(np.array([0., 0.]))  # UniformWind(np.array([factor_speed * -0.1, 0.]))
+    const_wind = UniformWind(np.array([0., 0.]))
 
     # Wind array boundaries
     bl = 1e6 * np.array([-0.2, -1.])
@@ -104,4 +104,4 @@ def test_solver():
 
 
 if __name__ == '__main__':
-    test_solver()
+    run()

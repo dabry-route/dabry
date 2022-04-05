@@ -275,7 +275,9 @@ class RFT:
             # Give also the wind to the matlab script
             u = np.zeros((self.nx, self.ny))
             v = np.zeros((self.nx, self.ny))
-            factor = 1 / EARTH_RADIUS
+
+            factor = 1 / EARTH_RADIUS if self.coords == COORD_GCS else 1.
+
             for i in range(self.nx - 1):
                 for j in range(self.ny - 1):
                     point = factor * np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
@@ -360,7 +362,7 @@ class RFT:
     def dump_rff(self, filepath):
         with h5py.File(os.path.join(filepath, 'rff.h5'), 'w') as f:
             nx, ny, nt = self.phi.shape
-            f.attrs['coords'] = COORD_CARTESIAN
+            f.attrs['coords'] = self.coords
             dset = f.create_dataset('data', (nt, nx, ny), dtype='f8')
             dset[:, :, :] = self.phi.transpose((2, 0, 1))
 
@@ -370,8 +372,9 @@ class RFT:
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
             X, Y = np.meshgrid(self.bl[0] + self.delta_x * np.arange(self.nx),
                                self.bl[1] + self.delta_y * np.arange(self.ny), indexing='ij')
-            dset[:, :, 0] = 1 / DEG_TO_RAD * X
-            dset[:, :, 1] = 1 / DEG_TO_RAD * Y
+            factor = 1 / DEG_TO_RAD if self.coords == COORD_GCS else 1.
+            dset[:, :, 0] = factor * X
+            dset[:, :, 1] = factor * Y
 
 
 def time_to_go(self,

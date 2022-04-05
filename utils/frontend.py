@@ -14,6 +14,7 @@ def configure(d: Display, case_name: str):
         bl = np.array([-76., 30.])
         tr = np.array([5., 60.])
         d.setup(bl=bl, tr=tr)
+        d.load_params()
         d.draw_trajs(nolabels=True)
         lon_ny, lat_ny = d.geodata.get_coords('New York')
         lon_par, lat_par = d.geodata.get_coords('Paris')
@@ -23,15 +24,16 @@ def configure(d: Display, case_name: str):
         d.draw_point_by_name('New York')
         d.draw_point_by_name('Paris')
 
-    elif case_name == 'example_linearwind':
+    elif case_name == 'example_solver_linearwind' or case_name == 'example_ft_linearwind':
         d.set_coords('cartesian')
         d.set_title('Analytic solution comparison')
-        bl = np.array([0.2, -0.1])
-        tr = np.array([1.2, 0.2])
-        d.setup(bl=bl, tr=tr)
+        d.setup()
+        d.load_params()
         d.draw_wind()
         d.draw_trajs()
         d.draw_point(1e6, 0., label='Target')
+        if case_name == 'example_ft_linearwind':
+            d.draw_rff()
 
     elif case_name == 'example_front_tracking':
         d.set_coords('gcs')
@@ -86,18 +88,39 @@ def configure(d: Display, case_name: str):
         d.draw_trajs(nolabels=True)
 
     elif case_name == 'example_solver':
+        d.nocontrols = True
         d.set_coords('cartesian')
         d.set_title('Solver test')
-        bl = np.array([0.2, -0.1])
-        tr = np.array([1.2, 0.2])
-        d.setup(bl=bl, tr=tr)
+        # bl = np.array([0.2, -0.1])
+        # tr = np.array([1.2, 0.2])
+        # d.setup(bl=bl, tr=tr)
+        d.setup()
+        d.load_params()
         d.draw_wind()
         d.draw_trajs(nolabels=True)
         d.draw_point(1e6, 0., label='Target')
         # d.legend()
 
+    elif case_name == 'example_ft_vor3':
+        d.nocontrols = True
+        d.set_coords('cartesian')
+        d.set_title('Front tracking on Rankine vortices')
+        d.setup()
+        d.load_params()
+        d.draw_wind()
+        d.draw_trajs(nolabels=True, filename='../example_solver/trajectories.h5')
+        d.draw_rff()
+
     else:
-        raise FileNotFoundError(f'No setup script provided for case "{case_name}"')
+        print(f'Using default setup script for unknown case "{case_name}"', file=sys.stderr)
+        d.nocontrols = True
+        d.set_coords('cartesian')
+        d.set_title('Example')
+        d.setup()
+        d.load_params()
+        d.draw_wind()
+        d.draw_trajs(nolabels=True)
+        d.draw_rff()
 
 
 def select_example():
@@ -116,22 +139,26 @@ def select_example():
     return dropdown
 
 
-def run_frontend(mode='default', ex_name=None):
+def run_frontend(mode='default', ex_name=None, noparams=False):
     if mode == 'default':
-        output_path = easygui.diropenbox(default='../output')
-        if output_path is None:
-            exit(0)
+        if ex_name is None:
+            output_path = easygui.diropenbox(default=os.path.join('..', 'output'))
+            if output_path is None:
+                exit(0)
+        else:
+            output_path = os.path.join('..', 'output', ex_name)
         bn = os.path.basename(output_path)
         d = Display()
         d.set_output_path(output_path)
         configure(d, bn)
-        d.show()
+        d.show(noparams=noparams)
     elif mode == 'notebook':
         output_path = os.path.join('..', 'output', ex_name)
         bn = os.path.basename(output_path)
         d = Display()
         d.set_output_path(output_path)
         configure(d, bn)
+        d.update_title()
         d.show(noparams=True)
     else:
         print(f'Unknown mode {mode}', file=sys.stderr)

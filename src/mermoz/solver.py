@@ -139,7 +139,7 @@ class Solver:
         with open(os.path.join(self.output_dir, 'config.txt'), 'w') as f:
             f.writelines(self.config_to_string())
 
-    def solve(self, plotting=True):
+    def solve(self, plotting=False):
 
         quit = False
         t_start = time.time()
