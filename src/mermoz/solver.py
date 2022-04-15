@@ -2,12 +2,14 @@ import math
 import os
 import time
 import numpy as np
+import scipy.optimize
 from matplotlib import pyplot as plt
 from heapq import heappush, heappop
 
-from .problem import MermozProblem
-from .shooting import Shooting
-from .trajectory import Trajectory
+from mermoz.problem import MermozProblem
+from mermoz.shooting import Shooting
+from mermoz.trajectory import Trajectory
+from mermoz.misc import *
 
 
 class Solver:
@@ -77,6 +79,7 @@ class Solver:
         self.opti_test = []
         self.opti_test_dict = {}
         self.opti_indexes = []
+        self.opti_headings = {}
         self.opti_time = {}
 
         self.iter = 0
@@ -95,11 +98,19 @@ class Solver:
         t = (k, j) if j > k else (j, k)
         self.distances_queue.append(t)
 
+    def distance(self, x1, x2):
+        if self.mp.coords == COORD_GCS:
+            # x1, x2 shall be vectors (lon, lat) in radians
+            return geodesic_distance(x1, x2)
+        else:
+            # x1, x2 shall be cartesian vectors in meters
+            return np.linalg.norm(x1 - x2)
+
     def is_opti(self, traj: Trajectory):
         b = False
         k = -1
         for k in range(traj.last_index - 1, -1, -1):
-            if np.linalg.norm(traj.points[k] - self.x_target) < self.opti_ceil:
+            if self.distance(traj.points[k], self.x_target) < self.opti_ceil:
                 b = True
                 break
         return b, k
@@ -259,17 +270,27 @@ class Solver:
     def print_iteration(self, n_trajs):
         print(f'* Iteration {self.iter} - {n_trajs} trajectories - {len(self.opti_indexes)}/{self.n_min_opti} optima')
 
-    def solve_fancy(self, max_depth=10):
+    def adj_from_dir(self, d):
+        if self.mp.coords == COORD_CARTESIAN:
+            return np.array([-np.cos(d), -np.sin(d)])
+        elif self.mp.coords == COORD_GCS:
+            return np.array([-np.sin(d), -np.cos(d)])
+
+    def solve_fancy(self, max_depth=10, debug=False):
 
         t_start = time.time()
         self.iter = 0
         int_steps = []
         k_max = len(self.dirs.keys())
+        dirs_list = []
+        dirs_queue = []
         for k, d in self.dirs.items():
+            print(f'Shooting {d * 180 / pi:.1f}')
+            dirs_list.append(d)
             shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
                              N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
-                             factor=self.int_prec_factor)
-            shoot.set_adjoint(np.array([-np.cos(d), -np.sin(d)]))
+                             factor=self.int_prec_factor, coords=self.mp.coords)
+            shoot.set_adjoint(self.adj_from_dir(d))
             traj = shoot.integrate()
             self.trajs[k] = traj
             lp = np.zeros(2)
@@ -279,12 +300,21 @@ class Solver:
             if k != 0:
                 d1 = self.dirs[k - 1]
                 d2 = self.dirs[k]
+                p1 = min(self.distance(p, self.x_target) for p in self.trajs[k - 1].points[:self.trajs[k - 1].last_index])
+                p2 = min(self.distance(p, self.x_target) for p in self.trajs[k].points[:self.trajs[k].last_index])
+                l1 = 0.5 #p1 / (p1 + p2)
+                l2 = 0.5 #1 - l1
+                new_dir = l1 * d1 + l2 * d2
                 heappush(self.shoot_queue,
-                         (
-                             np.linalg.norm(self.x_target - self.x_init),
-                             (0.5 * (d1 + d2), k_max, d1, 0, k - 1, d2, k, 0)))
+                         (     0.5 * (p1 + p2),
+                             #np.linalg.norm(self.x_target - self.x_init),
+                               (new_dir, k_max, d1, k - 1, 0, d2, k, 0)))
+                dirs_queue.append(new_dir)
         t_end = time.time()
+        for e in self.shoot_queue:
+            print(f'{e[0]:.5f}, {RAD_TO_DEG * e[1][0]:.2f}')
         t_start2 = time.time()
+
         try:
             while len(self.shoot_queue) != 0:
                 self.iter += 1
@@ -292,12 +322,15 @@ class Solver:
                 _, obj = heappop(self.shoot_queue)
                 d, k, d_l, k_l, depth_l, d_u, k_u, depth_u = obj
                 my_depth = max(depth_l, depth_u) + 1
+                print(f'Shooting {d*180/pi:.1f} - Depth {my_depth} - ', end='')
+                dirs_list.append(d)
                 bl = False
                 bu = False
                 shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
                                  N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
-                                 factor=self.int_prec_factor)
-                shoot.set_adjoint(np.array([-np.cos(d), -np.sin(d)]))
+                                 factor=self.int_prec_factor, coords=self.mp.coords,
+                                 target_crit=lambda x: self.distance(x, self.x_target) < self.opti_ceil)
+                shoot.set_adjoint(self.adj_from_dir(d))
                 traj = shoot.integrate()
                 traj.label = self.iter
                 self.trajs[k] = traj
@@ -305,29 +338,38 @@ class Solver:
                 lp = np.zeros(2)
                 lp[:] = traj.points[traj.last_index - 1]
                 self.last_points[k] = lp
-                b, index = self.is_opti(traj)
+                b, index = traj.optimal, (traj.last_index - 1)  # self.is_opti(traj)
                 if b:
                     print('Optimum found')
                     self.opti_indexes.append(k)
                     self.trajs[k].type = 'optimal'
+                    self.opti_headings[k] = d
                     self.opti_time[k] = self.trajs[k].timestamps[index]
                     break
                 lp_l = self.last_points[k_l]
                 lp_u = self.last_points[k_u]
-                if my_depth <= max_depth:
-                    if np.linalg.norm(lp - lp_l) > self.neighb_ceil:
+                if my_depth < max_depth:
+                    if self.distance(lp, lp_l) > self.neighb_ceil:
                         bl = True
-                        d1 = np.linalg.norm(lp - self.x_target)
-                        d2 = np.linalg.norm(lp_l - self.x_target)
+                        d1 = min(self.distance(p, self.x_target) for p in traj.points[:traj.last_index])
+                        d2 = min(self.distance(p, self.x_target) for p in self.trajs[k_l].points[:self.trajs[k_l].last_index])
+                        # d1 = self.distance(lp, self.x_target)
+                        # d2 = self.distance(lp_l, self.x_target)
+
                         heappush(self.shoot_queue,
                                  (0.5 * (d1 + d2), (0.5 * (d + d_l), k_max, d_l, k_l, depth_l, d, k, my_depth)))
+                        dirs_queue.append(0.5 * (d + d_l))
                         k_max += 1
-                    if np.linalg.norm(lp - lp_u) > self.neighb_ceil:
+                    if self.distance(lp, lp_u) > self.neighb_ceil:
                         bu = True
-                        d1 = np.linalg.norm(lp - self.x_target)
-                        d2 = np.linalg.norm(lp_u - self.x_target)
+                        d1 = min(self.distance(p, self.x_target) for p in traj.points[:traj.last_index])
+                        d2 = min(self.distance(p, self.x_target) for p in
+                                 self.trajs[k_u].points[:self.trajs[k_u].last_index])
+                        # d1 = self.distance(lp, self.x_target)
+                        # d2 = self.distance(lp_u, self.x_target)
                         heappush(self.shoot_queue,
                                  (0.5 * (d1 + d2), (0.5 * (d + d_u), k_max, d, k, my_depth, d_u, k_u, depth_u)))
+                        dirs_queue.append(0.5 * (d + d_u))
                         k_max += 1
                     if bl or bu:
                         print(f'Branching {"L" if bl else ""}{"U" if bu else ""}')
@@ -335,6 +377,62 @@ class Solver:
                         print('No branching')
                 else:
                     print(f'Max depth ({max_depth}) reached, no branching')
+        except KeyboardInterrupt:
+            pass
+
+        t_end2 = time.time()
+        d_pre_proc = t_end - t_start
+        d_proc = t_end2 - t_start2
+
+        self.mp.trajs = list(self.trajs.values())
+        print(f'    * Pre-processing :  {d_pre_proc:.3f} s')
+        print(f'    * Processing      :  {d_proc:.3f} s')
+        print(f'    * Total           :  {d_proc + d_pre_proc:.3f} s')
+        if debug:
+            plt.hist(180 / pi * np.array(dirs_list), np.linspace(0., 360., 180))
+            plt.hist(180 / pi * np.array(dirs_queue), np.linspace(0., 360., 180))
+            plt.show()
+        if len(self.opti_indexes) == 0:
+            print("No optimum found")
+        else:
+            for k in self.opti_indexes:
+                print(f'         Optimal time : {self.opti_time[k]}')
+                print(f'Optimal init. heading : {RAD_TO_DEG * self.opti_headings[k]}')
+                self.trajs[k].type = 'optimal'
+
+    def solve_fancy2(self, max_depth=10, debug=False):
+
+        t_start = time.time()
+        self.iter = 0
+        int_steps = []
+        k_max = len(self.dirs.keys())
+        dirs_list = []
+        dirs_queue = []
+        k = 0
+        def f(d):
+            nonlocal k
+            dirs_list.append(d)
+            shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
+                             N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                             factor=self.int_prec_factor, coords=self.mp.coords)
+            shoot.set_adjoint(self.adj_from_dir(d).reshape((2,)))
+            traj = shoot.integrate()
+            self.trajs[k] = traj
+            lp = np.zeros(2)
+            lp[:] = traj.points[traj.last_index - 1]
+            self.last_points[k] = lp
+            int_steps.append(traj.last_index)
+            val = np.mean(np.linalg.norm(traj.points[:traj.last_index] - self.x_target))
+            k += 1
+            return val
+
+        t_end = time.time()
+        t_start2 = time.time()
+        try:
+            res_list = []
+            for k in range(len(self.dirs) - 1):
+                res_list.append(scipy.optimize.minimize_scalar(f, bounds=(self.dirs[k], self.dirs[k + 1])))
+            print(min(res_list, key=lambda x: x.fun))
         except KeyboardInterrupt:
             pass
         t_end2 = time.time()
@@ -345,9 +443,14 @@ class Solver:
         print(f'    * Pre-processing :  {d_pre_proc:.3f} s')
         print(f'    * Processing      :  {d_proc:.3f} s')
         print(f'    * Total           :  {d_proc + d_pre_proc:.3f} s')
+        if debug:
+            plt.hist(180 / pi * np.array(dirs_list), np.linspace(0., 360., 180))
+            plt.hist(180 / pi * np.array(dirs_queue), np.linspace(0., 360., 180))
+            plt.show()
         if len(self.opti_indexes) == 0:
             print("No optimum found")
         else:
             for k in self.opti_indexes:
-                print(self.opti_time[k])
+                print(f'         Optimal time : {self.opti_time[k]}')
+                print(f'Optimal init. heading : {RAD_TO_DEG * self.opti_headings[k]}')
                 self.trajs[k].type = 'optimal'

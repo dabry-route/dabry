@@ -1,9 +1,12 @@
+import sys
 from abc import ABC, abstractmethod
 import numpy as np
 from numpy import ndarray
 import random
+from math import cos, sin, atan2
 
-from .wind import Wind
+from mermoz.wind import Wind
+from mermoz.misc import *
 
 
 class Feedback(ABC):
@@ -84,7 +87,7 @@ class FixedHeadingFB(Feedback):
     control law steers perpendicular to the target direction
     """
 
-    def __init__(self, wind, v_a: float, initial_steering: float):
+    def __init__(self, wind, v_a: float, initial_steering: float, coords: str):
         """
         :param v_a: The UAV airspeed in m/s
         :param initial_steering: The heading to keep constant in rad
@@ -92,19 +95,76 @@ class FixedHeadingFB(Feedback):
         super().__init__(1, wind)
         self.v_a = v_a
         self.theta_0 = initial_steering
+        self.coords = coords
 
     def value(self, x):
-        e_theta_0 = np.array([np.cos(self.theta_0), np.sin(self.theta_0)])
+        if self.coords == COORD_CARTESIAN:
+            e_theta_0 = np.array([np.cos(self.theta_0), np.sin(self.theta_0)])
+        elif self.coords == COORD_GCS:
+            e_theta_0 = np.array([np.sin(self.theta_0), np.cos(self.theta_0)])
         wind = self.wind.value(x)
-        wind_tangent = np.cross(e_theta_0, wind)
-        r = -wind_tangent / self.v_a
+        wind_ortho = np.cross(e_theta_0, wind)
+        r = -wind_ortho / self.v_a
         if r > 1.:
             res = np.pi / 2.
         elif r < -1.:
             res = -np.pi / 2.
         else:
-            res = np.arcsin(-wind_tangent / self.v_a)
+            res = np.arcsin(r)
+            if self.coords == COORD_GCS:
+                res *= -1
         res += self.theta_0
+        return res
+
+class GreatCircleFB(Feedback):
+    """
+    Control law for GCS problems only.
+    Tries to stay on a great circle when wind allows it.
+    """
+    pass
+
+class TargetFB(Feedback):
+    """
+    Control law trying to put ground speed vector towards a fixed target
+    """
+
+    def __init__(self, wind, v_a: float, target: ndarray, coords: str):
+        super().__init__(1, wind)
+        self.v_a = v_a
+        self.target = np.zeros(2)
+        self.target[:] = target
+        if coords == COORD_CARTESIAN:
+            print('Cartesian coordinates not supported by target FB yet', file=sys.stderr)
+            exit(1)
+        self.coords = coords
+
+    def value(self, x: ndarray) -> ndarray:
+        # Assuming GCS
+        # Got to 3D cartesian assuming spherical earth
+        lon, lat = x[0], x[1]
+        X3 = EARTH_RADIUS * np.array((cos(lon)*cos(lat), sin(lon)*cos(lat), sin(lat)))
+        # Vector normal to earth at position
+        e_phi = np.array((-sin(lon), cos(lon), 0.))
+        e_lambda = np.array((-sin(lat)*cos(lon), -sin(lat)*sin(lon), cos(lat)))
+        lon, lat = self.target[0], self.target[1]
+        X_target3 = EARTH_RADIUS * np.array((cos(lon)*cos(lat), sin(lon)*cos(lat), sin(lat)))
+        e_target = np.zeros(2)
+        e_target[0] = (X_target3 - X3) @ e_phi
+        e_target[1] = (X_target3 - X3) @ e_lambda
+        e_target = e_target / np.linalg.norm(e_target)
+
+        wind = self.wind.value(x)
+        wind_ortho = np.cross(e_target, wind)
+        r = -wind_ortho / self.v_a
+        if r > 1.:
+            res = np.pi / 2.
+        elif r < -1.:
+            res = -np.pi / 2.
+        else:
+            res = np.arcsin(r)
+            if self.coords == COORD_GCS:
+                res *= -1
+        res += pi/2 - atan2(e_target[1], e_target[0])
         return res
 
 

@@ -5,7 +5,7 @@ from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
 from mermoz.mdf_manager import MDFmanager
 from mermoz.model import Model
-from mermoz.stoppingcond import StoppingCond
+from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.visual import Visual
 
 
@@ -19,16 +19,24 @@ class MermozProblem:
 
     def __init__(self,
                  model: Model,
-                 coords='cartesian',
+                 coords=None,
                  domain=None,
                  T=0.,
                  visual_mode="full",
-                 axes_equal=True):
+                 axes_equal=True,
+                 autodomain=True):
         self.model = model
 
         self.coords = coords
         if not domain:
-            self.domain = lambda _: True
+            if not autodomain:
+                self.domain = lambda _: True
+            else:
+                # Bound computation domain on wind grid limits
+                wind = self.model.wind
+                bl = (wind.grid[0, 0, 0], wind.grid[0, 0, 1])
+                tr = (wind.grid[-1, -1, 0], wind.grid[-1, -1, 1])
+                self.domain = lambda x: bl[0] < x[0] < tr[0] and bl[1] < x[1] < tr[1]
         else:
             self.domain = domain
         self._feedback = None
@@ -68,10 +76,13 @@ class MermozProblem:
         """
         if self._feedback is None:
             raise ValueError("No feedback provided for integration")
+        sc = TimedSC(1.)
+        sc.value = lambda t, x: stop_cond.value(t, x) or not self.domain(x)
         integrator = IntEulerExpl(self.model.wind,
                                   self.model.dyn,
                                   self._feedback,
-                                  stop_cond=stop_cond,
+                                  self.coords,
+                                  stop_cond=sc,
                                   max_iter=max_iter,
                                   int_step=int_step)
         self.trajs.append(integrator.integrate(x_init))

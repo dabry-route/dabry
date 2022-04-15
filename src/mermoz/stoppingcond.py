@@ -72,3 +72,17 @@ class PrecisionSC(StoppingCond):
 
     def value(self, t, x):
         return 1 / self.wind.grad_norm(x) * self.factor < self.int_stepsize
+
+
+class DistanceSC(StoppingCond):
+    """
+        Stops when trajectory is close enough to a given point according
+        to a given distance function
+    """
+
+    def __init__(self, distance, ceil):
+        self.distance = distance
+        self.ceil = ceil
+
+    def value(self, _, x):
+        return self.distance(x) < self.ceil

@@ -5,7 +5,7 @@ import h5py
 import numpy as np
 
 from mermoz.misc import *
-from mermoz.wind import Wind
+from mermoz.wind import Wind, DiscreteWind
 
 
 class MDFmanager:
@@ -56,22 +56,30 @@ class MDFmanager:
                 for attr, val in traj.attrs.items():
                     print(f'{attr} : {val}')
 
-    def dump_wind(self, wind: Wind, filename=None):
-        if not wind.is_dumpable:
+    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, bl=None, tr=None, coords=COORD_CARTESIAN):
+        if wind.is_dumpable == 0:
             print('Error : Wind is not dumpable to file', file=sys.stderr)
             exit(1)
         filename = self.wind_filename if filename is None else filename
         filepath = os.path.join(self.output_dir, filename)
+        if wind.is_dumpable == 1:
+            if nx is None or ny is None:
+                print(f'Please provide grid shape "nx=..., ny=..." to sample analytical wind "{wind}"')
+                exit(1)
+            dwind = DiscreteWind()
+            dwind.load_from_wind(wind, nx, ny, bl, tr, coords, nodiff=True)
+        else:
+            dwind = wind
         with h5py.File(filepath, 'w') as f:
-            f.attrs['coords'] = wind.coords
+            f.attrs['coords'] = dwind.coords
             f.attrs['units_grid'] = U_DEG
-            dset = f.create_dataset('data', (wind.nt, wind.nx, wind.ny, 2), dtype='f8')
-            dset[:] = wind.uv
-            dset = f.create_dataset('ts', (wind.nt,), dtype='f8')
-            dset[:] = wind.ts
-            factor = (1 / DEG_TO_RAD if wind.coords == COORD_GCS else 1.)
-            dset = f.create_dataset('grid', (wind.nx, wind.ny, 2), dtype='f8')
-            dset[:] = factor * wind.grid
+            dset = f.create_dataset('data', (dwind.nt, dwind.nx, dwind.ny, 2), dtype='f8')
+            dset[:] = dwind.uv
+            dset = f.create_dataset('ts', (dwind.nt,), dtype='f8')
+            dset[:] = dwind.ts
+            factor = (1 / DEG_TO_RAD if dwind.coords == COORD_GCS else 1.)
+            dset = f.create_dataset('grid', (dwind.nx, dwind.ny, 2), dtype='f8')
+            dset[:] = factor * dwind.grid
 
 
 if __name__ == '__main__':

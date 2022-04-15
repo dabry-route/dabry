@@ -5,6 +5,12 @@ import shutil
 import markdown
 import datetime
 
+import numpy as np
+
+from mermoz.problem import MermozProblem
+from mermoz.solver import Solver
+from mermoz.misc import *
+
 
 class ParamsSummary:
 
@@ -35,9 +41,17 @@ class ParamsSummary:
 
         self.params = params
         self.md = None
-        self.process_params()
+
+    def add_param(self, k, v):
+        self.params[k] = v
+
+    def load_dict(self, d):
+        self.params = {}
+        for k, v in d.items():
+            self.params[k] = v
 
     def dump(self, fname=None, nohtml=False):
+        self.process_params()
         fname = self.params_fname if fname is None else fname
         with open(os.path.join(self.output_dir, fname), 'w') as f:
             json.dump(self.params, f)
@@ -48,7 +62,6 @@ class ParamsSummary:
             shutil.copyfile(os.path.join(self.params_ss_path, self.params_ss_fname),
                             os.path.join(self.output_dir, self.params_ss_fname))
 
-
     def _fcoords(self, coords):
         if type(coords) == str:
             return coords
@@ -57,6 +70,33 @@ class ParamsSummary:
 
     def _fcomptime(self, comptime):
         return f'{comptime:.3f}'
+
+    def load_from_solver(self, sv: Solver):
+        total_wind = sv.mp.model.wind
+        T = sv.T
+        factor = RAD_TO_DEG if sv.mp.coords == COORD_GCS else 1.
+        self.params = {
+            'coords': sv.mp.coords,
+            'point_init': (factor * sv.x_init[0], factor * sv.x_init[1]),
+            'max_time': T,
+            'airspeed': sv.mp.model.v_a,
+            'point_target': (factor * sv.x_target[0], factor * sv.x_target[1]),
+            'target_radius': sv.opti_ceil,
+            'nt_pmp': sv.N_iter,
+        }
+        try:
+            self.params['bl_wind'] = (factor * total_wind.grid[0, 0, 0], factor * total_wind.grid[0, 0, 1])
+            self.params['tr_wind'] = (factor * total_wind.grid[-1, -1, 0], factor * total_wind.grid[-1, -1, 1])
+            self.params['nx_wind'] = total_wind.grid.shape[0]
+            self.params['ny_wind'] = total_wind.grid.shape[1]
+            self.params['date_wind'] = total_wind.ts[0]
+        except AttributeError:
+            pass
+        if sv.mp.coords == COORD_GCS:
+            self.params['geodesic_time'] = geodesic_distance(sv.x_init[0], sv.x_init[1], sv.x_target[0], sv.x_target[1],
+                                                             mode='rad') / sv.mp.model.v_a
+        else:
+            self.params['geodesic_time'] = np.linalg.norm(sv.x_init - sv.x_target) / sv.mp.model.v_a
 
     def process_params(self):
         params = self.params
@@ -69,6 +109,8 @@ class ParamsSummary:
 
         s = ""
         s += '### Computation parameters\n\n'
+
+        units_max_time = ''
 
         try:
             self.coords = self._fcoords(params['coords'])
@@ -95,7 +137,13 @@ class ParamsSummary:
         except KeyError:
             pass
         try:
-            self.max_time = params['max_time']
+            max_time = params['max_time']
+            if max_time > 1800.:
+                self.max_time = f'{max_time / 3600.:.2f}'
+                units_max_time = 'h'
+            else:
+                self.max_time = max_time
+                units_max_time = 's'
         except KeyError:
             pass
         try:
@@ -127,7 +175,7 @@ class ParamsSummary:
             f"| Wind top right bound | {self.tr_wind} | {self.coords_units} |\n" + \
             f"| Wind grid {self.coords_name} | {self.grid_wind} |  |\n" + \
             f"| Wind date | {self.date_wind} |  |\n" + \
-            f"| Time window upper bound | {self.max_time} | s |\n" + \
+            f"| Time window upper bound | {self.max_time} | {units_max_time} |\n" + \
             f"| PMP number of time steps | {self.nt_pmp} |  |\n" + \
             f"| RFT number of time steps | {self.nt_rft} |  |\n" + \
             f"| RFT grid {self.coords_name} | {self.grid_rft} |  |\n" + \

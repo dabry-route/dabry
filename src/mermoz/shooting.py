@@ -25,7 +25,8 @@ class Shooting(ABC):
                  domain=None,
                  abort_on_precision=False,
                  fail_on_maxiter=False,
-                 coords=COORD_CARTESIAN
+                 coords=COORD_CARTESIAN,
+                 target_crit=None
                  ):
         """
         :param dyn: The dynamics of the problem
@@ -42,6 +43,9 @@ class Shooting(ABC):
         integration
         :param coords: COORD_CARTESIAN if working in 2D planar space, COORD_GCS if working on plane-carree projection
         of earth
+        :param target_crit: If not None, shooting process will monitor optimality with this criteria while
+        computing trajectories. Should take a 2D np array position vector as input and return boolean
+        stating if point is close enough to goal.
         """
         self.dyn = dyn
         self.x_init = np.zeros(2)
@@ -59,6 +63,7 @@ class Shooting(ABC):
         self.p_init = np.zeros(2)
         self.coords = coords
         ensure_coords(coords)
+        self.target_crit = target_crit
 
     def set_adjoint(self, p_init: ndarray):
         self.p_init[:] = p_init
@@ -100,6 +105,7 @@ class Shooting(ABC):
         adjoints[0] = p
         u = controls[0] = self.control(x, p, 0.)
         interrupted = False
+        optimal = False
         list_dt = []
         if verbose:
             print(sumup(0, t, x, p, u))
@@ -115,6 +121,10 @@ class Shooting(ABC):
                 if _sc_value or not self.domain(x):
                     interrupted = True
                     break
+                if self.target_crit is not None and self.target_crit(x):
+                    interrupted = True
+                    optimal = True
+                    break
                 t += dt
                 u = self.control(x, p, t)
                 dyn_x = self.dyn.value(x, u, t)
@@ -128,7 +138,7 @@ class Shooting(ABC):
                 controls[i] = u
                 if verbose:
                     print(sumup(i, t, x, p, u))
-            return AugmentedTraj(timestamps, states, adjoints, controls, i, type=TRAJ_PMP,
+            return AugmentedTraj(timestamps, states, adjoints, controls, i, optimal=optimal, type=TRAJ_PMP,
                                  interrupted=interrupted, coords=self.coords)
         else:
             i = 1

@@ -68,8 +68,12 @@ class WindConverter:
                     file = f'wind_{lat}_{lon}.txt'
                     with open(os.path.join(path_to_wind, file), 'r') as windfile:
                         wind_data = json.load(windfile)
-                    self.data[k, i, j, 0] = wind_data['wind_u-surface'][0]
-                    self.data[k, i, j, 1] = wind_data['wind_v-surface'][0]
+                    try:
+                        self.data[k, i, j, 0] = wind_data['wind_u-surface'][0]
+                        self.data[k, i, j, 1] = wind_data['wind_v-surface'][0]
+                    except KeyError:
+                        self.data[k, i, j, 0] = wind_data['wind_u-1000h'][0]
+                        self.data[k, i, j, 1] = wind_data['wind_v-1000h'][0]
                     self.ts[k] = wind_data['ts'][k]
         print('Done')
 

@@ -75,8 +75,8 @@ def run():
                     x_init,
                     x_target,
                     T,
-                    -np.pi / 2. + 5e-2,
-                    np.pi / 2. - 5e-2,
+                    -np.pi / 2.,
+                    np.pi / 2.,
                     output_dir,
                     N_disc_init=2,
                     opti_ceil=1e6/30,
@@ -118,20 +118,9 @@ def run():
     mp.trajs.append(alyt_traj)
     mdfm.dump_trajs(mp.trajs)
 
-    params = {
-        'coords': 'cartesian',
-        'bl_wind': (total_wind.grid[0, 0, 0], total_wind.grid[0, 0, 1]),
-        'tr_wind': (total_wind.grid[-1, -1, 0], total_wind.grid[-1, -1, 1]),
-        'nx_wind': total_wind.grid.shape[0],
-        'ny_wind': total_wind.grid.shape[1],
-        'date_wind': total_wind.ts[0],
-        'point_init': (x_init[0], x_init[1]),
-        'max_time': T,
-        'nt_pmp': nt_pmp,
-        'pmp_time': time_pmp
-    }
-
-    ps = ParamsSummary(params, output_dir)
+    ps = ParamsSummary({}, output_dir)
+    ps.load_from_solver(solver)
+    ps.add_param('pmp_time', time_pmp)
     ps.dump()
 
 

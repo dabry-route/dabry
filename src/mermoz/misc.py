@@ -1,4 +1,5 @@
-from math import pi
+import sys
+from math import pi, acos, cos, sin
 
 COORD_CARTESIAN = 'cartesian'
 COORD_GCS = 'gcs'
@@ -38,3 +39,37 @@ def ensure_compatible(coords, units):
         if units not in [U_RAD, U_DEG]:
             print(f'Uncompatible coords "{coords}" and grid units "{units}"')
             exit(1)
+
+
+def geodesic_distance(*args, mode='rad'):
+    """
+    Computes the great circle distance between two points on the earth surface
+    Arguments may be given in (lon1, lat1, lon2, lat2)
+    or in (ndarray(lon1, lat1), ndarray(lon2, lat2))
+    :param mode: Whether lon/lat given in degrees or radians
+    :return: Great circle distance in meters
+    """
+    if len(args) == 4:
+        lon1 = args[0]
+        lat1 = args[1]
+        lon2 = args[2]
+        lat2 = args[3]
+    elif len(args) == 2:
+        lon1 = args[0][0]
+        lat1 = args[0][1]
+        lon2 = args[1][0]
+        lat2 = args[1][1]
+    else:
+        print('Incorrect argument format', file=sys.stderr)
+        exit(1)
+    factor = pi / 180 if mode == 'deg' else 1.
+    phi1 = lon1 * factor
+    phi2 = lon2 * factor
+    lambda1 = lat1 * factor
+    lambda2 = lat2 * factor
+    # def rectify(phi):
+    #     return phi + 2*pi if phi <= pi else -2*pi if phi > pi else 0.
+    # phi1 = rectify(phi1)
+    # phi2 = rectify(phi2)
+    res = acos(sin(lambda1) * sin(lambda2) + cos(lambda1) * cos(lambda2) * cos(phi2 - phi1)) * EARTH_RADIUS
+    return res

@@ -12,6 +12,7 @@ class Integration(ABC):
                  wind,
                  dyn,
                  feedback,
+                 coords,
                  stop_cond=None,
                  max_iter=10000,
                  int_step=0.0001):
@@ -21,6 +22,7 @@ class Integration(ABC):
         self.stop_cond = stop_cond
         self.max_iter = max_iter
         self.int_step = int_step
+        self.coords = coords
 
     @abstractmethod
     def integrate(self,
@@ -49,8 +51,7 @@ class IntEulerExpl(Integration):
         points[0] = x
         controls[0] = self.feedback.value(x)
         dt = self.int_step
-        a = self.stop_cond.value(t, x)
-        while (i+1 < self.max_iter) and not (self.stop_cond and self.stop_cond.value(t, x)):
+        while (i + 1 < self.max_iter) and (self.stop_cond is None or not self.stop_cond.value(t, x)):
             i += 1
             t += dt
             u = self.feedback.value(x)
@@ -59,4 +60,4 @@ class IntEulerExpl(Integration):
             timestamps[i] = t
             points[i] = x
             controls[i] = u
-        return Trajectory(timestamps, points, controls, last_index=i, type=TRAJ_INT)
+        return Trajectory(timestamps, points, controls, last_index=i, type=TRAJ_INT, coords=self.coords)

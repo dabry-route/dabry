@@ -1,5 +1,6 @@
 import os
 import random
+import time
 
 import matplotlib as mpl
 import numpy as np
@@ -7,6 +8,7 @@ from matplotlib import pyplot as plt
 import scipy.optimize
 
 from mermoz.mdf_manager import MDFmanager
+from mermoz.params_summary import ParamsSummary
 from mermoz.problem import MermozProblem
 from mermoz.model import ZermeloGeneralModel
 from mermoz.solver import Solver
@@ -79,8 +81,10 @@ def run():
     # u_max = 3 * np.pi / 8.
     # u_min = - np.pi / 8.
     # u_max = 0.
-    u_min = -np.pi / 2 + np.pi / 6 * random.random()
-    u_max = np.pi / 2 - np.pi / 6 * random.random()
+    u_min = -np.pi / 2 #+ np.pi / 6 * random.random()
+    u_max = np.pi / 2 #- np.pi / 6 * random.random()
+
+    nt_pmp = 1000
 
     solver = Solver(mp,
                     x_init,
@@ -94,13 +98,22 @@ def run():
                     neighb_ceil=factor / 40,
                     n_min_opti=1,
                     adaptive_int_step=False,
-                    N_iter=10000)
+                    N_iter=nt_pmp)
     solver.log_config()
 
     solver.setup()
+
+    t_start = time.time()
     solver.solve_fancy()
+    t_end = time.time()
+    time_pmp = t_end - t_start
 
     mdfm.dump_trajs(mp.trajs)
+
+    ps = ParamsSummary({}, output_dir)
+    ps.load_from_solver(solver)
+    ps.add_param('pmp_time', time_pmp)
+    ps.dump()
 
 
 if __name__ == '__main__':

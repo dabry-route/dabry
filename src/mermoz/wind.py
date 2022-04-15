@@ -20,7 +20,10 @@ class Wind:
         self.value = value_func
         self.d_value = d_value_func
         self.descr = descr
-        self.is_dumpable = False
+        # 0 if wind is not dumpable,
+        # 1 if dumpable but needs sampling (analytical winds)
+        # 2 if directly dumpable
+        self.is_dumpable = 1
 
     def __add__(self, other):
         """
@@ -89,7 +92,7 @@ class DiscreteWind(Wind):
     def __init__(self, interp='pwc'):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
 
-        self.is_dumpable = True
+        self.is_dumpable = 2
 
         self.nt = None
         self.nx = None
@@ -217,7 +220,7 @@ class DiscreteWind(Wind):
         yy = (x[1] - self.y_min) / (self.y_max - self.y_min)
 
         eps = self.clipping_tol
-        if xx < 0. - eps or xx > 1. + eps or yy < 0. - eps or yy > 1. + eps:
+        if xx < 0. - eps or xx >= 1. or yy < 0. - eps or yy >= 1.:
             # print(f"Real windfield undefined at ({x[0]:.3f}, {x[1]:.3f})")
             return np.array([0., 0.])
 
@@ -278,9 +281,9 @@ class DiscreteWind(Wind):
             yij = delta_y * j + self.y_min
             b = (x[1] - yij) / delta_y
             d_uv__d_x = 1. / delta_x * ((1 - b) * (self.uv[0, i + 1, j] - self.uv[0, i, j]) +
-                                       b * (self.uv[0, i + 1, j + 1] - self.uv[0, i, j + 1]))
+                                        b * (self.uv[0, i + 1, j + 1] - self.uv[0, i, j + 1]))
             d_uv__d_y = 1. / delta_y * ((1 - a) * (self.uv[0, i, j + 1] - self.uv[0, i, j]) +
-                                       a * (self.uv[0, i + 1, j + 1] - self.uv[0, i + 1, j]))
+                                        a * (self.uv[0, i + 1, j + 1] - self.uv[0, i + 1, j]))
             return np.stack((d_uv__d_x, d_uv__d_y), axis=1)
 
     def compute_derivatives(self):
@@ -516,3 +519,62 @@ class LinearWind(Wind):
 
     def d_value(self, x):
         return self.gradient
+
+
+class PointSymWind(Wind):
+    """
+    From Techy 2011 (DOI 10.1007/s11370-011-0092-9)
+    """
+
+    def __init__(self, x_center: float, y_center: float, gamma: float, omega: float):
+        """
+        :param x_center: Center x-coordinate
+        :param y_center: Center y-coordinate
+        :param gamma: Divergence
+        :param omega: Curl
+        """
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+
+        self.center = np.array((x_center, y_center))
+
+        self.gamma = gamma
+        self.omega = omega
+        self.mat = np.array([[gamma, -omega], [omega, gamma]])
+
+    def value(self, x):
+        return self.mat @ (x - self.center)
+
+    def d_value(self, x):
+        return self.mat
+
+
+class DoubleGyreWind(Wind):
+    """
+    From Li 2020 (DOI 10.1109/JOE.2019.2926822)
+    """
+
+    def __init__(self, x_center: float, y_center: float, x_wl: float, y_wl: float, ampl: float):
+        """
+        :param x_center: Bottom left x-coordinate
+        :param y_center: Bottom left y-coordinate
+        :param x_wl: x-axis wavelength
+        :param y_wl: y-axis wavelength
+        :param ampl: Amplitude in meters per second
+        """
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+
+        self.center = np.array((x_center, y_center))
+
+        # Phase gradient
+        self.kx = 2 * pi / x_wl
+        self.ky = 2 * pi / y_wl
+        self.ampl = ampl
+
+    def value(self, x):
+        xx = np.diag((self.kx, self.ky)) @ (x - self.center)
+        return self.ampl * np.array((-sin(xx[0]) * cos(xx[1]), cos(xx[0]) * sin(xx[1])))
+
+    def d_value(self, x):
+        xx = np.diag((self.kx, self.ky)) @ (x - self.center)
+        return self.ampl * np.array([[-self.kx * cos(xx[0]) * cos(xx[1]), self.ky * sin(xx[0]) * sin(xx[1])],
+                                     [-self.kx * sin(xx[0]) * sin(xx[1]), self.ky * cos(xx[0]) * sin(xx[1])]])
