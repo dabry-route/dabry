@@ -170,6 +170,16 @@ class FrontendHandler:
 
             self.display.mainfig.canvas.mpl_connect('motion_notify_event', on_plot_hover)
 
+        elif self.case_name in ['example_solver_rad_gauss_1']:
+            self.display.nocontrols = True
+            self.display.set_title('Test case')
+            self.display.load_params()
+            self.display.setup()
+            self.display.draw_wind()
+            self.display.draw_trajs(nolabels=False, opti_only=False)
+            self.display.draw_solver()
+            self.display.draw_rff()
+
         elif 'solver' in self.case_name:
             print(f'Using default solver setup script for unknown case "{self.case_name}"', file=sys.stderr)
             self.display.nocontrols = True

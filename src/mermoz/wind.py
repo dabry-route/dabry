@@ -3,6 +3,7 @@ import os
 import h5py
 import numpy as np
 from numpy import ndarray
+from math import exp, log
 
 from mermoz.misc import *
 
@@ -455,8 +456,8 @@ class RankineVortexWind(Wind):
         if r <= self.radius:
             a = (x - self.omega)[0]
             b = (x - self.omega)[1]
-            d_e_theta__d_x = np.array([a * b / r ** 3, (r ** 2 - a ** 2) / r ** 3])
-            d_e_theta__d_y = np.array([(r ** 2 - b ** 2) / r ** 3, a * b / r ** 3])
+            d_e_theta__d_x = np.array([a * b / r ** 3, b ** 2 / r ** 3])
+            d_e_theta__d_y = np.array([- a ** 2 / r ** 3, - a * b / r ** 3])
             return f / self.radius ** 2 * np.stack((a / r * e_theta + r * d_e_theta__d_x,
                                                     b / r * e_theta + r * d_e_theta__d_y), axis=1)
         else:
@@ -578,3 +579,47 @@ class DoubleGyreWind(Wind):
         xx = np.diag((self.kx, self.ky)) @ (x - self.center)
         return self.ampl * np.array([[-self.kx * cos(xx[0]) * cos(xx[1]), self.ky * sin(xx[0]) * sin(xx[1])],
                                      [-self.kx * sin(xx[0]) * sin(xx[1]), self.ky * cos(xx[0]) * sin(xx[1])]])
+
+
+class RadialGaussWind(Wind):
+    def __init__(self, x_center: float, y_center: float, radius: float, sdev: float, v_max: float):
+        """
+        :param x_center: Center x-coordinate
+        :param y_center: Center y-coordinate
+        :param radius: Radial distance of maximum wind value (absolute value)
+        :param sdev: Gaussian standard deviation
+        :param v_max: Maximum wind value
+        """
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+
+        self.center = np.array((x_center, y_center))
+
+        self.radius = radius
+        self.sdev = sdev
+        self.v_max = v_max
+        self.zero_ceil = 1e-3
+
+    def ampl(self, r):
+        if r < self.zero_ceil * self.radius:
+            return 0.
+        return self.v_max * exp(-(log(r/self.radius)) ** 2 / (2 * self.sdev ** 2))
+
+    def value(self, x):
+        xx = x - self.center
+        r = np.linalg.norm(xx)
+        if r < self.zero_ceil * self.radius:
+            return np.zeros(2)
+        e_r = (x - self.center) / r
+        v = self.ampl(r)
+        return v * e_r
+
+    def d_value(self, x):
+        xx = x - self.center
+        r = np.linalg.norm(xx)
+        e_r = (x - self.center) / r
+        a = (x - self.center)[0]
+        b = (x - self.center)[1]
+        dv = -log(r/self.radius) * self.ampl(r) / (r**2 * log(r) * self.sdev**2) * np.array([xx[0]**2, xx[1]**2])
+        nabla_e_r = np.array([[b ** 2 / r ** 3, - a * b / r ** 3],
+                              [-a * b / r ** 3, a ** 2 / r ** 3]])
+        return np.einsum('i,j->ij', e_r, dv) + self.ampl(r) * nabla_e_r
