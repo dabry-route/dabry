@@ -1,5 +1,6 @@
 import os
 import sys
+import scipy.interpolate as itp
 
 import h5py
 import numpy as np
@@ -131,11 +132,13 @@ class DiscreteWind(Wind):
 
         self.is_analytical = force_analytical
 
-    def load(self, filepath, nodiff=False):
+    def load(self, filepath, nodiff=False, unstructured=False, resample=1):
         """
         Loads wind data from H5 wind data
         :param filepath: The H5 file contaning wind data
         :param nodiff: Do not compute wind derivatives
+        :param unstructured: True if grid is not evenly-spaced 2D grid (fixed dx and fixed dy)
+        :param resample: If unstructured, the resample rate over which to evaluate wind
         """
 
         # Fill the wind data array
@@ -150,13 +153,46 @@ class DiscreteWind(Wind):
             ensure_compatible(self.coords, self.units_grid)
 
             # Loading
-            self.nt, self.nx, self.ny, _ = wind_data['data'].shape
-            self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
-            self.uv[:, :, :, :] = wind_data['data']
-            self.grid = np.zeros((self.nx, self.ny, 2))
-            self.grid[:] = wind_data['grid']
-            self.ts = np.zeros((self.nt,))
-            self.ts[:] = wind_data['ts']
+            if not unstructured:
+                self.nt, self.nx, self.ny, _ = wind_data['data'].shape
+                self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
+                self.uv[:, :, :, :] = wind_data['data']
+                self.grid = np.zeros((self.nx, self.ny, 2))
+                self.grid[:] = wind_data['grid']
+                self.ts = np.zeros((self.nt,))
+                self.ts[:] = wind_data['ts']
+            else:
+                nx_wind = wind_data['data'].shape[1]
+                ny_wind = wind_data['data'].shape[2]
+                self.nt = wind_data['data'].shape[0]
+                self.nx = resample * nx_wind
+                self.ny = resample * ny_wind
+                self.x_min = wind_data['grid'][:, :, 0].min()
+                self.x_max = wind_data['grid'][:, :, 0].max()
+                self.y_min = wind_data['grid'][:, :, 1].min()
+                self.y_max = wind_data['grid'][:, :, 1].max()
+                self.grid = np.zeros((self.nx, self.ny, 2))
+                self.grid[:] = np.array(np.meshgrid(np.linspace(self.x_min, self.x_max, self.nx),
+                                                 np.linspace(self.y_min, self.y_max, self.ny))).transpose((2, 1, 0))
+                grid_wind = np.zeros(wind_data['grid'].shape)
+                grid_wind[:] = np.array(wind_data['grid'])
+                u_wind = np.zeros((nx_wind, ny_wind))
+                v_wind = np.zeros((nx_wind, ny_wind))
+                u_wind[:] = np.array(wind_data['data'][0, :, :, 0])
+                v_wind[:] = np.array(wind_data['data'][0, :, :, 1])
+                u_itp = np.zeros((self.nx, self.ny))
+                u_itp[:] = itp.griddata(grid_wind.reshape((nx_wind * ny_wind, 2)),
+                                     u_wind.reshape((nx_wind * ny_wind,)),
+                                     self.grid.reshape((self.nx * self.ny, 2)), method='linear', fill_value=0.).reshape((self.nx, self.ny))
+                v_itp = np.zeros((self.nx, self.ny))
+                v_itp[:] = itp.griddata(grid_wind.reshape((nx_wind * ny_wind, 2)),
+                                     v_wind.reshape((nx_wind * ny_wind,)),
+                                     self.grid.reshape((self.nx * self.ny, 2)), method='linear', fill_value=0.).reshape((self.nx, self.ny))
+                self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
+                for kt in range(self.nt):
+                    self.uv[kt, :] = np.stack((u_itp, v_itp), axis=2)
+                self.ts = np.zeros((self.nt,))
+                self.ts[:] = wind_data['ts']
 
         # Post processing
         if self.units_grid == U_DEG:
@@ -381,10 +417,10 @@ class DiscreteWind(Wind):
             print(self.x_min, self.x_max, self.y_min, self.y_max)
 
             # Wind
-            f_wind = DiscreteWind()
-            bl = np.array((-5e6, 5e6))  # self.grid[0, 0]
-            tr = np.array((-5e6, 5e6))  # self.grid[-1, -1]
-            f_wind.load_from_wind(self, nx, ny, bl, tr, coords=COORD_CARTESIAN)
+            # f_wind = DiscreteWind()
+            # bl = np.array((-5e6, -5e6))  # self.grid[0, 0]
+            # tr = np.array((5e6, 5e6))  # self.grid[-1, -1]
+            # f_wind.load_from_wind(self, nx, ny, bl, tr, coords=COORD_CARTESIAN)
             # newuv = np.zeros(f_wind.uv.shape)
             # newuv[:] = self._rotate_wind(f_wind.uv[:, :, :, 0],
             #                           f_wind.uv[:, :, :, 1],
@@ -395,13 +431,12 @@ class DiscreteWind(Wind):
             print(f"Unknown projection type {proj}", file=sys.stderr)
             exit(1)
 
-        self.grid[:] = oldgrid
-        self.x_min, self.y_min, self.x_max, self.y_max = oldbounds
+        # self.grid[:] = oldgrid
+        # self.x_min, self.y_min, self.x_max, self.y_max = oldbounds
 
-        f_wind.coords = COORD_CARTESIAN
-        f_wind.units_grid = 'meters'
-        f_wind.is_analytical = False
-        return f_wind
+        self.coords = COORD_CARTESIAN
+        self.units_grid = 'meters'
+        self.is_analytical = False
 
     @staticmethod
     def _rotate_wind(u, v, x, y):

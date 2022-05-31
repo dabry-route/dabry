@@ -196,7 +196,7 @@ class FrontendHandler:
             self.display.load_params()
             self.display.setup()
             self.display.draw_wind()
-            self.display.draw_trajs(nolabels=False, opti_only=False)
+            #self.display.draw_trajs(nolabels=False, opti_only=False)
             # self.display.draw_solver()
             self.display.draw_rff()
 

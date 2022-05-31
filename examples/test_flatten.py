@@ -43,7 +43,7 @@ def run():
 
     # Load wind
     total_wind = DiscreteWind(force_analytical=True)
-    total_wind.load(os.path.join(wind_data_dir, 'wind.h5'))
+    total_wind.load(os.path.join(wind_data_dir, 'wind.h5'), unstructured=True)
     mdfm.dump_wind(total_wind)
 
     # Creates the cinematic model
@@ -77,13 +77,12 @@ def run():
 
     rft = RFT(bl, tr, T, nx_rft, ny_rft, 10, mp, x_init, kernel='matlab', coords=coords)
 
-    #rft.compute()
+    rft.compute()
+    rft.dump_rff(output_dir)
 
     t_end = time.time()
     time_rft = t_end - t_start
     print(f"Done ({time_rft:.3f} s)")
-
-    #rft.dump_rff(output_dir)
 
     # Set a list of initial adjoint states for the shooting method
     nt_pmp = 3000
