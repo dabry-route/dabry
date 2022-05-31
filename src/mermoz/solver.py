@@ -300,15 +300,15 @@ class Solver:
             if k != 0:
                 d1 = self.dirs[k - 1]
                 d2 = self.dirs[k]
-                p1 = min(self.distance(p, self.x_target) for p in self.trajs[k - 1].points[:self.trajs[k - 1].last_index])
+                p1 = min(
+                    self.distance(p, self.x_target) for p in self.trajs[k - 1].points[:self.trajs[k - 1].last_index])
                 p2 = min(self.distance(p, self.x_target) for p in self.trajs[k].points[:self.trajs[k].last_index])
-                l1 = 0.5 #p1 / (p1 + p2)
-                l2 = 0.5 #1 - l1
+                l1 = 0.5  # p1 / (p1 + p2)
+                l2 = 0.5  # 1 - l1
                 new_dir = l1 * d1 + l2 * d2
                 heappush(self.shoot_queue,
-                         (     0.5 * (p1 + p2),
-                             #np.linalg.norm(self.x_target - self.x_init),
-                               (new_dir, k_max, d1, k - 1, 0, d2, k, 0)))
+                         (0.5 * (p1 + p2),
+                          (new_dir, k_max + k, d1, k - 1, 0, d2, k, 0)))
                 dirs_queue.append(new_dir)
         t_end = time.time()
         for e in self.shoot_queue:
@@ -318,11 +318,11 @@ class Solver:
         try:
             while len(self.shoot_queue) != 0:
                 self.iter += 1
-                print(f"Iteration {self.iter} - ", end='')
+                print(f"It {self.iter:>3} - ", end='')
                 _, obj = heappop(self.shoot_queue)
                 d, k, d_l, k_l, depth_l, d_u, k_u, depth_u = obj
                 my_depth = max(depth_l, depth_u) + 1
-                print(f'Shooting {d*180/pi:.1f} - Depth {my_depth} - ', end='')
+                print(f'Shoot {f"{d * 180 / pi:.1f}":>4} - Depth {my_depth:>3} - ', end='')
                 dirs_list.append(d)
                 bl = False
                 bu = False
@@ -338,6 +338,9 @@ class Solver:
                 lp = np.zeros(2)
                 lp[:] = traj.points[traj.last_index - 1]
                 self.last_points[k] = lp
+                d_target = self.distance(lp, self.x_target)
+                d_ref_dist = self.distance(self.x_init, self.x_target)
+                print(f'Crit {d_target:.1f}, {int(100 * d_target/d_ref_dist)}% - ', end='')
                 b, index = traj.optimal, (traj.last_index - 1)  # self.is_opti(traj)
                 if b:
                     print('Optimum found')
@@ -351,28 +354,44 @@ class Solver:
                 if my_depth < max_depth:
                     if self.distance(lp, lp_l) > self.neighb_ceil:
                         bl = True
-                        d1 = min(self.distance(p, self.x_target) for p in traj.points[:traj.last_index])
-                        d2 = min(self.distance(p, self.x_target) for p in self.trajs[k_l].points[:self.trajs[k_l].last_index])
+                        dist1 = min(self.distance(p, self.x_target) for p in traj.points[:traj.last_index])
+                        dist2 = min(self.distance(p, self.x_target) for p in
+                                 self.trajs[k_l].points[:self.trajs[k_l].last_index])
                         # d1 = self.distance(lp, self.x_target)
                         # d2 = self.distance(lp_l, self.x_target)
+                        w1 = 0.5
+                        w2 = 0.5
+                        # w1 = dist2 / (dist1 + dist2)
+                        # w2 = dist1 / (dist1 + dist2)
+
+                        new_dir = w1 * d_l + w2 * d
+                        new_prio = w1 * dist1 + w2 * dist2
 
                         heappush(self.shoot_queue,
-                                 (0.5 * (d1 + d2), (0.5 * (d + d_l), k_max, d_l, k_l, depth_l, d, k, my_depth)))
-                        dirs_queue.append(0.5 * (d + d_l))
+                                 (new_prio, (new_dir, k_max, d_l, k_l, depth_l, d, k, my_depth)))
+                        dirs_queue.append(new_dir)
                         k_max += 1
                     if self.distance(lp, lp_u) > self.neighb_ceil:
                         bu = True
-                        d1 = min(self.distance(p, self.x_target) for p in traj.points[:traj.last_index])
-                        d2 = min(self.distance(p, self.x_target) for p in
+                        dist1 = min(self.distance(p, self.x_target) for p in traj.points[:traj.last_index])
+                        dist2 = min(self.distance(p, self.x_target) for p in
                                  self.trajs[k_u].points[:self.trajs[k_u].last_index])
                         # d1 = self.distance(lp, self.x_target)
                         # d2 = self.distance(lp_u, self.x_target)
+                        w1 = 0.5
+                        w2 = 0.5
+                        # w1 = dist2 / (dist1 + dist2)
+                        # w2 = dist1 / (dist1 + dist2)
+
+                        new_dir = w1 * d + w2 * d_u
+                        new_prio = w1 * dist1 + w2 * dist2
+
                         heappush(self.shoot_queue,
-                                 (0.5 * (d1 + d2), (0.5 * (d + d_u), k_max, d, k, my_depth, d_u, k_u, depth_u)))
-                        dirs_queue.append(0.5 * (d + d_u))
+                                 (new_prio, (new_dir, k_max, d, k, my_depth, d_u, k_u, depth_u)))
+                        dirs_queue.append(new_dir)
                         k_max += 1
                     if bl or bu:
-                        print(f'Branching {"L" if bl else ""}{"U" if bu else ""}')
+                        print(f'Branching {("L" if bl else "") + ("U" if bu else ""):>2}')
                     else:
                         print('No branching')
                 else:
@@ -409,6 +428,7 @@ class Solver:
         dirs_list = []
         dirs_queue = []
         k = 0
+
         def f(d):
             nonlocal k
             dirs_list.append(d)
@@ -454,3 +474,55 @@ class Solver:
                 print(f'         Optimal time : {self.opti_time[k]}')
                 print(f'Optimal init. heading : {RAD_TO_DEG * self.opti_headings[k]}')
                 self.trajs[k].type = 'optimal'
+
+    def solve_global(self, gradient=False):
+
+        # Preprocessing
+        t_start = time.time()
+
+        def f(d):
+            shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
+                             N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                             factor=self.int_prec_factor, coords=self.mp.coords)
+            shoot.set_adjoint(self.adj_from_dir(d).reshape((2,)))
+            traj = shoot.integrate()
+            return self.distance(self.x_target, traj.points[-1])
+
+        t_end = time.time()
+
+        t_start2 = time.time()
+        # res = scipy.optimize.shgo(f, ((self.min_init_angle, self.max_init_angle),))
+        if gradient:
+            for d in self.dirs.values():
+                res = scipy.optimize.minimize(f, d, method='BFGS')
+                shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
+                                 N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                                 factor=self.int_prec_factor, coords=self.mp.coords)
+                shoot.set_adjoint(self.adj_from_dir(res.x[0]).reshape((2,)))
+                self.mp.trajs.append(shoot.integrate())
+        else:
+            res = scipy.optimize.shgo(f, ((self.min_init_angle, self.max_init_angle),))
+        t_end2 = time.time()
+
+        d_pre_proc = t_end - t_start
+        d_proc = t_end2 - t_start2
+        print(f'    * Pre-processing :  {d_pre_proc:.3f} s')
+        print(f'    * Processing      :  {d_proc:.3f} s')
+        print(f'    * Total           :  {d_proc + d_pre_proc:.3f} s')
+
+        if not gradient:
+            print(res)
+            for i in range(len(res.x)):
+                shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
+                                 N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                                 factor=self.int_prec_factor, coords=self.mp.coords)
+                shoot.set_adjoint(self.adj_from_dir(res.x[i]).reshape((2,)))
+                self.mp.trajs.append(shoot.integrate())
+
+    def shoot_init(self):
+        for d in self.dirs.values():
+            shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
+                             N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                             factor=self.int_prec_factor, coords=self.mp.coords)
+            shoot.set_adjoint(self.adj_from_dir(d).reshape((2,)))
+            self.mp.trajs.append(shoot.integrate())

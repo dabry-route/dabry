@@ -38,19 +38,22 @@ def run():
     gd = GeoData()
     # Initial point
     # x_init = DEG_TO_RAD * np.array((-60., 60.))
-    x_init = np.array(gd.get_coords('Paris', units='rad'))
+    x_init = np.array(gd.get_coords('Dakar', units='rad'))
 
     # Target
     # x_target = DEG_TO_RAD * np.array((-38, 50.))
-    x_target = np.array(gd.get_coords('New York', units='rad'))
+    x_target = np.array(gd.get_coords('Natal', units='rad'))
 
     # Time window upper bound
     # Estimated through great circle distance + 20 percent
-    T = 1.4 * geodesic_distance(x_init[0], x_init[1], x_target[0], x_target[1], mode='rad') / v_a
+    T = 1.7 * geodesic_distance(x_init[0], x_init[1], x_target[0], x_target[1], mode='rad') / v_a
 
-    total_wind = DiscreteWind()
+    total_wind = DiscreteWind(force_analytical=True)
     # total_wind.load('/home/bastien/Documents/data/wind/windy/NorthAtlantic.mz/data.h5')
-    total_wind.load('/home/bastien/Documents/data/wind/windy/NewYork-Paris-1.0-padded.mz/data.h5')
+    total_wind.load('/home/bastien/Documents/work/mermoz/output/example_wf_dn/wind.h5')
+    old_uv = np.zeros(total_wind.uv.shape)
+    old_uv[:] = total_wind.uv
+    total_wind.uv[:] = - old_uv
     mdfm.dump_wind(total_wind)
 
     # Creates the cinematic model
@@ -70,6 +73,7 @@ def run():
                 cos(x_init[1]) * sin(x_target[1]) - sin(x_init[1]) * cos(x_target[1]) * cos(x_target[0] - x_init[0])))
     print(f'auto_psi : {180/pi * auto_psi}')
     auto_psi = auto_psi + 2 * pi * (auto_psi < 0.)
+    auto_psi += pi
     psi_min = auto_psi - DEG_TO_RAD * 20.
     psi_max = auto_psi + DEG_TO_RAD * 20.
 
@@ -85,7 +89,7 @@ def run():
                     psi_min,
                     psi_max,
                     output_dir,
-                    N_disc_init=2,
+                    N_disc_init=10,
                     opti_ceil=opti_ceil,
                     neighb_ceil=neighb_ceil,
                     n_min_opti=1,
@@ -97,11 +101,9 @@ def run():
     solver.setup()
 
     t_start = time.time()
-    #solver.solve_fancy()
+    solver.solve_fancy()
     t_end = time.time()
     time_pmp = t_end - t_start
-
-    list_headings = DEG_TO_RAD * np.linspace(270, 280, 10)
 
     mp.load_feedback(TargetFB(mp.model.wind, v_a, x_target, mp.coords))
     mp.integrate_trajectory(x_init, DistanceSC(lambda x: geodesic_distance(x, x_target), opti_ceil), int_step=T / (nt_pmp - 1))

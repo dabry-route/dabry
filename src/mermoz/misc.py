@@ -1,5 +1,5 @@
 import sys
-from math import pi, acos, cos, sin
+from math import pi, acos, cos, sin, floor
 
 COORD_CARTESIAN = 'cartesian'
 COORD_GCS = 'gcs'
@@ -11,6 +11,30 @@ U_RAD = 'rad'
 UNITS = [U_METERS, U_DEG, U_RAD]
 DEG_TO_RAD = pi / 180.
 RAD_TO_DEG = 180. / pi
+
+
+def to_0_360(angle):
+    """
+    Bring angle to 0-360 domain
+    :param angle: Angle in degrees
+    :return: Same angle in 0-360
+    """
+    return angle - 360. * floor(angle / 360.)
+
+
+def rectify(a, b):
+    """
+    Bring angles to 0-720 and keep order
+    :param a: First angle in degrees
+    :param b: Second angle in degrees
+    :return: (a, b) but between 0 and 720 degrees
+    """
+    aa = to_0_360(a)
+    bb = to_0_360(b)
+    if aa > bb:
+        bb += 360.
+    return aa, bb
+
 
 TRAJ_PMP = 'pmp'
 TRAJ_INT = 'integral'
@@ -62,14 +86,22 @@ def geodesic_distance(*args, mode='rad'):
     else:
         print('Incorrect argument format', file=sys.stderr)
         exit(1)
-    factor = pi / 180 if mode == 'deg' else 1.
+    factor = DEG_TO_RAD if mode == 'deg' else 1.
     phi1 = lon1 * factor
     phi2 = lon2 * factor
     lambda1 = lat1 * factor
     lambda2 = lat2 * factor
+    delta_phi = abs(phi2 - phi1)
+    delta_phi -= int(delta_phi/pi)*pi
     # def rectify(phi):
     #     return phi + 2*pi if phi <= pi else -2*pi if phi > pi else 0.
     # phi1 = rectify(phi1)
     # phi2 = rectify(phi2)
-    res = acos(sin(lambda1) * sin(lambda2) + cos(lambda1) * cos(lambda2) * cos(phi2 - phi1)) * EARTH_RADIUS
+    tol = 1e-6
+    arg = sin(lambda1) * sin(lambda2) + cos(lambda1) * cos(lambda2) * cos(delta_phi)
+    if arg > 1. and arg - 1. < tol:
+        return 0.
+    if arg < -1. and -(arg + 1.) < tol:
+        return pi * EARTH_RADIUS
+    res = acos(sin(lambda1) * sin(lambda2) + cos(lambda1) * cos(lambda2) * cos(delta_phi)) * EARTH_RADIUS
     return res

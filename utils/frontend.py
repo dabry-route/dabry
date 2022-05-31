@@ -127,13 +127,13 @@ class FrontendHandler:
             self.display.load_params()
             self.display.setup(projection='lcc')
             self.display.draw_wind()
-            self.display.draw_trajs(nolabels=False)
-            self.display.draw_solver()
-            lon_ny, lat_ny = self.display.geodata.get_coords('New York')
-            lon_par, lat_par = self.display.geodata.get_coords('Paris')
-            self.display.map.drawgreatcircle(lon_ny, lat_ny, lon_par, lat_par, linewidth=1, color='b', alpha=0.4,
-                                             linestyle='--',
-                                             label='Great circle', zorder=4)
+            self.display.draw_trajs(nolabels=False, opti_only=True)
+            self.display.draw_solver(labeling=False)
+            # lon_ny, lat_ny = self.display.geodata.get_coords('New York')
+            # lon_par, lat_par = self.display.geodata.get_coords('Paris')
+            # self.display.map.drawgreatcircle(lon_ny, lat_ny, lon_par, lat_par, linewidth=1, color='b', alpha=0.4,
+            #                                  linestyle='--',
+            #                                  label='Great circle', zorder=4)
         elif self.case_name == 'example_solver_test':
             self.display.nocontrols = True
             self.display.set_title('Solver')
@@ -157,18 +157,18 @@ class FrontendHandler:
             self.display.draw_rff()
             self.display.draw_solver()
 
-            def on_plot_hover(event):
-                # Iterating over each data member plotted
-                for curve in self.display.mainax.get_lines():
-                    # Searching which data member corresponds to current mouse position
-                    if curve.contains(event)[0]:
-                        with h5py.File(self.display.trajs_fpath, 'r') as f:
-                            value = RAD_TO_DEG * f[str(curve.get_gid())]["controls"][0]
-                            self.display.ax_info.set_text(str(value))
-                            print(f'{value}')
-                        break
-
-            self.display.mainfig.canvas.mpl_connect('motion_notify_event', on_plot_hover)
+            # def on_plot_hover(event):
+            #     # Iterating over each data member plotted
+            #     for curve in self.display.mainax.get_lines():
+            #         # Searching which data member corresponds to current mouse position
+            #         if curve.contains(event)[0]:
+            #             with h5py.File(self.display.trajs_fpath, 'r') as f:
+            #                 value = RAD_TO_DEG * f[str(curve.get_gid())]["controls"][0]
+            #                 self.display.ax_info.set_text(str(value))
+            #                 print(f'{value}')
+            #             break
+            #
+            # self.display.mainfig.canvas.mpl_connect('motion_notify_event', on_plot_hover)
 
         elif self.case_name in ['example_solver_rad_gauss_1']:
             self.display.nocontrols = True
@@ -180,6 +180,46 @@ class FrontendHandler:
             self.display.draw_solver()
             self.display.draw_rff()
 
+        elif self.case_name in ['example_test_grib']:
+            self.display.nocontrols = True
+            self.display.set_title('Test grib')
+            self.display.load_params()
+            self.display.setup(projection='ortho')
+            self.display.draw_wind()
+            self.display.draw_trajs(nolabels=False, opti_only=False)
+            # self.display.draw_solver()
+            # self.display.draw_rff()
+
+        elif self.case_name in ['example_test_flatten']:
+            self.display.nocontrols = True
+            self.display.set_title('Test flatten')
+            self.display.load_params()
+            self.display.setup()
+            self.display.draw_wind()
+            self.display.draw_trajs(nolabels=False, opti_only=False)
+            # self.display.draw_solver()
+            self.display.draw_rff()
+
+        elif self.case_name in ['example_solver_dakar-natal']:
+            self.display.nocontrols = True
+            self.display.set_title('Optimal trajectory between Dakar and Natal')
+            self.display.load_params()
+            self.display.setup()
+            self.display.draw_wind()
+            self.display.draw_trajs(nolabels=False, opti_only=False)
+            self.display.draw_solver(labeling=False)
+            # self.display.draw_rff()
+
+        elif self.case_name in ['example_test_flatten_ref']:
+            self.display.nocontrols = True
+            self.display.set_title('Test flatten')
+            self.display.load_params()
+            self.display.setup(projection='ortho')
+            self.display.draw_wind()
+            self.display.draw_trajs(nolabels=False, opti_only=False)
+            # self.display.draw_solver()
+            self.display.draw_rff()
+
         elif 'solver' in self.case_name:
             print(f'Using default solver setup script for unknown case "{self.case_name}"', file=sys.stderr)
             self.display.nocontrols = True
@@ -187,8 +227,15 @@ class FrontendHandler:
             self.display.load_params()
             self.display.setup(projection='ortho')
             self.display.draw_wind()
-            self.display.draw_trajs(nolabels=False, opti_only=True)
+            self.display.draw_trajs(nolabels=False)
+            self.display.draw_rff()
             self.display.draw_solver()
+        elif 'wf' in self.case_name:
+            print(f'Using default wind field setup script for unknown case "{self.case_name}"', file=sys.stderr)
+            self.display.set_title('Wind field')
+            self.display.load_params()
+            self.display.setup()
+            self.display.draw_wind()
         else:
             print(f'Using default setup script for unknown case "{self.case_name}"', file=sys.stderr)
             self.display.nocontrols = True
@@ -203,15 +250,31 @@ class FrontendHandler:
         if mode == 'notebook':
             from ipywidgets import Dropdown
             from IPython.core.display import display
-            option_list = sorted(os.listdir(os.path.join('..', 'output')))
+            example_path = os.path.join('..', 'output')
+            cache_fp = os.path.join(example_path, '.frontend_cache.txt')
+            default_value = None
+            if os.path.exists(cache_fp):
+                with open(cache_fp, 'r') as f:
+                    default_value = f.readline()
+            option_list = sorted(os.listdir(example_path))
             new_ol = []
             for e in option_list:
                 if not e.startswith('example_'):
                     del e
                 else:
                     new_ol.append(e.split('example_')[1])
-            self.dd = Dropdown(description="Choose one:", options=new_ol)
-            self.dd.observe(lambda _: 0., names='value')
+            kwargs = {'description': "Choose one:",
+                      'options': new_ol}
+            if default_value is not None:
+                kwargs['value'] = default_value
+            self.dd = Dropdown(**kwargs)
+            def handler(change):
+                try:
+                    with open(cache_fp, 'w') as f:
+                        f.writelines(change['new'])
+                except KeyError:
+                    pass
+            self.dd.observe(handler, names='value')
             display(self.dd)
         else:
             class ns:
@@ -252,9 +315,11 @@ class FrontendHandler:
             params = json.load(f)
 
         opti_ceil = params['target_radius']
+        #print(opti_ceil)
 
         factor = DEG_TO_RAD if params['coords'] == COORD_GCS else 1.
         target = factor * np.array(params['point_target'])
+        #print(target)
 
         reach_time_nowind = params['geodesic_time']
         reach_time_pmp = float('inf')
@@ -265,8 +330,8 @@ class FrontendHandler:
                 reach_time = float('inf')
                 for k, p in enumerate(traj['data']):
                     p = factor * np.array(p)
-                    if params['coords'] == COORD_GCS and geodesic_distance(p, target, mode='rad') < opti_ceil \
-                            or np.linalg.norm(p - target) < opti_ceil:
+                    if params['coords'] == COORD_GCS and geodesic_distance(p, target, mode='rad') < 1.05*opti_ceil \
+                            or params['coords'] == COORD_CARTESIAN and np.linalg.norm(p - target) < 1.05*opti_ceil:
                         reach_time = traj["ts"][k]
                         break
                 if traj.attrs['type'] in ['pmp', 'optimal']:

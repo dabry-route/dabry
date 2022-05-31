@@ -1,16 +1,18 @@
 import os
+import sys
 
 import h5py
 import numpy as np
 from numpy import ndarray
 from math import exp, log
+from pyproj import Proj
 
 from mermoz.misc import *
 
 
 class Wind:
 
-    def __init__(self, value_func=None, d_value_func=None, descr=''):
+    def __init__(self, value_func=None, d_value_func=None, descr='', is_analytical=False):
         """
         Builds a windfield which is a smooth vector field of space
         value_func Function taking a point in space (ndarray) and returning the
@@ -26,6 +28,10 @@ class Wind:
         # 2 if directly dumpable
         self.is_dumpable = 1
 
+        # To remember if an analytical wind was discretized for
+        # display purposes.
+        self.is_analytical = is_analytical
+
     def __add__(self, other):
         """
         Add windfields
@@ -37,7 +43,8 @@ class Wind:
             raise TypeError(f"Unsupported type for addition : {type(other)}")
         return Wind(value_func=lambda x: self.value(x) + other.value(x),
                     d_value_func=lambda x: self.d_value(x) + other.d_value(x),
-                    descr=self.descr + ', ' + other.descr)
+                    descr=self.descr + ', ' + other.descr,
+                    is_analytical=self.is_analytical and other.is_analytical)
 
     def __mul__(self, other):
         """
@@ -52,7 +59,8 @@ class Wind:
             raise TypeError(f"Unsupported type for multiplication : {type(other)}")
         return Wind(value_func=lambda x: other * self.value(x),
                     d_value_func=lambda x: other * self.d_value(x),
-                    descr=self.descr)
+                    descr=self.descr,
+                    is_analytical=self.is_analytical)
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -90,7 +98,7 @@ class DiscreteWind(Wind):
     Handles wind loading from H5 format and derivative computation
     """
 
-    def __init__(self, interp='pwc'):
+    def __init__(self, interp='pwc', force_analytical=False):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
 
         self.is_dumpable = 2
@@ -120,6 +128,8 @@ class DiscreteWind(Wind):
         self.interp = interp
 
         self.clipping_tol = 1e-2
+
+        self.is_analytical = force_analytical
 
     def load(self, filepath, nodiff=False):
         """
@@ -162,13 +172,13 @@ class DiscreteWind(Wind):
 
         print('Done')
 
-    def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False):
+    def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, skip_coord_check=False):
         self.coords = coords
         self.units_grid = 'meters'
 
         # Checking consistency before loading
-        ensure_coords(self.coords)
         ensure_units(self.units_grid)
+        ensure_coords(self.coords)
         ensure_compatible(self.coords, self.units_grid)
 
         self.x_min = bl[0]
@@ -226,15 +236,23 @@ class DiscreteWind(Wind):
             return np.array([0., 0.])
 
         if self.interp == 'pwc':
-            return self.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
+            try:
+                return self.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
+            except ValueError:
+                return np.zeros(2)
 
         elif self.interp == 'linear':
+            # Find the tile to which requested point belongs
+            # A tile is a region between 4 known values of wind
             delta_x = (self.x_max - self.x_min) / (nx - 1)
             delta_y = (self.y_max - self.y_min) / (ny - 1)
             i = int((nx - 1) * xx)
             j = int((ny - 1) * yy)
+            # Tile bottom left corner x-coordinate
             xij = delta_x * i + self.x_min
+            # Point relative position in tile
             a = (x[0] - xij) / delta_x
+            # Tile bottom left corner y-coordinate
             yij = delta_y * j + self.y_min
             b = (x[1] - yij) / delta_y
             return (1 - b) * ((1 - a) * self.uv[0, i, j] + a * self.uv[0, i + 1, j]) + \
@@ -265,11 +283,11 @@ class DiscreteWind(Wind):
             return np.array([[0., 0.],
                              [0., 0.]])
         if self.interp == 'pwc':
-            i, j = int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)
             try:
+                i, j = int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)
                 return np.array([[self.d_u__d_x[0, i, j], self.d_u__d_y[0, i, j]],
                                  [self.d_v__d_x[0, i, j], self.d_v__d_y[0, i, j]]])
-            except IndexError:
+            except (ValueError, IndexError) as e:
                 return np.array([[0., 0.],
                                  [0., 0.]])
         elif self.interp == 'linear':
@@ -310,6 +328,87 @@ class DiscreteWind(Wind):
         self.d_v__d_y[:] = factor * 0.5 * (self.uv[:, 1:-1, 2:, 1] - self.uv[:, 1:-1, :-2, 1]) / (
                 self.grid[1:-1, 2:, 1] - self.grid[1:-1, :-2, 1])
 
+    def flatten(self, proj='plate-carree', **kwargs):
+        """
+        Flatten GCS-coordinates wind to euclidean space using given projection
+        :return The flattened wind
+        """
+        if self.coords != COORD_GCS:
+            print('Coordinates must be GCS to flatten', file=sys.stderr)
+            exit(1)
+        oldgrid = np.zeros(self.grid.shape)
+        oldgrid[:] = self.grid
+        oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
+        if proj == 'plate-carree':
+            center = 0.5 * (self.grid[0, 0] + self.grid[-1, -1])
+            newgrid = np.zeros(self.grid.shape)
+            newgrid[:] = EARTH_RADIUS * (self.grid - center)
+            self.grid[:] = newgrid
+            self.x_min = self.grid[0, 0, 0]
+            self.y_min = self.grid[0, 0, 1]
+            self.x_max = self.grid[-1, -1, 0]
+            self.y_max = self.grid[-1, -1, 1]
+            f_wind = DiscreteWind()
+            nx, ny, _ = self.grid.shape
+            bl = self.grid[0, 0]
+            tr = self.grid[-1, -1]
+            f_wind.load_from_wind(self, nx, ny, bl, tr, coords=COORD_CARTESIAN)
+        elif proj == 'ortho':
+            for p in ['lon_0', 'lat_0', 'width', 'height']:
+                if p not in kwargs.keys():
+                    print(f'Missing parameter {p} for {proj} flatten type', file=sys.stdin)
+                    exit(1)
+            lon_0 = kwargs['lon_0']
+            lat_0 = kwargs['lat_0']
+            width = kwargs['width']
+            height = kwargs['height']
+
+            nx, ny, _ = self.grid.shape
+
+            # Grid
+            proj = Proj(proj='ortho', lon_0=lon_0, lat_0=lat_0)
+            oldgrid = np.zeros(self.grid.shape)
+            oldgrid[:] = self.grid
+            newgrid = np.zeros((2, nx, ny))
+            newgrid[:] = proj(RAD_TO_DEG * self.grid[:, :, 0], RAD_TO_DEG * self.grid[:, :, 1])
+            self.grid[:] = newgrid.transpose((1, 2, 0))
+            oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
+            self.x_min = self.grid[:, :, 0].min()
+            self.y_min = self.grid[:, :, 1].min()
+            self.x_max = self.grid[:, :, 0].max()
+            self.y_max = self.grid[:, :, 1].max()
+
+            print(self.x_min, self.x_max, self.y_min, self.y_max)
+
+            # Wind
+            f_wind = DiscreteWind()
+            bl = np.array((-5e6, 5e6))  # self.grid[0, 0]
+            tr = np.array((-5e6, 5e6))  # self.grid[-1, -1]
+            f_wind.load_from_wind(self, nx, ny, bl, tr, coords=COORD_CARTESIAN)
+            # newuv = np.zeros(f_wind.uv.shape)
+            # newuv[:] = self._rotate_wind(f_wind.uv[:, :, :, 0],
+            #                           f_wind.uv[:, :, :, 1],
+            #                           oldgrid[:, :, 0],
+            #                           oldgrid[:, :, 1])
+            # f_wind.uv[:] = newuv
+        else:
+            print(f"Unknown projection type {proj}", file=sys.stderr)
+            exit(1)
+
+        self.grid[:] = oldgrid
+        self.x_min, self.y_min, self.x_max, self.y_max = oldbounds
+
+        f_wind.coords = COORD_CARTESIAN
+        f_wind.units_grid = 'meters'
+        f_wind.is_analytical = False
+        return f_wind
+
+    @staticmethod
+    def _rotate_wind(u, v, x, y):
+        print(u.shape)
+        print(v.shape)
+        return np.stack((u, v), axis=3)
+
 
 class TwoSectorsWind(Wind):
 
@@ -329,6 +428,7 @@ class TwoSectorsWind(Wind):
         self.v_w2 = v_w2
         self.x_switch = x_switch
         self.descr = f'Two sectors'  # ({self.v_w1:.2f} m/s, {self.v_w2:.2f} m/s)'
+        self.is_analytical = True
 
     def value(self, x):
         return np.array([0, self.v_w1 * np.heaviside(self.x_switch - x[0], 0.)
@@ -359,6 +459,7 @@ class UniformWind(Wind):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
         self.wind_vector = wind_vector
         self.descr = f'Uniform'  # ({np.linalg.norm(self.wind_vector):.2f} m/s, {math.floor(180 / np.pi * np.arctan2(self.wind_vector[1], self.wind_vector[0]))})'
+        self.is_analytical = True
 
     def value(self, x):
         return self.wind_vector
@@ -387,6 +488,7 @@ class VortexWind(Wind):
         self.omega = np.array([x_omega, y_omega])
         self.gamma = gamma
         self.descr = f'Vortex'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
+        self.is_analytical = True
 
     def value(self, x):
         r = np.linalg.norm(x - self.omega)
@@ -426,6 +528,7 @@ class RankineVortexWind(Wind):
         self.radius = radius
         self.zero_ceil = 1e-3
         self.descr = f'Rankine vortex'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
+        self.is_analytical = True
 
     def max_speed(self):
         return self.gamma / (self.radius * 2 * np.pi)
@@ -466,6 +569,31 @@ class RankineVortexWind(Wind):
                              [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
 
 
+# class VortexBarrierWind(Wind):
+#     def __init__(self,
+#                  x_omega: float,
+#                  y_omega: float,
+#                  gamma: float,
+#                  radius: float):
+#         """
+#         A vortex from potential theory, but add a wind barrier at a given radius
+#
+#         :param x_omega: x_coordinate of vortex center in m
+#         :param y_omega: y_coordinate of vortex center in m
+#         :param gamma: Circulation of the vortex in m^2/s. Positive is ccw vortex.
+#         :param radius: Radius of the barrier in m
+#         """
+#         super().__init__(value_func=self.value, d_value_func=self.d_value)
+#         self.x_omega = x_omega
+#         self.y_omega = y_omega
+#         self.omega = np.array([x_omega, y_omega])
+#         self.gamma = gamma
+#         self.radius = radius
+#         self.zero_ceil = 1e-3
+#         self.descr = f'Vortex barrier'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
+#         self.is_analytical = True
+
+
 class SourceWind(Wind):
 
     def __init__(self,
@@ -484,6 +612,7 @@ class SourceWind(Wind):
         self.y_omega = y_omega
         self.omega = np.array([x_omega, y_omega])
         self.flux = flux
+        self.is_analytical = True
 
     def value(self, x):
         r = np.linalg.norm(x - self.omega)
@@ -514,6 +643,7 @@ class LinearWind(Wind):
         self.gradient[:] = gradient
         self.origin[:] = origin
         self.value_origin[:] = value_origin
+        self.is_analytical = True
 
     def value(self, x):
         return self.gradient.dot(x - self.origin) + self.value_origin
@@ -541,6 +671,7 @@ class PointSymWind(Wind):
         self.gamma = gamma
         self.omega = omega
         self.mat = np.array([[gamma, -omega], [omega, gamma]])
+        self.is_analytical = True
 
     def value(self, x):
         return self.mat @ (x - self.center)
@@ -570,6 +701,7 @@ class DoubleGyreWind(Wind):
         self.kx = 2 * pi / x_wl
         self.ky = 2 * pi / y_wl
         self.ampl = ampl
+        self.is_analytical = True
 
     def value(self, x):
         xx = np.diag((self.kx, self.ky)) @ (x - self.center)
@@ -598,6 +730,7 @@ class RadialGaussWind(Wind):
         self.sdev = sdev
         self.v_max = v_max
         self.zero_ceil = 1e-3
+        self.is_analytical = True
 
     def ampl(self, r):
         if r < self.zero_ceil * self.radius:
@@ -625,3 +758,9 @@ class RadialGaussWind(Wind):
         nabla_e_r = np.array([[b ** 2 / r ** 3, - a * b / r ** 3],
                               [-a * b / r ** 3, a ** 2 / r ** 3]])
         return np.einsum('i,j->ij', e_r, dv) + self.ampl(r) * nabla_e_r
+
+
+if __name__ == '__main__':
+    wind = DiscreteWind(interp='linear')
+    wind.load('/home/bastien/Documents/data/wind/windy/Dakar-Natal-0.5-padded.mz/data.h5')
+    f_wind = wind.flatten()

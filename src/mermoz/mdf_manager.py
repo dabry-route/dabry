@@ -1,4 +1,6 @@
+import datetime
 import os
+import pygrib
 import sys
 
 import h5py
@@ -49,6 +51,16 @@ class MDFmanager:
                     dset = trajgroup.create_dataset('adjoints', (nt, 2), dtype='f8')
                     dset[:, :] = traj.adjoints
 
+    def _grib_date_to_unix(self, grib_filename):
+        date, hm = grib_filename.split('_')[2:4]
+        hours = int(hm[:2])
+        minutes = int(hm[2:])
+        year = int(date[:4])
+        month = int(date[4:6])
+        day = int(date[6:])
+        dt = datetime.datetime(year, month, day, hours, minutes)
+        return dt.timestamp()
+
     def print_trajs(self, filepath):
         with h5py.File(filepath, 'r') as f:
             for traj in f.values():
@@ -66,22 +78,75 @@ class MDFmanager:
             if nx is None or ny is None:
                 print(f'Please provide grid shape "nx=..., ny=..." to sample analytical wind "{wind}"')
                 exit(1)
-            dwind = DiscreteWind()
+            dwind = DiscreteWind(force_analytical=True)
             dwind.load_from_wind(wind, nx, ny, bl, tr, coords, nodiff=True)
         else:
             dwind = wind
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = dwind.coords
-            f.attrs['units_grid'] = U_DEG
+            f.attrs['units_grid'] = U_METERS if dwind.coords == COORD_CARTESIAN else U_DEG
+            f.attrs['analytical'] = dwind.is_analytical
             dset = f.create_dataset('data', (dwind.nt, dwind.nx, dwind.ny, 2), dtype='f8')
             dset[:] = dwind.uv
             dset = f.create_dataset('ts', (dwind.nt,), dtype='f8')
             dset[:] = dwind.ts
-            factor = (1 / DEG_TO_RAD if dwind.coords == COORD_GCS else 1.)
+            factor = (RAD_TO_DEG if dwind.coords == COORD_GCS else 1.)
             dset = f.create_dataset('grid', (dwind.nx, dwind.ny, 2), dtype='f8')
             dset[:] = factor * dwind.grid
+
+    def dump_wind_from_grib2(self, srcfile, bl, tr, dstname=None, coords=COORD_GCS):
+        if coords == COORD_CARTESIAN:
+            print('Cartesian conversion not handled yet', file=sys.stderr)
+            exit(1)
+        filename = self.wind_filename if dstname is None else dstname
+        filepath = os.path.join(self.output_dir, filename)
+        grib_name = os.path.basename(srcfile)
+        grbs = pygrib.open(srcfile)
+        grb = grbs.select(name='U component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
+        lon_b = rectify(bl[0], tr[0])
+        U, lats, lons = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
+        grb = grbs.select(name='V component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
+        V, _, _ = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
+        ny, nx = U.shape
+        print(f'nx : {nx}, ny : {ny}')
+
+        if lons.max() > 180.:
+            newlons = np.zeros(lons.shape)
+            newlons[:] = lons - 360.
+            lons[:] = newlons
+
+        newlats = np.zeros(lats.shape)
+        newlats = lats[::-1, :]
+        lats[:] = newlats
+
+        grid = np.zeros((nx, ny, 2))
+        grid[:] = np.transpose(np.stack((lons, lats)), (2, 1, 0))
+
+        with h5py.File(filepath, 'w') as f:
+            f.attrs['coords'] = coords
+            f.attrs['units_grid'] = U_DEG
+            f.attrs['analytical'] = False
+            dset = f.create_dataset('data', (1, nx, ny, 2), dtype='f8')
+            UV = np.zeros((nx, ny, 2))
+            UV[:] = np.transpose(np.stack((U, V)), (2, 1, 0))
+            dset[0, :] = UV
+            dset = f.create_dataset('ts', (1,), dtype='f8')
+            dset[0] = self._grib_date_to_unix(grib_name)
+            factor = 1. # (RAD_TO_DEG if coords == COORD_GCS else 1.)
+            dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
+            dset[:] = factor * grid
+
+        return nx, ny
 
 
 if __name__ == '__main__':
     mdfm = MDFmanager()
-    mdfm.print_trajs('/home/bastien/Documents/work/mermoz/output/example_front_tracking2/trajectories.h5')
+    # mdfm.print_trajs('/home/bastien/Documents/work/mermoz/output/example_front_tracking2/trajectories.h5')
+    mdfm.set_output_dir('/home/bastien/Documents/work/test')
+    data_dir = '/home/bastien/Documents/data/other'
+    # data_filepath = os.path.join(data_dir, 'gfs_3_20090823_0600_000.grb2')
+    data_filepath = os.path.join(data_dir, 'gfs_4_20220324_1200_000.grb2')
+    bl = np.array((-50., -40.))
+    tr = np.array((10., 40.))
+    mdfm.dump_wind_from_grib2(data_filepath, bl, tr)
+

@@ -1,6 +1,7 @@
 /
 ['coords' : {'cartesian', 'gcs'},
- 'units_grid' : {'meters', 'degrees', 'rad'}]
+ 'units_grid' : {'meters', 'degrees', 'rad'},
+ 'analytical' : {True, False}]
 	data : (nt, nx, ny, 2)
 	ts : (nt, )
 	grid : (nx, ny, 2)

@@ -3,7 +3,8 @@ import random
 import numpy as np
 from tqdm import tqdm
 
-from mermoz.wind import VortexWind, RadialGaussWind, RankineVortexWind, DoubleGyreWind, PointSymWind
+from mermoz.wind import VortexWind, RadialGaussWind, RankineVortexWind, DoubleGyreWind, PointSymWind, DiscreteWind
+from mermoz.misc import *
 
 
 class WindTester:
@@ -72,9 +73,13 @@ if __name__ == '__main__':
     # wind = VortexWind(x_center, y_center, radius)
     # wind = RankineVortexWind(x_center, y_center, 20., radius)
     # wind = PointSymWind(x_center, y_center, 20. / l_factor, 10/ l_factor)
-    # wind = DoubleGyreWind(x_center, y_center, (x_max - x_min)/5., (y_max - y_min)/5., 20.)
-    wind = RadialGaussWind(x_center, y_center, radius, 1/3 * np.log(0.5), 20.)
+    wind2 = DoubleGyreWind(x_center, y_center, (x_max - x_min)/5., (y_max - y_min)/5., 20.)
+    # wind2 = RadialGaussWind(x_center, y_center, radius, 1/3 * np.log(0.5), 20.)
+    wind = DiscreteWind(interp='linear')
+    bl = np.array((x_min, y_min))
+    tr = np.array((x_max, y_max))
+    wind.load_from_wind(wind2, 101, 101, bl, tr, coords=COORD_CARTESIAN)
 
-    tester = WindTester(x_min, x_max, y_min, y_max, wind)
+    tester = WindTester(x_min, x_max, y_min, y_max, wind, eps=1e-7)
     tester.setup()
     tester.test()

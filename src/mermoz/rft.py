@@ -177,7 +177,7 @@ class RFT:
     Reachability front tracker
     """
 
-    def __init__(self, bl, tr, max_time, nx, ny, mp: MermozProblem, x_init, nt=None, kernel='base',
+    def __init__(self, bl, tr, max_time, nx, ny, nt, mp: MermozProblem, x_init, kernel='base',
                  method='sethian', coords=COORD_CARTESIAN):
         """
         :param bl: Grid bottom left point
@@ -185,9 +185,9 @@ class RFT:
         :param max_time: Time window upper bound
         :param nx: Number of points in the x-axis direction
         :param ny: Number of points in the y-axis direction
+        :param nt: Number of points in the time direction.
         :param mp: The mermoz problem instance containing the analytic wind
         :param x_init: The problem starting point
-        :param nt: Number of points in the time direction. Unused with matlab kernel.
         :param kernel: 'base' for Python implementation of level set methods or 'matlab'
         to use ToolboxLS (https://www.cs.ubc.ca/~mitchell/ToolboxLS)
         :param method: With 'base' kernel, select numerical scheme ('sethian' or 'lolla')
@@ -267,7 +267,8 @@ class RFT:
                 "x_init": self.x_init[0],
                 "y_init": self.x_init[1],
                 "airspeed": self.mp.model.v_a,
-                "max_time": self.max_time
+                "max_time": self.max_time,
+                "nt_rft": self.nt
             }
             with open(os.path.join(self.matlabLS_path, 'args.json'), 'w') as f:
                 json.dump(args, f)
