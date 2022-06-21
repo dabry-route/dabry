@@ -83,7 +83,7 @@ def run():
                     neighb_ceil=1e6/60,
                     n_min_opti=1,
                     adaptive_int_step=False,
-                    N_iter=nt_pmp)
+                    nt_pmp=nt_pmp)
     solver.setup()
     solver.solve_fancy()
 

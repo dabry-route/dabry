@@ -23,13 +23,22 @@ class MDFmanager:
     def set_output_dir(self, output_dir):
         self.output_dir = output_dir
 
+    def clean_output_dir(self):
+        for filename in os.listdir(self.output_dir):
+            os.remove(os.path.join(self.output_dir, filename))
+
     def dump_trajs(self, traj_list, filename=None):
         filename = self.trajs_filename if filename is None else filename
         filepath = os.path.join(self.output_dir, filename)
-        with h5py.File(filepath, "w") as f:
+        with h5py.File(filepath, "a") as f:
+            index = 0
+            if len(f.keys()) != 0:
+                index = int(max(f.keys(), key=int)) + 1
+            print(f.keys())
+            print(str(index))
             for i, traj in enumerate(traj_list):
                 nt = traj.timestamps.shape[0]
-                trajgroup = f.create_group(str(i))
+                trajgroup = f.create_group(str(index + i))
                 trajgroup.attrs['type'] = traj.type
                 trajgroup.attrs['coords'] = traj.coords
                 trajgroup.attrs['interrupted'] = traj.interrupted
@@ -86,6 +95,11 @@ class MDFmanager:
             f.attrs['coords'] = dwind.coords
             f.attrs['units_grid'] = U_METERS if dwind.coords == COORD_CARTESIAN else U_DEG
             f.attrs['analytical'] = dwind.is_analytical
+            if dwind.lon_0 is not None:
+                f.attrs['lon_0'] = dwind.lon_0
+            if dwind.lat_0 is not None:
+                f.attrs['lat_0'] = dwind.lat_0
+            f.attrs['unstructured'] = dwind.unstructured
             dset = f.create_dataset('data', (dwind.nt, dwind.nx, dwind.ny, 2), dtype='f8')
             dset[:] = dwind.uv
             dset = f.create_dataset('ts', (dwind.nt,), dtype='f8')

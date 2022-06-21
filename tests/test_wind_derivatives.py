@@ -1,5 +1,5 @@
 import random
-
+import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
@@ -41,8 +41,13 @@ class WindTester:
         random.seed(self.seed)
         passed = 0
         failed = 0
+        points = np.zeros((self.N_samples, 2))
+        c = np.zeros((self.N_samples, 4))
+        red = np.array((1.0, 0., 0., 1.))
+        green = np.array((0., 1.0, 0., 1.))
         for i in tqdm(range(self.N_samples)):
             p = self.r_point()
+            points[i, :] = p
             dwind = self.wind.d_value(p)
             dx = np.array([self.eps_x, 0.])
             dy = np.array([0., self.eps_y])
@@ -55,13 +60,19 @@ class WindTester:
 
             if err_x > self.rtol * self.wind_mean_norm or err_y > self.rtol * self.wind_mean_norm:
                 print('Incorrect gradient')
-                print(f'From function : {dwind}')
-                print(f'    From test : {dwind_est}')
+                print(f'At point :\n{p}')
+                print(f'From function :\n{dwind}')
+                print(f'    From test :\n{dwind_est}')
+                c[i, :] = red
                 failed += 1
             else:
+                c[i, :] = green
                 passed += 1
 
         print(f'Done. ({passed} passed, {failed} failed)')
+
+        plt.scatter(points[:, 0], points[:, 1], s=3., c=c)
+        plt.show()
 
 
 if __name__ == '__main__':
@@ -76,10 +87,17 @@ if __name__ == '__main__':
     wind2 = DoubleGyreWind(x_center, y_center, (x_max - x_min)/5., (y_max - y_min)/5., 20.)
     # wind2 = RadialGaussWind(x_center, y_center, radius, 1/3 * np.log(0.5), 20.)
     wind = DiscreteWind(interp='linear')
-    bl = np.array((x_min, y_min))
-    tr = np.array((x_max, y_max))
-    wind.load_from_wind(wind2, 101, 101, bl, tr, coords=COORD_CARTESIAN)
+    total_wind = DiscreteWind(force_analytical=True, interp='linear')
+    total_wind.load('/home/bastien/Documents/work/mermoz/output/example_wf_san-juan_dublin/wind.h5')
+    x_min, x_max = -1. * l_factor, 3 * l_factor
+    y_min, y_max = -1. * l_factor, 3 * l_factor
 
-    tester = WindTester(x_min, x_max, y_min, y_max, wind, eps=1e-7)
+    tester = WindTester(total_wind.x_min,
+                        total_wind.x_max,
+                        total_wind.y_min,
+                        total_wind.y_max,
+                        total_wind,
+                        eps=1e-8,
+                        rtol=1e-4)
     tester.setup()
     tester.test()

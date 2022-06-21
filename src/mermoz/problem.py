@@ -1,4 +1,5 @@
 import numpy as np
+from mpl_toolkits.basemap import Basemap
 from numpy import ndarray
 
 from mermoz.feedback import Feedback
@@ -6,7 +7,7 @@ from mermoz.integration import IntEulerExpl
 from mermoz.mdf_manager import MDFmanager
 from mermoz.model import Model
 from mermoz.stoppingcond import StoppingCond, TimedSC
-from mermoz.visual import Visual
+from mermoz.misc import *
 
 
 class MermozProblem:
@@ -24,29 +25,33 @@ class MermozProblem:
                  T=0.,
                  visual_mode="full",
                  axes_equal=True,
-                 autodomain=True):
+                 autodomain=True,
+                 mask_land=True):
         self.model = model
 
         self.coords = coords
+        self.bm = None
         if not domain:
             if not autodomain:
                 self.domain = lambda _: True
             else:
                 # Bound computation domain on wind grid limits
                 wind = self.model.wind
-                bl = (wind.grid[0, 0, 0], wind.grid[0, 0, 1])
-                tr = (wind.grid[-1, -1, 0], wind.grid[-1, -1, 1])
-                self.domain = lambda x: bl[0] < x[0] < tr[0] and bl[1] < x[1] < tr[1]
+                bl = (wind.x_min, wind.y_min)
+                tr = (wind.x_max, wind.y_max)
+                if self.coords == COORD_GCS and mask_land:
+                    factor = 1. if wind.units_grid == U_RAD else RAD_TO_DEG
+                    self.bm = Basemap(llcrnrlon=factor * bl[0],
+                                      llcrnrlat=factor * bl[1],
+                                      urcrnrlon=factor * tr[0],
+                                      urcrnrlat=factor * tr[1],
+                                      projection='cyl', resolution='c')
+                self.domain = lambda x: bl[0] < x[0] < tr[0] and bl[1] < x[1] < tr[1] and \
+                                        (self.bm is None or not self.bm.is_land(factor * x[0], factor * x[1]))
         else:
             self.domain = domain
         self._feedback = None
         title = "$v_a=" + str(self.model.v_a) + "\:m/s$, $T=" + str(T) + "\:s$"
-        self.display = Visual(visual_mode,
-                              2,
-                              1,
-                              lambda x: self.model.wind.value(x) / self.model.v_a,
-                              title=title,
-                              axes_equal=axes_equal)
         self.trajs = []
 
     def __str__(self):

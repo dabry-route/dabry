@@ -82,7 +82,7 @@ class ParamsSummary:
             'airspeed': sv.mp.model.v_a,
             'point_target': (factor * sv.x_target[0], factor * sv.x_target[1]),
             'target_radius': sv.opti_ceil,
-            'nt_pmp': sv.N_iter,
+            'nt_pmp': sv.nt_pmp,
         }
         try:
             self.params['bl_wind'] = (factor * total_wind.grid[0, 0, 0], factor * total_wind.grid[0, 0, 1])
@@ -92,11 +92,12 @@ class ParamsSummary:
             self.params['date_wind'] = total_wind.ts[0]
         except AttributeError:
             pass
-        if sv.mp.coords == COORD_GCS:
-            self.params['geodesic_time'] = geodesic_distance(sv.x_init[0], sv.x_init[1], sv.x_target[0], sv.x_target[1],
-                                                             mode='rad') / sv.mp.model.v_a
-        else:
-            self.params['geodesic_time'] = np.linalg.norm(sv.x_init - sv.x_target) / sv.mp.model.v_a
+        try:
+            self.params['nt_rft_eff'] = sv.nt_rft_eff
+        except AttributeError:
+            pass
+        self.params['geodesic_time'] = distance(sv.x_init, sv.x_target, coords=sv.mp.coords) / sv.mp.model.v_a
+        self.params['geodesic_length'] = distance(sv.x_init, sv.x_target, coords=sv.mp.coords)
 
     def process_params(self):
         params = self.params

@@ -15,11 +15,12 @@ from mermoz.misc import *
 
 class FrontendHandler:
 
-    def __init__(self):
+    def __init__(self, mode='notebook'):
         self.display = None
         self.case_name = None
         self.dd = None
         self.output_path = None
+        self.mode = mode
         self.pp_params = {}
 
     def configure(self, opti_only=False):
@@ -195,7 +196,7 @@ class FrontendHandler:
             self.display.set_title('Test flatten')
             self.display.load_params()
             self.display.setup()
-            self.display.draw_wind()
+            self.display.draw_wind(wind_nointerp=True)
             #self.display.draw_trajs(nolabels=False, opti_only=False)
             # self.display.draw_solver()
             self.display.draw_rff()
@@ -215,7 +216,17 @@ class FrontendHandler:
             self.display.set_title('Test flatten')
             self.display.load_params()
             self.display.setup(projection='ortho')
-            self.display.draw_wind()
+            self.display.draw_wind(wind_nointerp=True)
+            self.display.draw_trajs(nolabels=False, opti_only=False)
+            # self.display.draw_solver()
+            self.display.draw_rff()
+
+        elif self.case_name in ['example_solver_san-juan_dublin_ortho']:
+            self.display.nocontrols = True
+            self.display.set_title('Test flatten')
+            self.display.load_params()
+            self.display.setup()
+            self.display.draw_wind(wind_nointerp=True)
             self.display.draw_trajs(nolabels=False, opti_only=False)
             # self.display.draw_solver()
             self.display.draw_rff()
@@ -246,8 +257,11 @@ class FrontendHandler:
             self.display.draw_trajs(nolabels=True)
             self.display.draw_rff()
 
-    def select_example(self, mode='notebook'):
-        if mode == 'notebook':
+    def select_example(self, *args):
+        if self.mode == 'user':
+            self.output_path = args[0]
+            self.case_name = os.path.basename(self.output_path)
+        elif self.mode == 'notebook':
             from ipywidgets import Dropdown
             from IPython.core.display import display
             example_path = os.path.join('..', 'output')
@@ -281,30 +295,50 @@ class FrontendHandler:
                 def __init__(self, value):
                     self.__dict__.update(value=value)
 
-            self.dd = ns(
-                os.path.basename(easygui.diropenbox(default=os.path.join('..', 'output'))).split('example_')[1])
 
-    def run_frontend(self, mode='default', ex_name=None, noparams=True, opti_only=False):
-        if mode == 'default':
-            if ex_name is None:
-                self.output_path = easygui.diropenbox(default=os.path.join('..', 'output'))
-                if self.output_path is None:
-                    exit(0)
-            else:
-                self.output_path = os.path.join('..', 'output', ex_name)
-            self.case_name = os.path.basename(self.output_path)
-        elif mode == 'notebook':
+            try:
+                cache_fp = os.path.join('..', 'output', '.frontend_cache2.txt')
+                sel_dir = easygui.diropenbox(default=os.path.join('..', 'output'))
+                if sel_dir in os.path.abspath(os.path.join('..', 'output')):
+                    print('To open example, double-click directory. Opening last file.')
+                    with open(cache_fp, 'r') as f:
+                        sel_dir = f.readline()
+                        print(sel_dir)
+                    self.dd = ns(os.path.basename(sel_dir).split('example_')[1])
+                else:
+                    self.dd = ns(os.path.basename(sel_dir).split('example_')[1])
+                    with open(cache_fp, 'w') as f:
+                        f.writelines(sel_dir)
+
+            except IndexError:
+                print('Directory shall start with "example_"', file=sys.stderr)
+                exit(1)
+
+
+    def run_frontend(self, ex_name=None, noparams=True, opti_only=False, noshow=False):
+        # if self.mode == 'default':
+        #     if ex_name is None:
+        #         self.output_path = easygui.diropenbox(default=os.path.join('..', 'output'))
+        #         if self.output_path is None:
+        #             exit(0)
+        #     else:
+        #         self.output_path = os.path.join('..', 'output', ex_name)
+        #     self.case_name = os.path.basename(self.output_path)
+        if self.mode in ['notebook', 'default']:
             self.output_path = os.path.join('..', 'output', f'example_{self.dd.value}')
             self.case_name = os.path.basename(self.output_path)
+        elif self.mode == 'user':
+            pass
         else:
-            print(f'Unknown mode {mode}', file=sys.stderr)
+            print(f'Unknown mode {self.mode}', file=sys.stderr)
             exit(1)
 
         self.display = Display()
         self.display.set_output_path(self.output_path)
         self.configure(opti_only=opti_only)
         self.display.update_title()
-        self.display.show(noparams=noparams)
+        if not noshow:
+            self.display.show(noparams=noparams)
 
     def show_params(self):
         from IPython.core.display import HTML
@@ -322,57 +356,160 @@ class FrontendHandler:
         #print(target)
 
         reach_time_nowind = params['geodesic_time']
+
         reach_time_pmp = float('inf')
+        length_pmp = float('inf')
         reach_time_int = []
+        length_int = []
+
+        self.traj_stats = []
 
         with h5py.File(os.path.join('..', 'output', f'example_{self.dd.value}', 'trajectories.h5')) as f:
             for i, traj in enumerate(f.values()):
+                coords = traj.attrs['coords']
+                last_index = traj.attrs['last_index']
                 reach_time = float('inf')
+                notfound = True
+                last_p = np.zeros(2)
+                length = 0.
                 for k, p in enumerate(traj['data']):
-                    p = factor * np.array(p)
-                    if params['coords'] == COORD_GCS and geodesic_distance(p, target, mode='rad') < 1.05*opti_ceil \
-                            or params['coords'] == COORD_CARTESIAN and np.linalg.norm(p - target) < 1.05*opti_ceil:
-                        reach_time = traj["ts"][k]
+                    if k >= last_index:
                         break
+                    p = factor * np.array(p)
+                    if k > 0:
+                        length += distance(p, last_p, coords=coords)
+                    if notfound and distance(p, target, coords=coords) < 1.05*opti_ceil:
+                        reach_time = traj["ts"][k]
+                        notfound = False
+                    last_p[:] = p
                 if traj.attrs['type'] in ['pmp', 'optimal']:
+                    # If traj is an extremal, only look for the best one
                     reach_time_pmp = min(reach_time_pmp, reach_time)
+                    length_pmp = min(length_pmp, length)
                 else:
-                    reach_time_int.append(reach_time)
+                    # If traj is a regular integral, add it straightforward
+                    tst = {
+                        'id': k,
+                        'name': 'integral',
+                        'duration': reach_time,
+                        'length': length
+                    }
+                    self.traj_stats.append(tst)
+
+        # Add best extremal
+        tst = {
+            'id': -1,
+            'name': 'best extremal',
+            'duration': reach_time_pmp,
+            'length': length_pmp
+        }
+        self.traj_stats.append(tst)
+
+        # Add the no-wind geodesic
+        tst = {
+            'id': -2,
+            'name': 'no-wind geodesic',
+            'duration': params['geodesic_time'],
+            'length': params['geodesic_length']
+        }
+        self.traj_stats.append(tst)
 
         self.pp_params['reach_time_geodesic'] = reach_time_nowind
         self.pp_params['reach_time_pmp'] = reach_time_pmp
+        self.pp_params['length_pmp'] = length_pmp
         for i, rti in enumerate(reach_time_int):
             self.pp_params[f'reach_time_int_{i}'] = rti
+            self.pp_params[f'length_int_{i}'] = length_int[i]
 
-    def show_pp(self, units='hours'):
-        reach_time_nowind = self.pp_params['reach_time_geodesic']
-        reach_time_pmp = self.pp_params['reach_time_pmp']
+    # def show_pp(self, units='hours'):
+    #     reach_time_nowind = self.pp_params['reach_time_geodesic']
+    #     reach_time_pmp = self.pp_params['reach_time_pmp']
+    #     length_pmp = self.pp_params['length_pmp']
+    #
+    #     def ft(value):
+    #         # value is expected in seconds
+    #         if units == 'hours':
+    #             return f'{value / 3600.:.2f} h'
+    #         elif units == 'seconds':
+    #             return f'{value:.2f} s'
+    #         else:
+    #             print(f'Unknown units "{units}"', file=sys.stderr)
+    #             exit(1)
+    #
+    #     def fl(value):
+    #         # value expected in meters
+    #         if value > 1000.:
+    #             return f'{value / 1000.:.2f} km'
+    #         return f'{value:.2f} m'
+    #
+    #     print(f'   No wind geodesic : {ft(reach_time_nowind)}')
+    #     print(f'     Reach time PMP : {ft(reach_time_pmp)}')
+    #     print(f'         Length PMP : {fl(length_pmp)}')
+    #     i = 0
+    #     while True:
+    #         try:
+    #             reach_time_int = self.pp_params[f'reach_time_int_{i}']
+    #             length_int = self.pp_params[f'length_int_{i}']
+    #             print(f' Reach time int. {i:<2} : {ft(reach_time_int)}')
+    #             print(f'     Length int. {i:<2} : {fl(length_int)}')
+    #             print(f'     PMP saved time : {(reach_time_pmp - reach_time_int) / reach_time_int * 100:.1f} %')
+    #             i += 1
+    #         except KeyError:
+    #             break
 
+    def show_pp(self):
         def ft(value):
             # value is expected in seconds
-            if units == 'hours':
+            if value > 4000.:
                 return f'{value / 3600.:.2f} h'
-            elif units == 'seconds':
-                return f'{value:.2f} s'
-            else:
-                print(f'Unknown units "{units}"', file=sys.stderr)
-                exit(1)
+            return f'{value:.2f} s'
 
-        print(f'   No wind geodesic : {ft(reach_time_nowind)}')
-        print(f'     Reach time PMP : {ft(reach_time_pmp)}')
-        i = 0
-        while True:
-            try:
-                reach_time_int = self.pp_params[f'reach_time_int_{i}']
-                print(f' Reach time int. {i:<2} : {ft(reach_time_int)}')
-                print(f'     PMP saved time : {(reach_time_pmp - reach_time_int) / reach_time_int * 100:.1f} %')
-                i += 1
-            except KeyError:
-                break
+        def fl(value):
+            # value expected in meters
+            if value > 1000.:
+                return f'{value / 1000.:.2f} km'
+            return f'{value:.2f} m'
+
+        s = "| Id | Name | Duration | Length | Mean groundspeed | \n|---|:---:|---|---|---|\n"
+        for tst in self.traj_stats:
+            s += f"| {tst['id']} | {tst['name']} | {ft(tst['duration'])} | {fl(tst['length'])} | {3.6 * tst['length']/tst['duration']:.2f} km/h |\n"
+        from IPython.core.display import display, Markdown, HTML
+        #display(HTML("<style>.rendered_html { font-size: 30px; }</style>"))
+        display(Markdown(s))
+
 
 
 if __name__ == '__main__':
-    fh = FrontendHandler()
-    fh.select_example(mode='runtime')
+    fh = FrontendHandler(mode='default')
+    fh.select_example()
     fh.run_frontend()
     fh.post_processing()
+    # from plotly.tools import mpl_to_plotly
+    # import dash
+    # import dash_core_components as dcc
+    # import dash_html_components as html
+    #
+    # fh = FrontendHandler(mode='default')
+    # fh.select_example()
+    # fh.run_frontend(noshow=True)
+    #
+    # plotly_fig = mpl_to_plotly(fh.display.mainfig)
+    #
+    # app = dash.Dash(__name__)  # (3)
+    # app.layout = html.Div(children=[
+    #     html.H1(children=f'Life expectancy vs GDP per capita ()',
+    #             style={'textAlign': 'center', 'color': '#7FDBFF'}),  # (5)
+    #     dcc.Graph(
+    #         id='graph1',
+    #         figure=plotly_fig
+    #     ),  # (6)
+    #     html.Div(children=f'''
+    #                                     The graph above shows relationship between life expectancy and
+    #                                     GDP per capita for year. Each continent data has its own
+    #                                     colour and symbol size is proportionnal to country population.
+    #                                     Mouse over for details.
+    #                                 '''),  # (7)
+    # ]
+    # )
+    #
+    # app.run_server(debug=True)  # (8)

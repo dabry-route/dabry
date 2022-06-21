@@ -43,7 +43,7 @@ def run():
 
     # Load wind
     total_wind = DiscreteWind(force_analytical=True)
-    total_wind.load(os.path.join(wind_data_dir, 'wind.h5'), unstructured=True)
+    total_wind.load(os.path.join(wind_data_dir, 'wind.h5'))
     mdfm.dump_wind(total_wind)
 
     # Creates the cinematic model

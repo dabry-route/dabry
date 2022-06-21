@@ -116,12 +116,14 @@ class FixedHeadingFB(Feedback):
         res += self.theta_0
         return res
 
+
 class GreatCircleFB(Feedback):
     """
     Control law for GCS problems only.
     Tries to stay on a great circle when wind allows it.
     """
     pass
+
 
 class TargetFB(Feedback):
     """
@@ -141,12 +143,12 @@ class TargetFB(Feedback):
         if self.coords == COORD_GCS:
             # Got to 3D cartesian assuming spherical earth
             lon, lat = x[0], x[1]
-            X3 = EARTH_RADIUS * np.array((cos(lon)*cos(lat), sin(lon)*cos(lat), sin(lat)))
+            X3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
             # Vector normal to earth at position
             e_phi = np.array((-sin(lon), cos(lon), 0.))
-            e_lambda = np.array((-sin(lat)*cos(lon), -sin(lat)*sin(lon), cos(lat)))
+            e_lambda = np.array((-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat)))
             lon, lat = self.target[0], self.target[1]
-            X_target3 = EARTH_RADIUS * np.array((cos(lon)*cos(lat), sin(lon)*cos(lat), sin(lat)))
+            X_target3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
             e_target = np.zeros(2)
             e_target[0] = (X_target3 - X3) @ e_phi
             e_target[1] = (X_target3 - X3) @ e_lambda
@@ -170,9 +172,8 @@ class TargetFB(Feedback):
             res = np.arcsin(r)
         res += atan2(e_target[1], e_target[0])
         if self.coords == COORD_GCS:
-            res = pi/2 - res
+            res = pi / 2 - res
         return res
-
 
 
 class WindAlignedFB(Feedback):

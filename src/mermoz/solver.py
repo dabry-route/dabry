@@ -1,5 +1,6 @@
 import math
 import os
+import sys
 import time
 import numpy as np
 import scipy.optimize
@@ -31,18 +32,26 @@ class Solver:
                  opti_ceil=5e-2,
                  n_min_opti=1,
                  adaptive_int_step=True,
-                 N_iter=1000):
+                 nt_pmp=1000):
         self.mp = mp
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
+        if not self.mp.domain(self.x_init):
+            print(f'Solver error : x_init ({x_init}) is out of problem domain', file=sys.stderr)
+            exit(1)
         self.x_target = np.zeros(2)
         self.x_target[:] = x_target
+        if not self.mp.domain(self.x_target):
+            print(f'Solver error : x_target ({x_target}) is out of problem domain', file=sys.stderr)
+            exit(1)
         self.T = T
         self.N_disc_init = N_disc_init
         self.neighb_ceil = neighb_ceil
+        # When far from target point
+        self.neighb_ceil_large = 10. * neighb_ceil
         self.int_prec_factor = int_prec_factor
         self.adaptive_int_step = adaptive_int_step
-        self.N_iter = N_iter
+        self.nt_pmp = nt_pmp
         self.opti_ceil = opti_ceil
 
         self.output_dir = output_dir
@@ -99,12 +108,7 @@ class Solver:
         self.distances_queue.append(t)
 
     def distance(self, x1, x2):
-        if self.mp.coords == COORD_GCS:
-            # x1, x2 shall be vectors (lon, lat) in radians
-            return geodesic_distance(x1, x2)
-        else:
-            # x1, x2 shall be cartesian vectors in meters
-            return np.linalg.norm(x1 - x2)
+        return distance(x1, x2, coords=self.mp.coords)
 
     def is_opti(self, traj: Trajectory):
         b = False
@@ -141,7 +145,7 @@ class Solver:
                          f'{self.min_init_angle:.3f}, {self.max_init_angle:.3f}, {self.N_disc_init}')
         s += format_line(ln['mode'],
                          'Adaptive integration step' if self.adaptive_int_step else 'Fixed integration step')
-        s += format_line(ln['steps'], self.N_iter)
+        s += format_line(ln['steps'], self.nt_pmp)
         s += format_line(ln['neighb_ceil'], f'{self.neighb_ceil:.2e}')
         s += format_line(ln['int_prec_factor'], f'{self.int_prec_factor:.2e}')
         return s
@@ -170,7 +174,7 @@ class Solver:
             for k, d in self.dirs.items():
                 if self.to_shoot[k]:
                     shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
-                                     N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                                     N_iter=self.nt_pmp, domain=self.mp.domain, fail_on_maxiter=True,
                                      factor=self.int_prec_factor)
                     shoot.set_adjoint(np.array([-np.cos(d), -np.sin(d)]))
                     traj = shoot.integrate()
@@ -276,7 +280,7 @@ class Solver:
         elif self.mp.coords == COORD_GCS:
             return np.array([-np.sin(d), -np.cos(d)])
 
-    def solve_fancy(self, max_depth=10, debug=False):
+    def solve_fancy(self, max_depth=10, debug=False, dump_only_opti=False):
 
         t_start = time.time()
         self.iter = 0
@@ -288,7 +292,7 @@ class Solver:
             print(f'Shooting {d * 180 / pi:.1f}')
             dirs_list.append(d)
             shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
-                             N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                             N_iter=self.nt_pmp, domain=self.mp.domain, fail_on_maxiter=True,
                              factor=self.int_prec_factor, coords=self.mp.coords)
             shoot.set_adjoint(self.adj_from_dir(d))
             traj = shoot.integrate()
@@ -327,7 +331,7 @@ class Solver:
                 bl = False
                 bu = False
                 shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
-                                 N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                                 N_iter=self.nt_pmp, domain=self.mp.domain, fail_on_maxiter=True,
                                  factor=self.int_prec_factor, coords=self.mp.coords,
                                  target_crit=lambda x: self.distance(x, self.x_target) < self.opti_ceil)
                 shoot.set_adjoint(self.adj_from_dir(d))
@@ -352,7 +356,12 @@ class Solver:
                 lp_l = self.last_points[k_l]
                 lp_u = self.last_points[k_u]
                 if my_depth < max_depth:
-                    if self.distance(lp, lp_l) > self.neighb_ceil:
+                    if self.distance(lp, self.x_target) < self.neighb_ceil_large or \
+                            self.distance(lp_l, self.x_target) < self.neighb_ceil_large:
+                        ceil = self.neighb_ceil
+                    else:
+                        ceil = self.neighb_ceil_large
+                    if self.distance(lp, lp_l) > ceil:
                         bl = True
                         dist1 = min(self.distance(p, self.x_target) for p in traj.points[:traj.last_index])
                         dist2 = min(self.distance(p, self.x_target) for p in
@@ -371,7 +380,12 @@ class Solver:
                                  (new_prio, (new_dir, k_max, d_l, k_l, depth_l, d, k, my_depth)))
                         dirs_queue.append(new_dir)
                         k_max += 1
-                    if self.distance(lp, lp_u) > self.neighb_ceil:
+                    if self.distance(lp, self.x_target) < self.neighb_ceil_large or \
+                            self.distance(lp_u, self.x_target) < self.neighb_ceil_large:
+                        ceil = self.neighb_ceil
+                    else:
+                        ceil = self.neighb_ceil_large
+                    if self.distance(lp, lp_u) > ceil:
                         bu = True
                         dist1 = min(self.distance(p, self.x_target) for p in traj.points[:traj.last_index])
                         dist2 = min(self.distance(p, self.x_target) for p in
@@ -403,7 +417,12 @@ class Solver:
         d_pre_proc = t_end - t_start
         d_proc = t_end2 - t_start2
 
-        self.mp.trajs = list(self.trajs.values())
+        if not dump_only_opti:
+            self.mp.trajs = self.mp.trajs + list(self.trajs.values())
+        else:
+            for traj in self.trajs.values():
+                if traj.optimal:
+                    self.mp.trajs.append(traj)
         print(f'    * Pre-processing :  {d_pre_proc:.3f} s')
         print(f'    * Processing      :  {d_proc:.3f} s')
         print(f'    * Total           :  {d_proc + d_pre_proc:.3f} s')
@@ -433,7 +452,7 @@ class Solver:
             nonlocal k
             dirs_list.append(d)
             shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
-                             N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                             N_iter=self.nt_pmp, domain=self.mp.domain, fail_on_maxiter=True,
                              factor=self.int_prec_factor, coords=self.mp.coords)
             shoot.set_adjoint(self.adj_from_dir(d).reshape((2,)))
             traj = shoot.integrate()
@@ -482,7 +501,7 @@ class Solver:
 
         def f(d):
             shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
-                             N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                             N_iter=self.nt_pmp, domain=self.mp.domain, fail_on_maxiter=True,
                              factor=self.int_prec_factor, coords=self.mp.coords)
             shoot.set_adjoint(self.adj_from_dir(d).reshape((2,)))
             traj = shoot.integrate()
@@ -496,7 +515,7 @@ class Solver:
             for d in self.dirs.values():
                 res = scipy.optimize.minimize(f, d, method='BFGS')
                 shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
-                                 N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                                 N_iter=self.nt_pmp, domain=self.mp.domain, fail_on_maxiter=True,
                                  factor=self.int_prec_factor, coords=self.mp.coords)
                 shoot.set_adjoint(self.adj_from_dir(res.x[0]).reshape((2,)))
                 self.mp.trajs.append(shoot.integrate())
@@ -514,7 +533,7 @@ class Solver:
             print(res)
             for i in range(len(res.x)):
                 shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
-                                 N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                                 N_iter=self.nt_pmp, domain=self.mp.domain, fail_on_maxiter=True,
                                  factor=self.int_prec_factor, coords=self.mp.coords)
                 shoot.set_adjoint(self.adj_from_dir(res.x[i]).reshape((2,)))
                 self.mp.trajs.append(shoot.integrate())
@@ -522,7 +541,7 @@ class Solver:
     def shoot_init(self):
         for d in self.dirs.values():
             shoot = Shooting(self.mp.model.dyn, self.x_init, self.T, adapt_ts=self.adaptive_int_step,
-                             N_iter=self.N_iter, domain=self.mp.domain, fail_on_maxiter=True,
+                             N_iter=self.nt_pmp, domain=self.mp.domain, fail_on_maxiter=True,
                              factor=self.int_prec_factor, coords=self.mp.coords)
             shoot.set_adjoint(self.adj_from_dir(d).reshape((2,)))
             self.mp.trajs.append(shoot.integrate())

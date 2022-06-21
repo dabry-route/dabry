@@ -1,7 +1,12 @@
 /
 ['coords' : {'cartesian', 'gcs'},
  'units_grid' : {'meters', 'degrees', 'rad'},
- 'analytical' : {True, False}]
+ 'analytical' : {True, False},
+ % if cartesian originates from flattened wind, give ortho proj center
+ 'lon_0': float (degrees),
+ 'lat_0': float (degrees),
+ % if the grid is not regularly spaced
+ 'unstructured' : {True, False}]
 	data : (nt, nx, ny, 2)
 	ts : (nt, )
 	grid : (nx, ny, 2)

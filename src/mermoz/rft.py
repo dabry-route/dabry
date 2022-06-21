@@ -377,11 +377,46 @@ class RFT:
             dset[:, :, 0] = factor * X
             dset[:, :, 1] = factor * Y
 
+    def get_normal(self, point, compute=False):
+        if compute:
+            self.compute()
+        nx, ny, nt = self.phi.shape
+        # Find the tile to which requested point belongs
+        # A tile is a region between 4 known values of wind
+        xx = (point[0] - self.bl[0]) / (self.tr[0] - self.bl[0])
+        yy = (point[1] - self.bl[1]) / (self.tr[1] - self.bl[1])
+        delta_x = (self.tr[0] - self.bl[0]) / (nx - 1)
+        delta_y = (self.tr[1] - self.bl[1]) / (ny - 1)
+        i = int((nx - 1) * xx)
+        j = int((ny - 1) * yy)
+        # Tile bottom left corner x-coordinate
+        xij = delta_x * i + self.bl[0]
+        # Point relative position in tile
+        a = (point[0] - xij) / delta_x
+        # Tile bottom left corner y-coordinate
+        yij = delta_y * j + self.bl[1]
+        b = (point[1] - yij) / delta_y
+        phi_itp = 0.
+        k = 0
+        for k in range(nt):
+            phi_itp = (1 - b) * ((1 - a) * self.phi[i, j, k] + a * self.phi[i + 1, j, k]) + \
+                      b * ((1 - a) * self.phi[i, j + 1, k] + a * self.phi[i + 1, j + 1, k])
+            if phi_itp < 0.:
+                break
+        if phi_itp > 0.:
+            print(f'[Init shooting] Error: Point is not within any front. ({point[0]}, {point[1]})',
+                  file=sys.stderr)
+            exit(1)
 
-def time_to_go(self,
-               x_init: ndarray,
-               x_end: ndarray):
-    pass
+        k = k - 1
+
+        # Linear interpolation gradient at point gives the normal
+        d_phi__d_x = 1. / delta_x * ((1 - b) * (self.phi[i + 1, j, k] - self.phi[i, j, k]) +
+                                     b * (self.phi[i + 1, j + 1, k] - self.phi[i, j + 1, k]))
+        d_phi__d_y = 1. / delta_y * ((1 - a) * (self.phi[i, j + 1, k] - self.phi[i, j, k]) +
+                                     a * (self.phi[i + 1, j + 1, k] - self.phi[i + 1, j, k]))
+        d_phi = np.array((d_phi__d_x, d_phi__d_y))
+        return d_phi / np.linalg.norm(d_phi), self.max_time * (k + 1) / self.nt, k + 1
 
 
 if __name__ == '__main__':

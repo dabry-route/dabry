@@ -98,7 +98,7 @@ def run():
                     neighb_ceil=factor / 40,
                     n_min_opti=1,
                     adaptive_int_step=False,
-                    N_iter=nt_pmp)
+                    nt_pmp=nt_pmp)
     solver.log_config()
 
     solver.setup()

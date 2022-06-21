@@ -4,6 +4,7 @@ import scipy.interpolate as itp
 
 import h5py
 import numpy as np
+from mpl_toolkits.basemap import Basemap
 from numpy import ndarray
 from math import exp, log
 from pyproj import Proj
@@ -13,7 +14,7 @@ from mermoz.misc import *
 
 class Wind:
 
-    def __init__(self, value_func=None, d_value_func=None, descr='', is_analytical=False):
+    def __init__(self, value_func=None, d_value_func=None, descr='', is_analytical=False, **kwargs):
         """
         Builds a windfield which is a smooth vector field of space
         value_func Function taking a point in space (ndarray) and returning the
@@ -29,9 +30,19 @@ class Wind:
         # 2 if directly dumpable
         self.is_dumpable = 1
 
+        # Used when wind is flattened
+        self.lon_0 = None
+        self.lat_0 = None
+
+        # When grid is not regularly spaced
+        self.unstructured = False
+
         # To remember if an analytical wind was discretized for
         # display purposes.
         self.is_analytical = is_analytical
+
+        for k, v in kwargs.items():
+            self.__dict__[k] = v
 
     def __add__(self, other):
         """
@@ -42,10 +53,21 @@ class Wind:
         """
         if not isinstance(other, Wind):
             raise TypeError(f"Unsupported type for addition : {type(other)}")
-        return Wind(value_func=lambda x: self.value(x) + other.value(x),
-                    d_value_func=lambda x: self.d_value(x) + other.d_value(x),
-                    descr=self.descr + ', ' + other.descr,
-                    is_analytical=self.is_analytical and other.is_analytical)
+        value_func = lambda x: self.value(x) + other.value(x)
+        d_value_func = lambda x: self.d_value(x) + other.d_value(x)
+        descr = self.descr + ', ' + other.descr
+        is_analytical = self.is_analytical and other.is_analytical
+        # d = self.__dict__
+        # for k in ['value_func', 'd_value_func', 'descr', 'is_analytical']:
+        #     try:
+        #         del d[k]
+        #     except KeyError:
+        #         pass
+        return Wind(value_func=value_func,
+                    d_value_func=d_value_func,
+                    descr=descr,
+                    is_analytical=is_analytical)
+                    #**d)
 
     def __mul__(self, other):
         """
@@ -58,10 +80,21 @@ class Wind:
             other = float(other)
         if not isinstance(other, float):
             raise TypeError(f"Unsupported type for multiplication : {type(other)}")
-        return Wind(value_func=lambda x: other * self.value(x),
-                    d_value_func=lambda x: other * self.d_value(x),
-                    descr=self.descr,
-                    is_analytical=self.is_analytical)
+        value_func = lambda x: other * self.value(x)
+        d_value_func = lambda x: other * self.d_value(x)
+        descr = self.descr
+        is_analytical = self.is_analytical
+        # d = self.__dict__
+        # for k in ['value_func', 'd_value_func', 'descr', 'is_analytical']:
+        #     try:
+        #         del d[k]
+        #     except KeyError:
+        #         pass
+        return Wind(value_func=value_func,
+                    d_value_func=d_value_func,
+                    descr=descr,
+                    is_analytical=is_analytical)
+                    #**d)
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -132,7 +165,7 @@ class DiscreteWind(Wind):
 
         self.is_analytical = force_analytical
 
-    def load(self, filepath, nodiff=False, unstructured=False, resample=1):
+    def load(self, filepath, nodiff=False, resample=1):
         """
         Loads wind data from H5 wind data
         :param filepath: The H5 file contaning wind data
@@ -146,14 +179,30 @@ class DiscreteWind(Wind):
         with h5py.File(filepath, 'r') as wind_data:
             self.coords = wind_data.attrs['coords']
             self.units_grid = wind_data.attrs['units_grid']
+            try:
+                self.lon_0 = wind_data.attrs['lon_0']
+                self.lat_0 = wind_data.attrs['lat_0']
+            except KeyError:
+                pass
+            try:
+                # In a try/except for backward compatibility
+                self.unstructured = wind_data.attrs['unstructured']
+            except KeyError:
+                pass
 
             # Checking consistency before loading
             ensure_coords(self.coords)
             ensure_units(self.units_grid)
             ensure_compatible(self.coords, self.units_grid)
 
+            # Define computation bounds as smallest xy-coordinate outer bounding box
+            self.x_min = wind_data['grid'][:, :, 0].min()
+            self.x_max = wind_data['grid'][:, :, 0].max()
+            self.y_min = wind_data['grid'][:, :, 1].min()
+            self.y_max = wind_data['grid'][:, :, 1].max()
+
             # Loading
-            if not unstructured:
+            if not self.unstructured:
                 self.nt, self.nx, self.ny, _ = wind_data['data'].shape
                 self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
                 self.uv[:, :, :, :] = wind_data['data']
@@ -167,10 +216,6 @@ class DiscreteWind(Wind):
                 self.nt = wind_data['data'].shape[0]
                 self.nx = resample * nx_wind
                 self.ny = resample * ny_wind
-                self.x_min = wind_data['grid'][:, :, 0].min()
-                self.x_max = wind_data['grid'][:, :, 0].max()
-                self.y_min = wind_data['grid'][:, :, 1].min()
-                self.y_max = wind_data['grid'][:, :, 1].max()
                 self.grid = np.zeros((self.nx, self.ny, 2))
                 self.grid[:] = np.array(np.meshgrid(np.linspace(self.x_min, self.x_max, self.nx),
                                                  np.linspace(self.y_min, self.y_max, self.ny))).transpose((2, 1, 0))
@@ -197,11 +242,15 @@ class DiscreteWind(Wind):
         # Post processing
         if self.units_grid == U_DEG:
             self.grid[:] = DEG_TO_RAD * self.grid
+            self.x_min, self.x_max, self.y_min, self.y_max = \
+                tuple(DEG_TO_RAD * np.array((self.x_min, self.x_max, self.y_min, self.y_max)))
 
-        self.x_min = np.max(self.grid[0, :, 0])
-        self.x_max = np.min(self.grid[-1, :, 0])
-        self.y_min = np.max(self.grid[:, 0, 1])
-        self.y_max = np.min(self.grid[:, -1, 1])
+            self.units_grid = U_RAD
+
+        # self.x_min = np.max(self.grid[0, :, 0])
+        # self.x_max = np.min(self.grid[-1, :, 0])
+        # self.y_min = np.max(self.grid[:, 0, 1])
+        # self.y_max = np.min(self.grid[:, -1, 1])
 
         if not nodiff:
             self.compute_derivatives()
@@ -211,6 +260,7 @@ class DiscreteWind(Wind):
     def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, skip_coord_check=False):
         self.coords = coords
         self.units_grid = 'meters'
+        self.unstructured = wind.unstructured
 
         # Checking consistency before loading
         ensure_units(self.units_grid)
@@ -390,19 +440,19 @@ class DiscreteWind(Wind):
             tr = self.grid[-1, -1]
             f_wind.load_from_wind(self, nx, ny, bl, tr, coords=COORD_CARTESIAN)
         elif proj == 'ortho':
-            for p in ['lon_0', 'lat_0', 'width', 'height']:
+            for p in ['lon_0', 'lat_0']:
                 if p not in kwargs.keys():
                     print(f'Missing parameter {p} for {proj} flatten type', file=sys.stdin)
                     exit(1)
-            lon_0 = kwargs['lon_0']
-            lat_0 = kwargs['lat_0']
-            width = kwargs['width']
-            height = kwargs['height']
+            self.lon_0 = kwargs['lon_0']
+            self.lat_0 = kwargs['lat_0']
+            # width = kwargs['width']
+            # height = kwargs['height']
 
             nx, ny, _ = self.grid.shape
 
             # Grid
-            proj = Proj(proj='ortho', lon_0=lon_0, lat_0=lat_0)
+            proj = Proj(proj='ortho', lon_0=self.lon_0, lat_0=self.lat_0)
             oldgrid = np.zeros(self.grid.shape)
             oldgrid[:] = self.grid
             newgrid = np.zeros((2, nx, ny))
@@ -417,16 +467,13 @@ class DiscreteWind(Wind):
             print(self.x_min, self.x_max, self.y_min, self.y_max)
 
             # Wind
-            # f_wind = DiscreteWind()
-            # bl = np.array((-5e6, -5e6))  # self.grid[0, 0]
-            # tr = np.array((5e6, 5e6))  # self.grid[-1, -1]
-            # f_wind.load_from_wind(self, nx, ny, bl, tr, coords=COORD_CARTESIAN)
-            # newuv = np.zeros(f_wind.uv.shape)
-            # newuv[:] = self._rotate_wind(f_wind.uv[:, :, :, 0],
-            #                           f_wind.uv[:, :, :, 1],
-            #                           oldgrid[:, :, 0],
-            #                           oldgrid[:, :, 1])
-            # f_wind.uv[:] = newuv
+            newuv = np.zeros(self.uv.shape)
+            for kt in range(self.uv.shape[0]):
+                newuv[kt, :] = self._rotate_wind(self.uv[kt, :, :, 0],
+                                                 self.uv[kt, :, :, 1],
+                                                 RAD_TO_DEG * oldgrid[:, :, 0],
+                                                 RAD_TO_DEG * oldgrid[:, :, 1])
+            self.uv[:] = newuv
         else:
             print(f"Unknown projection type {proj}", file=sys.stderr)
             exit(1)
@@ -434,15 +481,14 @@ class DiscreteWind(Wind):
         # self.grid[:] = oldgrid
         # self.x_min, self.y_min, self.x_max, self.y_max = oldbounds
 
+        self.unstructured = True
         self.coords = COORD_CARTESIAN
         self.units_grid = 'meters'
         self.is_analytical = False
 
-    @staticmethod
-    def _rotate_wind(u, v, x, y):
-        print(u.shape)
-        print(v.shape)
-        return np.stack((u, v), axis=3)
+    def _rotate_wind(self, u, v, x, y):
+        bm = Basemap(projection='ortho', lon_0=self.lon_0, lat_0=self.lat_0)
+        return np.array(bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
 
 
 class TwoSectorsWind(Wind):
