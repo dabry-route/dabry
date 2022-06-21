@@ -21,6 +21,8 @@ class MDFmanager:
         self.wind_filename = 'wind.h5'
 
     def set_output_dir(self, output_dir):
+        if not os.path.exists(output_dir):
+            os.mkdir(output_dir)
         self.output_dir = output_dir
 
     def clean_output_dir(self):
@@ -34,8 +36,6 @@ class MDFmanager:
             index = 0
             if len(f.keys()) != 0:
                 index = int(max(f.keys(), key=int)) + 1
-            print(f.keys())
-            print(str(index))
             for i, traj in enumerate(traj_list):
                 nt = traj.timestamps.shape[0]
                 trajgroup = f.create_group(str(index + i))

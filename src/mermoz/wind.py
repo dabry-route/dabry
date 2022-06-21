@@ -259,7 +259,7 @@ class DiscreteWind(Wind):
 
     def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, skip_coord_check=False):
         self.coords = coords
-        self.units_grid = 'meters'
+        self.units_grid = 'meters' if coords == COORD_CARTESIAN else 'degrees'
         self.unstructured = wind.unstructured
 
         # Checking consistency before loading

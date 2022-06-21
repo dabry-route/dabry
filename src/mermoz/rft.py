@@ -377,6 +377,33 @@ class RFT:
             dset[:, :, 0] = factor * X
             dset[:, :, 1] = factor * Y
 
+    def value(self, point, timeindex):
+        """
+        Compute phi value at given point and timestamp using linear interpolation
+        :param point: Point at which to compute the front function
+        :param timeindex: The time index
+        :return: Value of phi
+        """
+        nx, ny, nt = self.phi.shape
+        # Find the tile to which requested point belongs
+        # A tile is a region between 4 known values of wind
+        xx = (point[0] - self.bl[0]) / (self.tr[0] - self.bl[0])
+        yy = (point[1] - self.bl[1]) / (self.tr[1] - self.bl[1])
+        delta_x = (self.tr[0] - self.bl[0]) / (nx - 1)
+        delta_y = (self.tr[1] - self.bl[1]) / (ny - 1)
+        i = int((nx - 1) * xx)
+        j = int((ny - 1) * yy)
+        # Tile bottom left corner x-coordinate
+        xij = delta_x * i + self.bl[0]
+        # Point relative position in tile
+        a = (point[0] - xij) / delta_x
+        # Tile bottom left corner y-coordinate
+        yij = delta_y * j + self.bl[1]
+        b = (point[1] - yij) / delta_y
+
+        return (1 - b) * ((1 - a) * self.phi[i, j, timeindex] + a * self.phi[i + 1, j, timeindex]) + b * (
+                    (1 - a) * self.phi[i, j + 1, timeindex] + a * self.phi[i + 1, j + 1, timeindex])
+
     def get_normal(self, point, compute=False):
         if compute:
             self.compute()

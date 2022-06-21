@@ -432,11 +432,13 @@ class Solver:
             plt.show()
         if len(self.opti_indexes) == 0:
             print("No optimum found")
+            return False
         else:
             for k in self.opti_indexes:
                 print(f'         Optimal time : {self.opti_time[k]}')
                 print(f'Optimal init. heading : {RAD_TO_DEG * self.opti_headings[k]}')
                 self.trajs[k].type = 'optimal'
+                return True
 
     def solve_fancy2(self, max_depth=10, debug=False):
 

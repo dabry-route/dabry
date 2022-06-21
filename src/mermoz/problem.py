@@ -1,61 +1,103 @@
 import numpy as np
+from mdisplay.geodata import GeoData
 from mpl_toolkits.basemap import Basemap
 from numpy import ndarray
 
 from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
 from mermoz.mdf_manager import MDFmanager
-from mermoz.model import Model
+from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind
+from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
+
+problems = {
+    0: ['Three vortices', '3vor'],
+    1: ['Linear wind', 'linear'],
+    2: ['Honolulu Vancouver', 'honolulu-vancouver'],
+    3: ['Double Gyre Li2020', 'double-gyre-li2020']
+}
 
 
 class MermozProblem:
     """
     The Mermoz problem class defines the whole optimal control problem.
 
-    The UAV is assimilated to a point in 2D space. Its starting point is assumed at (0, 0).
-    Its target is located at (x_f, 0) (coordinate system is adapted to the target).
+            min T
+        x(0) = x_init
+        x(T) = x_target
+        x_dot(t) = v_a * s(t) + v_w(x(t))
+        where s(t) is a control vector of unit norm
     """
 
     def __init__(self,
                  model: Model,
-                 coords=None,
+                 x_init,
+                 x_target,
+                 coords,
                  domain=None,
-                 T=0.,
-                 visual_mode="full",
-                 axes_equal=True,
+                 bl=None,
+                 tr=None,
                  autodomain=True,
                  mask_land=True):
         self.model = model
-
+        self.x_init = np.zeros(2)
+        self.x_init[:] = x_init
+        self.x_target = np.zeros(2)
+        self.x_target[:] = x_target
         self.coords = coords
+
+        # Domain bounding box corners
+        if bl is not None:
+            self.bl = np.zeros(2)
+            self.bl[:] = bl
+        else:
+            self.bl = None
+        if tr is not None:
+            self.tr = np.zeros(2)
+            self.tr[:] = tr
+        else:
+            self.tr = None
+
+        self._geod_l = distance(self.x_init, self.x_target, coords=self.coords)
+
         self.bm = None
+
+        self.descr = 'Problem'
+
         if not domain:
             if not autodomain:
-                self.domain = lambda _: True
+                if self.bl is not None and self.tr is not None:
+                    self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
+                else:
+                    self.domain = lambda _: True
             else:
                 # Bound computation domain on wind grid limits
                 wind = self.model.wind
-                bl = (wind.x_min, wind.y_min)
-                tr = (wind.x_max, wind.y_max)
+                if type(wind) == DiscreteWind:
+                    self.bl = np.array((wind.x_min, wind.y_min))
+                    self.tr = np.array((wind.x_max, wind.y_max))
+                else:
+                    w = 1.15 * self._geod_l
+                    self.bl = (self.x_init + self.x_target) / 2. - np.array((w / 2., w / 2.))
+                    self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
                 if self.coords == COORD_GCS and mask_land:
                     factor = 1. if wind.units_grid == U_RAD else RAD_TO_DEG
-                    self.bm = Basemap(llcrnrlon=factor * bl[0],
-                                      llcrnrlat=factor * bl[1],
-                                      urcrnrlon=factor * tr[0],
-                                      urcrnrlat=factor * tr[1],
+                    self.bm = Basemap(llcrnrlon=factor * self.bl[0],
+                                      llcrnrlat=factor * self.bl[1],
+                                      urcrnrlon=factor * self.tr[0],
+                                      urcrnrlat=factor * self.tr[1],
                                       projection='cyl', resolution='c')
-                self.domain = lambda x: bl[0] < x[0] < tr[0] and bl[1] < x[1] < tr[1] and \
+                self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1] and \
                                         (self.bm is None or not self.bm.is_land(factor * x[0], factor * x[1]))
         else:
             self.domain = domain
+
         self._feedback = None
-        title = "$v_a=" + str(self.model.v_a) + "\:m/s$, $T=" + str(T) + "\:s$"
         self.trajs = []
 
     def __str__(self):
-        return str(self.model)
+        return str(self.descr)
 
     def load_feedback(self, feedback: Feedback):
         """
@@ -109,14 +151,128 @@ class MermozProblem:
         for index in sorted(delete_index, reverse=True):
             del self.trajs[index]
 
-    def plot_trajs(self, color_mode="default"):
-        for traj in self.trajs:
-            # print(traj.adjoints[0])
-            scalar_prod = None
-            if color_mode == 'reachability-enhanced':
-                vect_controls = np.array([np.array([np.cos(u), np.sin(u)]) for u in traj.controls])
-                e_minuses = np.array([self.model.wind.e_minus(x) for x in traj.points])
-                norms = 1 / np.linalg.norm(e_minuses, axis=1)
-                e_minuses = np.einsum('ij,i->ij', e_minuses, norms)
-                scalar_prod = np.abs(np.einsum('ij,ij->i', vect_controls, e_minuses))
-            self.display.plot_traj(traj, color_mode=color_mode, controls=False, scalar_prods=scalar_prod)
+
+class IndexedProblem(MermozProblem):
+
+    def __init__(self, i, seed=0):
+        if i == 0:
+            v_a = 23.
+            coords = COORD_CARTESIAN
+
+            factor = 1e6
+            factor_speed = v_a
+
+            x_init = factor * np.array([0., 0.])
+            x_target = factor * np.array([1., 0.])
+
+            bl = factor * np.array([-0.2, -1.])
+            tr = factor * np.array([1.2, 1.])
+
+            import csv
+            with open('/home/bastien/Documents/work/mermoz/src/mermoz/.seeds/problem0/center1.csv', 'r') as f:
+                reader = csv.reader(f)
+                for k, row in enumerate(reader):
+                    if k == seed:
+                        omega1 = factor * np.array(list(map(float, row)))
+                        break
+            with open('/home/bastien/Documents/work/mermoz/src/mermoz/.seeds/problem0/center2.csv', 'r') as f:
+                reader = csv.reader(f)
+                for k, row in enumerate(reader):
+                    if k == seed:
+                        omega2 = factor * np.array(list(map(float, row)))
+                        break
+            with open('/home/bastien/Documents/work/mermoz/src/mermoz/.seeds/problem0/center3.csv', 'r') as f:
+                reader = csv.reader(f)
+                for k, row in enumerate(reader):
+                    if k == seed:
+                        omega3 = factor * np.array(list(map(float, row)))
+                        break
+
+            vortex1 = RankineVortexWind(omega1[0], omega1[1], factor * factor_speed * -1., factor * 1e-1)
+            vortex2 = RankineVortexWind(omega2[0], omega2[1], factor * factor_speed * -0.8, factor * 1e-1)
+            vortex3 = RankineVortexWind(omega3[0], omega3[1], factor * factor_speed * 0.8, factor * 1e-1)
+            const_wind = UniformWind(np.array([0., 0.]))
+
+            alty_wind = 3. * const_wind + vortex1 + vortex2 + vortex3
+            total_wind = DiscreteWind()
+            total_wind.load_from_wind(alty_wind, 101, 101, bl, tr, coords=coords)
+
+            zermelo_model = ZermeloGeneralModel(v_a)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
+
+        elif i == 1:
+            v_a = 23.
+            coords = COORD_CARTESIAN
+
+            factor = 1e6
+            x_init = factor * np.array([0., 0.])
+            x_target = factor * np.array([1., 0.])
+
+            gradient = np.array([[0., v_a / factor], [0., 0.]])
+            origin = np.array([0., 0.])
+            value_origin = np.array([0., 0.])
+
+            bl = factor * np.array([-0.2, -1.])
+            tr = factor * np.array([1.2, 1.])
+
+            linear_wind = LinearWind(gradient, origin, value_origin)
+            total_wind = DiscreteWind()
+            # Sample analytic linear wind to a grid
+            total_wind.load_from_wind(linear_wind, 51, 51, bl, tr, coords)
+
+            # Creates the cinematic model
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
+
+        elif i == 2:
+            v_a = 23.
+            coords = COORD_GCS
+
+            total_wind = DiscreteWind(interp='linear')
+            total_wind.load('/home/bastien/Documents/data/wind/windy/Vancouver-Honolulu-0.5.mz/data.h5')
+
+            # Creates the cinematic model
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            # Get problem domain boundaries
+            bl = np.zeros(2)
+            tr = np.zeros(2)
+            bl[:] = total_wind.grid[1, 1]
+            tr[:] = total_wind.grid[-2, -2]
+
+            # Initial point
+            gd = GeoData()
+            offset = np.array([5., 5.])  # Degrees
+            x_init = DEG_TO_RAD * (np.array(gd.get_coords('honolulu')) + offset)
+            x_target = DEG_TO_RAD * (np.array(gd.get_coords('vancouver')) - offset)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
+
+        elif i == 3:
+            v_a = 0.6
+
+            sf = 1.
+
+            x_init = sf * np.array((125., 125.))
+            x_target = sf * np.array((375., 375.))
+            bl = sf * np.array((-10, -10))
+            tr = sf * np.array((510, 510))
+            coords = COORD_CARTESIAN
+
+            from mermoz.wind import DoubleGyreWind
+            total_wind = DoubleGyreWind(0., 0., 500., 500., 1.)
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+
+        else:
+            raise IndexError(f'No problem with index {i}')
+
+        self.descr = problems[i][0]

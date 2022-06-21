@@ -1,13 +1,15 @@
 import warnings
 from abc import ABC
-from math import cos
-import numpy as np
-from numpy import ndarray
+from scipy.integrate import ode, odeint
 
 from mermoz.dynamics import Dynamics
 from mermoz.stoppingcond import PrecisionSC
 from mermoz.trajectory import AugmentedTraj
 from mermoz.misc import *
+
+
+class DomainException(Exception):
+    pass
 
 
 class Shooting(ABC):
@@ -75,15 +77,16 @@ class Shooting(ABC):
         elif self.coords == COORD_GCS:
             v = - np.diag([1 / cos(x[1]), 1.]) @ p
             v = v / np.linalg.norm(v)
-            res = np.pi/2. - np.arctan2(v[1], v[0])
+            res = np.pi / 2. - np.arctan2(v[1], v[0])
         else:
             exit(1)
         return res
 
-    def integrate(self, verbose=False):
+    def integrate(self, verbose=False, custom_int=True):
         """
         Integrate trajectory thanks to the shooting method with an explicit Euler scheme
         """
+
         def sumup(i, t, x, p, u):
             res = ''
             res += f'Step {i}, t = {t}\n'
@@ -94,80 +97,163 @@ class Shooting(ABC):
 
         if self.p_init is None:
             raise ValueError("No initial value provided for adjoint state")
-        timestamps = np.zeros(self.N_iter)
-        states = np.zeros((self.N_iter, 2))
-        adjoints = np.zeros((self.N_iter, 2))
-        controls = np.zeros(self.N_iter)
-        t = 0.
-        x = self.x_init
-        p = self.p_init
-        states[0] = x
-        adjoints[0] = p
-        u = controls[0] = self.control(x, p, 0.)
-        interrupted = False
-        optimal = False
-        list_dt = []
-        if verbose:
-            print(sumup(0, t, x, p, u))
-        if not self.adapt_ts:
-            dt = self.final_time / self.N_iter
-            sc = PrecisionSC(self.dyn.wind, factor=self.factor, int_stepsize=dt)
-            i = 1
-            for i in range(1, self.N_iter):
-                if self.abort_on_precision:
-                    _sc_value = sc.value(t, x)
-                else:
-                    _sc_value = False
-                if _sc_value or not self.domain(x):
-                    interrupted = True
-                    break
-                if self.target_crit is not None and self.target_crit(x):
-                    interrupted = True
-                    optimal = True
-                    break
-                t += dt
-                u = self.control(x, p, t)
-                dyn_x = self.dyn.value(x, u, t)
-                A = -self.dyn.d_value__d_state(x, u, t).transpose()
-                dyn_p = A.dot(p)
-                x += dt * dyn_x
-                p += dt * dyn_p
-                timestamps[i] = t
-                states[i] = x
-                adjoints[i] = p
-                controls[i] = u
-                if verbose:
-                    print(sumup(i, t, x, p, u))
-            return AugmentedTraj(timestamps, states, adjoints, controls, i, optimal=optimal, type=TRAJ_PMP,
-                                 interrupted=interrupted, coords=self.coords)
-        else:
-            i = 1
-            while t < self.final_time and i < self.N_iter and self.domain(x):
-                dt = 1 / self.dyn.wind.grad_norm(x) * self.factor
-                t += dt
-                list_dt.append(dt)
-                u = self.control(x, p, t)
-                dyn_x = self.dyn.value(x, u, t)
-                A = -self.dyn.d_value__d_state(x, u, t).transpose()
-                dyn_p = A.dot(p)
-                x += dt * dyn_x
-                p += dt * dyn_p
-                timestamps[i] = t
-                states[i] = x
-                adjoints[i] = p
-                controls[i] = u
-                if verbose:
-                    print(sumup(i, t, x, p, u))
-                i += 1
+        if custom_int:
+            timestamps = np.zeros(self.N_iter)
+            states = np.zeros((self.N_iter, 2))
+            adjoints = np.zeros((self.N_iter, 2))
+            controls = np.zeros(self.N_iter)
+            t = 0.
+            x = self.x_init
+            p = self.p_init
+            states[0] = x
+            adjoints[0] = p
+            u = controls[0] = self.control(x, p, 0.)
             interrupted = False
-            if t < self.final_time:
-                interrupted = True
-            if i == self.N_iter:
-                message = f"Adaptative integration reached step limit ({self.N_iter})"
-                if self.fail_on_maxiter:
-                    raise RuntimeError(message)
-                else:
-                    warnings.warn(message, stacklevel=2)
+            optimal = False
+            list_dt = []
+            if verbose:
+                print(sumup(0, t, x, p, u))
+            if not self.adapt_ts:
+                dt = self.final_time / self.N_iter
+                sc = PrecisionSC(self.dyn.wind, factor=self.factor, int_stepsize=dt)
+                i = 1
+                for i in range(1, self.N_iter):
+                    if self.abort_on_precision:
+                        _sc_value = sc.value(t, x)
+                    else:
+                        _sc_value = False
+                    if _sc_value or not self.domain(x):
+                        interrupted = True
+                        break
+                    if self.target_crit is not None and self.target_crit(x):
+                        interrupted = True
+                        optimal = True
+                        break
+                    t += dt
+                    u = self.control(x, p, t)
+                    dyn_x = self.dyn.value(x, u, t)
+                    A = -self.dyn.d_value__d_state(x, u, t).transpose()
+                    dyn_p = A.dot(p)
+                    x += dt * dyn_x
+                    p += dt * dyn_p
+                    timestamps[i] = t
+                    states[i] = x
+                    adjoints[i] = p
+                    controls[i] = u
+                    if verbose:
+                        print(sumup(i, t, x, p, u))
+                return AugmentedTraj(timestamps, states, adjoints, controls, i, optimal=optimal, type=TRAJ_PMP,
+                                     interrupted=interrupted, coords=self.coords)
+            else:
+                i = 1
+                while t < self.final_time and i < self.N_iter and self.domain(x):
+                    dt = 1 / self.dyn.wind.grad_norm(x) * self.factor
+                    t += dt
+                    list_dt.append(dt)
+                    u = self.control(x, p, t)
+                    dyn_x = self.dyn.value(x, u, t)
+                    A = -self.dyn.d_value__d_state(x, u, t).transpose()
+                    dyn_p = A.dot(p)
+                    x += dt * dyn_x
+                    p += dt * dyn_p
+                    timestamps[i] = t
+                    states[i] = x
+                    adjoints[i] = p
+                    controls[i] = u
+                    if verbose:
+                        print(sumup(i, t, x, p, u))
+                    i += 1
+                interrupted = False
+                if t < self.final_time:
                     interrupted = True
-            return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type=TRAJ_PMP,
-                                 interrupted=interrupted, coords=self.coords)
+                if i == self.N_iter:
+                    message = f"Adaptative integration reached step limit ({self.N_iter})"
+                    if self.fail_on_maxiter:
+                        raise RuntimeError(message)
+                    else:
+                        warnings.warn(message, stacklevel=2)
+                        interrupted = True
+                return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type=TRAJ_PMP,
+                                     interrupted=interrupted, coords=self.coords)
+
+        else:
+            dt = self.final_time / self.N_iter
+            timestamps = np.linspace(0., self.final_time, self.N_iter)
+            states = np.zeros((self.N_iter, 2))
+            adjoints = np.zeros((self.N_iter, 2))
+            controls = np.zeros(self.N_iter)
+            global_mode = 1
+            if global_mode:
+                def f(z, t):
+                    """
+                    :param z: 4D vector concat of x and p
+                    :param t: Timestamp
+                    :return: Value of dynamic function
+                    """
+                    x = np.zeros(2)
+                    x[:] = z[:2]
+                    p = np.zeros(2)
+                    p[:] = z[2:]
+                    u = self.control(x, p, t)
+                    dyn_x = self.dyn.value(x, u, t)
+                    A = -self.dyn.d_value__d_state(x, u, t).transpose()
+                    dyn_p = A.dot(p)
+                    return np.concatenate((dyn_x, dyn_p))
+
+                z0 = np.zeros(4)
+                z0[:2] = self.x_init
+                z0[2:] = self.p_init
+                zz = np.array(odeint(f, z0, timestamps))
+                last_index = self.N_iter
+                for i in range(self.N_iter):
+                    if not self.domain(zz[i, :2]):
+                        last_index = i + 1
+                        break
+                controls = np.array(list(map(lambda z: self.control(z[:2], z[2:], 0), zz)))
+                return AugmentedTraj(timestamps, zz[:, :2], zz[:, 2:], controls, last_index=last_index, type=TRAJ_PMP,
+                                     interrupted=(last_index != self.N_iter), coords=self.coords)
+            else:
+                def f(t, z):
+                    """
+                    :param z: 4D vector concat of x and p
+                    :param t: Timestamp
+                    :return: Value of dynamic function
+                    """
+                    x = np.zeros(2)
+                    x[:] = z[:2]
+                    p = np.zeros(2)
+                    p[:] = z[2:]
+                    u = self.control(x, p, t)
+                    dyn_x = self.dyn.value(x, u, t)
+                    A = -self.dyn.d_value__d_state(x, u, t).transpose()
+                    dyn_p = A.dot(p)
+                    return np.concatenate((dyn_x, dyn_p))
+
+                def solout(t, z):
+                    if not self.domain(z[:2]):
+                        return -1
+                    return 0
+
+                z0 = np.zeros(4)
+                z0[:2] = self.x_init
+                z0[2:] = self.p_init
+                solver = ode(f)
+                solver.set_integrator('dopri5', nsteps=self.N_iter)
+                solver.set_solout(solout)
+                solver.set_initial_value(z0)
+                states[0, :] = z0[:2]
+                adjoints[0, :] = z0[2:]
+                last_index = 0
+                while True:
+                    z = solver.integrate(solver.t + dt)
+                    if not solver.successful():
+                        break
+                    last_index += 1
+                    states[last_index, :] = z[:2]
+                    adjoints[last_index, :] = z[2:]
+                    controls[last_index] = self.control(z[:2], z[2:], solver.t)
+                    if last_index == self.N_iter - 1:
+                        break
+                controls = np.array(list(map(lambda z: self.control(z[:2], z[2:], 0), np.concatenate((states, adjoints), axis=0))))
+                return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter, type=TRAJ_PMP,
+                                     interrupted=False, coords=self.coords)

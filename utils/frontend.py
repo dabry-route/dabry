@@ -252,10 +252,11 @@ class FrontendHandler:
             self.display.nocontrols = True
             self.display.set_title('Example')
             self.display.load_params()
-            self.display.setup()
+            self.display.setup(projection='ortho')
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=True)
             self.display.draw_rff()
+            self.display.draw_solver()
 
     def select_example(self, *args):
         if self.mode == 'user':

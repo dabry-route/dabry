@@ -10,11 +10,13 @@ import numpy as np
 from mermoz.problem import MermozProblem
 from mermoz.solver import Solver
 from mermoz.misc import *
+from mermoz.solver_rp import SolverRP
+from mermoz.wind import DiscreteWind
 
 
 class ParamsSummary:
 
-    def __init__(self, params, output_dir, style='params.css'):
+    def __init__(self, params=None, output_dir='', style='params.css'):
         self.coords_units = None
         self.x_name = None
         self.y_name = None
@@ -39,8 +41,11 @@ class ParamsSummary:
         self.params_ss_path = '/home/bastien/Documents/work/mermoz/docs'
         self.params_fname_formatted = 'params.html'
 
-        self.params = params
+        self.params = params if params is not None else {}
         self.md = None
+
+    def set_output_dir(self, output_dir):
+        self.output_dir = output_dir
 
     def add_param(self, k, v):
         self.params[k] = v
@@ -96,8 +101,46 @@ class ParamsSummary:
             self.params['nt_rft_eff'] = sv.nt_rft_eff
         except AttributeError:
             pass
-        self.params['geodesic_time'] = distance(sv.x_init, sv.x_target, coords=sv.mp.coords) / sv.mp.model.v_a
-        self.params['geodesic_length'] = distance(sv.x_init, sv.x_target, coords=sv.mp.coords)
+        w = distance(sv.x_init, sv.x_target, coords=sv.mp.coords)
+        self.params['geodesic_time'] = w / sv.mp.model.v_a
+        self.params['geodesic_length'] = w
+
+    def load_from_solver_rp(self, sv: SolverRP):
+        self.load_from_problem(sv.mp)
+        self.add_param('max_time', sv.T)
+        self.add_param('airspeed', sv.mp.model.v_a)
+        self.add_param('target_radius', sv.opti_ceil)
+        self.add_param('nt_pmp', sv.nt_pmp)
+        self.add_param('nt_rft', sv.nt_rft)
+        self.add_param('nx_rft', sv.nx_rft)
+        self.add_param('ny_rft', sv.ny_rft)
+        self.add_param('nt_rft_eff', sv.nt_rft_eff)
+        w = distance(sv.x_init, sv.x_target, coords=sv.mp.coords)
+        self.add_param('geodesic_time', w / sv.mp.model.v_a)
+        self.add_param('geodesic_length', w)
+
+    def load_from_problem(self, pb: MermozProblem):
+        total_wind = pb.model.wind
+        try:
+            nx_wind = total_wind.grid.shape[0]
+            ny_wind = total_wind.grid.shape[1]
+        except AttributeError:
+            nx_wind, ny_wind = 0, 0
+        try:
+            date_wind = total_wind.ts[0]
+        except AttributeError:
+            date_wind = 0.
+        factor = RAD_TO_DEG if pb.coords == COORD_GCS else 1.
+        self.params = {
+            'coords': pb.coords,
+            'bl_wind': tuple(factor * pb.bl),
+            'tr_wind': tuple(factor * pb.tr),
+            'nx_wind': nx_wind,
+            'ny_wind': ny_wind,
+            'date_wind': date_wind,
+            'point_init': tuple(factor * pb.x_init),
+            'point_target': tuple(factor * pb.x_target),
+        }
 
     def process_params(self):
         params = self.params

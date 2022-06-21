@@ -22,17 +22,15 @@ class SolverRP:
 
     def __init__(self,
                  mp: MermozProblem,
-                 x_init,
-                 x_target,
                  nx_rft,
                  ny_rft,
                  nt_rft,
                  nt_pmp=1000):
         self.mp = mp
         self.x_init = np.zeros(2)
-        self.x_init[:] = x_init
+        self.x_init[:] = mp.x_init
         self.x_target = np.zeros(2)
-        self.x_target[:] = x_target
+        self.x_target[:] = mp.x_target
         self.nx_rft = nx_rft
         self.ny_rft = ny_rft
         self.nt_rft = nt_rft
@@ -47,14 +45,17 @@ class SolverRP:
 
         self.T = 2. * self.geod_l / mp.model.v_a
 
-        self.opti_ceil = self.geod_l / 100
+        self.opti_ceil = self.geod_l / 50
         self.neighb_ceil = self.opti_ceil / 2.
 
-        l = 1.15 * self.geod_l
-        bl_rft = (self.x_init + self.x_target) / 2. - np.array((l / 2., l / 2.))
-        tr_rft = (self.x_init + self.x_target) / 2. + np.array((l / 2., l / 2.))
+        l = 2. * self.geod_l
+        bl_rft = np.zeros(2)
+        tr_rft = np.zeros(2)
+        bl_rft[:] = mp.bl # (self.x_init + self.x_target) / 2. - np.array((l / 2., l / 2.))
+        tr_rft[:] = mp.tr # (self.x_init + self.x_target) / 2. + np.array((l / 2., l / 2.))
 
-        self.rft = RFT(bl_rft, tr_rft, self.T, nx_rft, ny_rft, nt_rft, mp, x_init, kernel='matlab', coords=mp.coords)
+        self.rft = RFT(bl_rft, tr_rft, self.T, nx_rft, ny_rft, nt_rft, mp, self.x_init, kernel='matlab',
+                       coords=mp.coords)
 
         # Setting the reverse-time Mermoz navigation problem
         zermelo_model = ZermeloGeneralModel(-self.mp.model.v_a, coords=self.mp.coords)
@@ -67,7 +68,8 @@ class SolverRP:
         else:
             wind = -1. * self.mp.model.wind
         zermelo_model.update_wind(wind)
-        self.mp_pmp = MermozProblem(zermelo_model, coords=self.mp.coords, autodomain=False, domain=self.mp.domain, mask_land=False)
+        self.mp_pmp = MermozProblem(zermelo_model, self.x_init, self.x_target, self.mp.coords, autodomain=False,
+                                    domain=self.mp.domain, mask_land=False)
 
     def solve(self):
         other_time = 0.
@@ -106,7 +108,30 @@ class SolverRP:
         solver.setup()
 
         t_start = time.time()
-        solver.solve_fancy()
+        success = solver.solve_fancy()
+        if not success:
+            print(f"Shooting failed, enlarging sector")
+            for sector in [(psi_min - 10. * DEG_TO_RAD, psi_min),
+                           (psi_max, psi_max + 10. * DEG_TO_RAD),
+                           (psi_min - 20. * DEG_TO_RAD, psi_min - 10. * DEG_TO_RAD),
+                           (psi_max + 10. * DEG_TO_RAD, psi_max + 20. * DEG_TO_RAD)]:
+                solver = Solver(self.mp_pmp,
+                                self.x_target,
+                                self.x_init,
+                                T,
+                                sector[0],
+                                sector[1],
+                                '/home/bastien/Documents/work',
+                                N_disc_init=10,
+                                opti_ceil=self.opti_ceil,
+                                neighb_ceil=self.neighb_ceil,
+                                n_min_opti=1,
+                                adaptive_int_step=False,
+                                nt_pmp=self.nt_pmp)
+                success = solver.solve_fancy()
+                if success:
+                    break
+
         t_end = time.time()
         time_pmp = t_end - t_start
         print(f"Done ({time_pmp:.3f} s)")
