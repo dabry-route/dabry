@@ -1,8 +1,6 @@
 import os
 import sys
-import numpy as np
 import h5py
-from numpy import ndarray
 import json
 import scipy.interpolate as itp
 from numpy import sin, pi, cos

@@ -1,7 +1,4 @@
 from abc import ABC, abstractmethod
-import numpy as np
-from numpy import ndarray
-from math import cos, sin
 
 from mermoz.misc import *
 from mermoz.wind import Wind, LinearWind

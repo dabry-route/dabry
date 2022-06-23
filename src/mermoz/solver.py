@@ -1,8 +1,6 @@
 import math
 import os
-import sys
 import time
-import numpy as np
 import scipy.optimize
 from matplotlib import pyplot as plt
 from heapq import heappush, heappop

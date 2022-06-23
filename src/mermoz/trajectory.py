@@ -1,8 +1,4 @@
-import numpy as np
-from numpy import ndarray
-import h5py
-import os
-from .misc import TRAJ_INT, COORD_GCS, COORD_CARTESIAN
+from .misc import *
 
 
 class Trajectory:

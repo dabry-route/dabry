@@ -1,15 +1,9 @@
 import json
 import os
-import sys
-import matplotlib.pyplot as plt
 
 import h5py
-import numpy as np
 from matplotlib import pyplot as plt
-from numpy import ndarray
-from math import sin, cos, atan2
-
-from scipy.integrate import odeint
+from math import atan2
 
 from mermoz.misc import *
 from mermoz.problem import MermozProblem

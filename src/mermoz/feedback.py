@@ -1,9 +1,6 @@
-import sys
 from abc import ABC, abstractmethod
-import numpy as np
-from numpy import ndarray
 import random
-from math import cos, sin, atan2
+from math import atan2
 
 from mermoz.wind import Wind
 from mermoz.misc import *

@@ -1,11 +1,7 @@
-import os
-import sys
 import scipy.interpolate as itp
 
 import h5py
-import numpy as np
 from mpl_toolkits.basemap import Basemap
-from numpy import ndarray
 from math import exp, log
 from pyproj import Proj
 

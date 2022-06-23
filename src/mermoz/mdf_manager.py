@@ -1,10 +1,8 @@
 import datetime
 import os
 import pygrib
-import sys
 
 import h5py
-import numpy as np
 
 from mermoz.misc import *
 from mermoz.wind import Wind, DiscreteWind

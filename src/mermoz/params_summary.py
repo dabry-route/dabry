@@ -5,13 +5,10 @@ import shutil
 import markdown
 import datetime
 
-import numpy as np
-
 from mermoz.problem import MermozProblem
 from mermoz.solver import Solver
 from mermoz.misc import *
 from mermoz.solver_rp import SolverRP
-from mermoz.wind import DiscreteWind
 
 
 class ParamsSummary:
