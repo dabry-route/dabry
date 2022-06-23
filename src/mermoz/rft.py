@@ -443,9 +443,12 @@ class RFT:
         x0 = np.zeros(2)
         x0[:] = point
 
-        def f(x, t):
+        def control(x):
             s = self.get_normal(x)[0]
-            u = atan2(s[1], s[0])
+            return atan2(s[1], s[0])
+
+        def f(x, t):
+            u = control(x)
             return - model.dyn.value(x, u, 0.)
         timestamps = np.linspace(0., T, N_disc)
         dt = T / N_disc
@@ -457,7 +460,8 @@ class RFT:
             if distance(points[k, :], new_target, coords=self.coords) < ceil:
                 break
         #points = np.array(odeint(f, x0, timestamps))
-        return Trajectory(timestamps, points, np.zeros(N_disc), k, optimal=True, coords=self.coords)
+        controls = np.array(list(map(control, points)))
+        return Trajectory(timestamps, points, controls, k, optimal=True, coords=self.coords)
 
     def get_first_index(self, point):
         """
@@ -470,10 +474,16 @@ class RFT:
         # A tile is a region between 4 known values of wind
         xx = (point[0] - self.bl[0]) / (self.tr[0] - self.bl[0])
         yy = (point[1] - self.bl[1]) / (self.tr[1] - self.bl[1])
+        if xx < 0. or xx > 1. or yy < 0. or yy > 1.:
+            print(f'Point not within bounds {tuple(point)}')
         delta_x = (self.tr[0] - self.bl[0]) / (nx - 1)
         delta_y = (self.tr[1] - self.bl[1]) / (ny - 1)
         i = int((nx - 1) * xx)
         j = int((ny - 1) * yy)
+        if i == nx - 1:
+            i -= 1
+        if j == ny - 1:
+            j -= 1
         # Tile bottom left corner x-coordinate
         xij = delta_x * i + self.bl[0]
         # Point relative position in tile

@@ -1,3 +1,4 @@
+import argparse
 import os.path
 import sys
 import numpy as np
@@ -180,6 +181,15 @@ class FrontendHandler:
             self.display.draw_trajs(nolabels=False, opti_only=False)
             self.display.draw_solver()
             self.display.draw_rff()
+        elif 'big_rankine' in self.case_name:
+            self.display.nocontrols = True
+            self.display.set_title('big-rankine')
+            self.display.load_params()
+            self.display.setup()
+            self.display.draw_wind(wind_nointerp=True)
+            self.display.draw_trajs(nolabels=False, opti_only=False)
+            self.display.draw_solver()
+            self.display.draw_rff(slice=(0, 5))
 
         elif self.case_name in ['example_test_grib']:
             self.display.nocontrols = True
@@ -221,7 +231,7 @@ class FrontendHandler:
             # self.display.draw_solver()
             self.display.draw_rff()
 
-        elif self.case_name in ['example_solver_san-juan_dublin_ortho']:
+        elif self.case_name in ['example_solver_san-juan_dublin_ortho', 'example_solver-rp_sanjuan-dublin-ortho']:
             self.display.nocontrols = True
             self.display.set_title('Test flatten')
             self.display.load_params()
@@ -229,7 +239,7 @@ class FrontendHandler:
             self.display.draw_wind(wind_nointerp=True)
             self.display.draw_trajs(nolabels=False, opti_only=False)
             # self.display.draw_solver()
-            self.display.draw_rff()
+            self.display.draw_rff(slice=(1,10))
 
         elif 'solver' in self.case_name:
             print(f'Using default solver setup script for unknown case "{self.case_name}"', file=sys.stderr)
@@ -258,7 +268,7 @@ class FrontendHandler:
             self.display.draw_rff()
             self.display.draw_solver()
 
-    def select_example(self, *args):
+    def select_example(self, *args, latest=False):
         if self.mode == 'user':
             self.output_path = args[0]
             self.case_name = os.path.basename(self.output_path)
@@ -296,7 +306,11 @@ class FrontendHandler:
                 def __init__(self, value):
                     self.__dict__.update(value=value)
 
-
+            if latest:
+                all_subdirs = [d for d in os.listdir(os.path.abspath(os.path.join('..', 'output')))]
+                latest_subdir = max(all_subdirs, key=os.path.getmtime)
+                print(latest_subdir)
+                self.dd = ns(os.path.basename(latest_subdir).split('example_')[1])
             try:
                 cache_fp = os.path.join('..', 'output', '.frontend_cache2.txt')
                 sel_dir = easygui.diropenbox(default=os.path.join('..', 'output'))
@@ -482,35 +496,6 @@ class FrontendHandler:
 
 if __name__ == '__main__':
     fh = FrontendHandler(mode='default')
-    fh.select_example()
+    fh.select_example(latest=False)
     fh.run_frontend()
     # fh.post_processing()
-    # from plotly.tools import mpl_to_plotly
-    # import dash
-    # import dash_core_components as dcc
-    # import dash_html_components as html
-    #
-    # fh = FrontendHandler(mode='default')
-    # fh.select_example()
-    # fh.run_frontend(noshow=True)
-    #
-    # plotly_fig = mpl_to_plotly(fh.display.mainfig)
-    #
-    # app = dash.Dash(__name__)  # (3)
-    # app.layout = html.Div(children=[
-    #     html.H1(children=f'Life expectancy vs GDP per capita ()',
-    #             style={'textAlign': 'center', 'color': '#7FDBFF'}),  # (5)
-    #     dcc.Graph(
-    #         id='graph1',
-    #         figure=plotly_fig
-    #     ),  # (6)
-    #     html.Div(children=f'''
-    #                                     The graph above shows relationship between life expectancy and
-    #                                     GDP per capita for year. Each continent data has its own
-    #                                     colour and symbol size is proportionnal to country population.
-    #                                     Mouse over for details.
-    #                                 '''),  # (7)
-    # ]
-    # )
-    #
-    # app.run_server(debug=True)  # (8)

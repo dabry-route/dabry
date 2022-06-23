@@ -10,7 +10,7 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id = 1
+    pb_id = 8
     seed = 0
     cache = False
 
@@ -34,7 +34,7 @@ if __name__ == '__main__':
     mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, bl=pb.bl, tr=pb.tr)
 
     # Setting the solver
-    solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft, nt_pmp=1000)
+    solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft, nt_pmp=1000, extremals=False)
     if cache:
         solver_rp.rft.load_cache(os.path.join(output_dir, 'rff.h5'))
 
@@ -42,9 +42,6 @@ if __name__ == '__main__':
     solver_rp.solve()
     t_end = time.time()
     time_rp = t_end - t_start
-
-    solver_rp.mp.trajs.append(solver_rp.rft.backward_traj(pb.x_target, pb.x_init, solver_rp.opti_ceil,
-                                                          solver_rp.T, pb.model, N_disc=1000))
 
     # solver_rp.rft.build_front(pb.x_target)
 
@@ -57,3 +54,5 @@ if __name__ == '__main__':
     ps.set_output_dir(output_dir)
     ps.load_from_solver_rp(solver_rp)
     ps.dump()
+
+    print(f'Results saved to {output_dir}')

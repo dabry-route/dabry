@@ -1,6 +1,7 @@
 import h5py
 from mdisplay.geodata import GeoData
 from mpl_toolkits.basemap import Basemap
+from pyproj import Proj
 
 from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
@@ -18,6 +19,8 @@ problems = {
     4: ['Double Gyre Kularatne2016', 'double-gyre-ku2016'],
     5: ['Point symmetric Techy2011', 'pointsym-techy2011'],
     6: ['Three obstacles', '3obs'],
+    7: ['San-Juan Dublin Ortho', 'sanjuan-dublin-ortho'],
+    8: ['Big Rankine vortex', 'big_rankine']
 }
 
 
@@ -360,6 +363,59 @@ class IndexedProblem(MermozProblem):
 
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+
+        elif i == 7:
+            v_a = 23.
+            coords = COORD_CARTESIAN
+            total_wind = DiscreteWind()
+            total_wind.load('/home/bastien/Documents/data/wind/ncdc/san-juan-dublin-flattened-ortho.mz/wind.h5')
+
+            bl = total_wind.grid[0, 0]
+            tr = total_wind.grid[-1, -1]
+
+            gd = GeoData()
+            proj = Proj(proj='ortho', lon_0=total_wind.lon_0, lat_0=total_wind.lat_0)
+
+            point = np.array(gd.get_coords('San Juan', units='deg'))
+            x_init = np.array(proj(*point))
+
+            point = np.array(gd.get_coords('Dublin', units='deg'))
+            x_target = np.array(proj(*point))
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            # Creates the navigation problem on top of the previous model
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+
+        elif i == 8:
+            v_a = 23.
+            coords = COORD_CARTESIAN
+
+            factor = 1e6
+            factor_speed = v_a
+
+            x_init = factor * np.array([0., 0.])
+            x_target = factor * np.array([1., 0.])
+
+            bl = factor * np.array([-0.2, -1.])
+            tr = factor * np.array([1.2, 1.])
+            omega = factor * np.array(((0.2, -0.2), (0.8, 0.2)))
+
+            vortex = [
+                RankineVortexWind(omega[0][0], omega[0][1], factor * factor_speed * -7., factor * 1.),
+                RankineVortexWind(omega[1][0], omega[1][1], factor * factor_speed * -7., factor * 1.)
+            ]
+            const_wind = UniformWind(np.array([0., 0.]))
+
+            alty_wind = const_wind + vortex[0] + vortex[1]
+            # total_wind = DiscreteWind()
+            # total_wind.load_from_wind(alty_wind, 101, 101, bl, tr, coords=coords)
+
+            zermelo_model = ZermeloGeneralModel(v_a)
+            zermelo_model.update_wind(alty_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
 

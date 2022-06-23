@@ -137,5 +137,5 @@ class PostProcessing:
 
 
 if __name__ == '__main__':
-    pp = PostProcessing('/home/bastien/Documents/work/mermoz/output/example_solver-rp_double-gyre-li2020_20')
+    pp = PostProcessing('/home/bastien/Documents/work/mermoz/output/example_solver-rp_linear')
     pp.stats(only_opti=True)
