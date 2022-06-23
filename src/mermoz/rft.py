@@ -1,15 +1,19 @@
 import json
 import os
 import sys
+import matplotlib.pyplot as plt
 
 import h5py
 import numpy as np
 from matplotlib import pyplot as plt
 from numpy import ndarray
-from math import sin, cos
+from math import sin, cos, atan2
+
+from scipy.integrate import odeint
 
 from mermoz.misc import *
 from mermoz.problem import MermozProblem
+from mermoz.trajectory import Trajectory
 
 
 def upwind_diff(field, axis, delta):
@@ -304,6 +308,30 @@ class RFT:
             # Unflatten data if needed
             if self.coords == COORD_GCS:
                 self.toggle_flatten()
+        elif self.kernel == 'cache':
+            pass
+
+    def load_cache(self, filepath):
+        try:
+            print('[RFT] Using cached values')
+            with h5py.File(filepath, 'r') as f:
+                nt, nx, ny = f['data'].shape
+                self.phi = np.zeros((nx, ny, nt))
+                self.coords = f.attrs['coords']
+                self.phi[:, :, :] = np.array(f['data']).transpose((1, 2, 0))
+
+                self.max_time = np.array(f['ts']).max()
+
+                grid = np.zeros(f['grid'].shape)
+                grid[:] = f['grid']
+
+                factor = DEG_TO_RAD if self.coords == COORD_GCS else 1.
+                self.bl = factor * np.array((grid[:, :, 0].min(), grid[:, :, 1].min()))
+                self.tr = factor * np.array((grid[:, :, 0].max(), grid[:, :, 1].max()))
+
+                self.kernel = 'cache'
+        except FileNotFoundError:
+            print(f'[RFT] Could load cache, resuming with usual computation ({filepath} : Not found)', file=sys.stderr)
 
     def toggle_flatten(self):
         """
@@ -377,6 +405,13 @@ class RFT:
             dset[:, :, 0] = factor * X
             dset[:, :, 1] = factor * Y
 
+    def build_front(self, point):
+        k = self.get_first_index(point) - 1
+        # TODO : make that more general
+        # For the moment, store it in first front
+        lam = self.value(point, k + 1) / (self.value(point, k + 1) - self.value(point, k))
+        self.phi[:, :, 0] = lam * self.phi[:, :, k] + (1 - lam) * self.phi[:, :, k + 1]
+
     def value(self, point, timeindex):
         """
         Compute phi value at given point and timestamp using linear interpolation
@@ -402,9 +437,71 @@ class RFT:
         b = (point[1] - yij) / delta_y
 
         return (1 - b) * ((1 - a) * self.phi[i, j, timeindex] + a * self.phi[i + 1, j, timeindex]) + b * (
-                    (1 - a) * self.phi[i, j + 1, timeindex] + a * self.phi[i + 1, j + 1, timeindex])
+                (1 - a) * self.phi[i, j + 1, timeindex] + a * self.phi[i + 1, j + 1, timeindex])
 
-    def get_normal(self, point, compute=False):
+    def backward_traj(self, point, new_target, ceil, T, model, N_disc=100):
+        """
+        Build backward trajectory starting from given endpoint
+        :param point: Endpoint
+        :param model: Zermelo model object
+        :return: Trajectory integrated backwards using normal to fronts
+        """
+        x0 = np.zeros(2)
+        x0[:] = point
+
+        def f(x, t):
+            s = self.get_normal(x)[0]
+            u = atan2(s[1], s[0])
+            return - model.dyn.value(x, u, 0.)
+        timestamps = np.linspace(0., T, N_disc)
+        dt = T / N_disc
+        points = np.zeros((N_disc, 2))
+        points[0, :] = point
+        k = 0
+        for k in range(1, N_disc):
+            points[k, :] = f(points[k-1, :], 0.) * dt + points[k-1, :]
+            if distance(points[k, :], new_target, coords=self.coords) < ceil:
+                break
+        #points = np.array(odeint(f, x0, timestamps))
+        return Trajectory(timestamps, points, np.zeros(N_disc), k, optimal=True, coords=self.coords)
+
+    def get_first_index(self, point):
+        """
+        Get first time index for which given point is in a front
+        :param point: Point to check
+        :return: First index such that phi is negative at that index and point
+        """
+        nx, ny, nt = self.phi.shape
+        # Find the tile to which requested point belongs
+        # A tile is a region between 4 known values of wind
+        xx = (point[0] - self.bl[0]) / (self.tr[0] - self.bl[0])
+        yy = (point[1] - self.bl[1]) / (self.tr[1] - self.bl[1])
+        delta_x = (self.tr[0] - self.bl[0]) / (nx - 1)
+        delta_y = (self.tr[1] - self.bl[1]) / (ny - 1)
+        i = int((nx - 1) * xx)
+        j = int((ny - 1) * yy)
+        # Tile bottom left corner x-coordinate
+        xij = delta_x * i + self.bl[0]
+        # Point relative position in tile
+        a = (point[0] - xij) / delta_x
+        # Tile bottom left corner y-coordinate
+        yij = delta_y * j + self.bl[1]
+        b = (point[1] - yij) / delta_y
+        phi_itp = 0.
+        try:
+            for k in range(1, nt):
+                phi_itp = (1 - b) * ((1 - a) * self.phi[i, j, k] + a * self.phi[i + 1, j, k]) + \
+                          b * ((1 - a) * self.phi[i, j + 1, k] + a * self.phi[i + 1, j + 1, k])
+                if phi_itp < 0.:
+                    return k
+            if phi_itp > 0.:
+                print(f'[Init shooting] Error: Point is not within any front. ({point[0]}, {point[1]})',
+                      file=sys.stderr)
+                return -1
+        except IndexError as e:
+            raise e
+
+    def get_normal(self, point, index=None, compute=False):
         if compute:
             self.compute()
         nx, ny, nt = self.phi.shape
@@ -423,26 +520,26 @@ class RFT:
         # Tile bottom left corner y-coordinate
         yij = delta_y * j + self.bl[1]
         b = (point[1] - yij) / delta_y
-        phi_itp = 0.
-        k = 0
-        for k in range(nt):
-            phi_itp = (1 - b) * ((1 - a) * self.phi[i, j, k] + a * self.phi[i + 1, j, k]) + \
-                      b * ((1 - a) * self.phi[i, j + 1, k] + a * self.phi[i + 1, j + 1, k])
-            if phi_itp < 0.:
-                break
-        if phi_itp > 0.:
-            print(f'[Init shooting] Error: Point is not within any front. ({point[0]}, {point[1]})',
-                  file=sys.stderr)
-            exit(1)
 
-        k = k - 1
+        if index is not None:
+            k = index
+        else:
+            k = self.get_first_index(point) - 1
+
+        lam = self.value(point, k + 1) / (self.value(point, k + 1) - self.value(point, k))
 
         # Linear interpolation gradient at point gives the normal
         d_phi__d_x = 1. / delta_x * ((1 - b) * (self.phi[i + 1, j, k] - self.phi[i, j, k]) +
                                      b * (self.phi[i + 1, j + 1, k] - self.phi[i, j + 1, k]))
         d_phi__d_y = 1. / delta_y * ((1 - a) * (self.phi[i, j + 1, k] - self.phi[i, j, k]) +
                                      a * (self.phi[i + 1, j + 1, k] - self.phi[i + 1, j, k]))
-        d_phi = np.array((d_phi__d_x, d_phi__d_y))
+        d_phi_k = np.array((d_phi__d_x, d_phi__d_y))
+        d_phi__d_x = 1. / delta_x * ((1 - b) * (self.phi[i + 1, j, k + 1] - self.phi[i, j, k + 1]) +
+                                     b * (self.phi[i + 1, j + 1, k + 1] - self.phi[i, j + 1, k + 1]))
+        d_phi__d_y = 1. / delta_y * ((1 - a) * (self.phi[i, j + 1, k + 1] - self.phi[i, j, k + 1]) +
+                                     a * (self.phi[i + 1, j + 1, k + 1] - self.phi[i + 1, j, k + 1]))
+        d_phi_kp1 = np.array((d_phi__d_x, d_phi__d_y))
+        d_phi = lam * d_phi_k / np.linalg.norm(d_phi_k) + (1-lam) * d_phi_kp1 / np.linalg.norm(d_phi_kp1)
         return d_phi / np.linalg.norm(d_phi), self.max_time * (k + 1) / self.nt, k + 1
 
 

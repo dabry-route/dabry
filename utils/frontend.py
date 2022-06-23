@@ -148,12 +148,12 @@ class FrontendHandler:
             self.display.map.drawgreatcircle(lon_ny, lat_ny, lon_par, lat_par, linewidth=1, color='b', alpha=0.4,
                                              linestyle='--',
                                              label='Great circle', zorder=4)
-        elif self.case_name in ['example_solver_double-gyre-kularatne2016', 'example_solver_double-gyre-li2020']:
+        elif 'double-gyre-ku2016' in self.case_name or 'double-gyre-li2020' in self.case_name:
             self.display.nocontrols = True
             self.display.set_title(f'{self.case_name.split("-")[-1]}')
             self.display.load_params()
             self.display.setup()
-            self.display.draw_wind(autoscale=True, wind_nointerp=False)
+            self.display.draw_wind(autoscale=True, wind_nointerp=True)
             self.display.draw_trajs(nolabels=True, opti_only=opti_only)
             self.display.draw_rff()
             self.display.draw_solver()
@@ -171,9 +171,9 @@ class FrontendHandler:
             #
             # self.display.mainfig.canvas.mpl_connect('motion_notify_event', on_plot_hover)
 
-        elif self.case_name in ['example_solver_rad_gauss_1']:
+        elif '3obs' in self.case_name:
             self.display.nocontrols = True
-            self.display.set_title('Test case')
+            self.display.set_title('3obs')
             self.display.load_params()
             self.display.setup()
             self.display.draw_wind()
@@ -484,7 +484,7 @@ if __name__ == '__main__':
     fh = FrontendHandler(mode='default')
     fh.select_example()
     fh.run_frontend()
-    fh.post_processing()
+    # fh.post_processing()
     # from plotly.tools import mpl_to_plotly
     # import dash
     # import dash_core_components as dcc

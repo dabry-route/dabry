@@ -42,6 +42,7 @@ def rectify(a, b):
 
 TRAJ_PMP = 'pmp'
 TRAJ_INT = 'integral'
+TRAJ_PATH = 'path'
 
 EARTH_RADIUS = 6378.137e3  # [m] Earth equatorial radius
 
@@ -161,3 +162,43 @@ def enlarge(bl, tr, factor=1.1):
     c = 0.5 * (bl + tr)
     half_delta = 0.5 * np.array((delta_x, delta_y))
     return c - factor * half_delta, c + factor * half_delta
+
+
+def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
+    """
+    Return the analytical solution to minimum time of travel between
+    x_init and x_target in a constant wind gradient.
+    x_init and x_target are assumed to lay on the x-axis
+    Wind gradient is assumed to be cross-track.
+    :param airspeed: The vehicle airspeed in meters per second
+    :param gradient: The windfield gradient non-null component in inverse seconds
+    :return: The analytical quickest trajectory
+    """
+    # Analytic optimal trajectory
+    w = -gradient
+
+    def analytic_traj(theta, theta_f):
+        x = 0.5 * airspeed / w * (-1 / np.cos(theta_f) * (np.tan(theta_f) - np.tan(theta)) +
+                                  np.tan(theta) * (1 / np.cos(theta_f) - 1 / np.cos(theta)) -
+                                  np.log((np.tan(theta_f)
+                                          + 1 / np.cos(theta_f)) / (
+                                                 np.tan(theta) + 1 / np.cos(theta))))
+        y = airspeed / w * (1 / np.cos(theta) - 1 / np.cos(theta_f))
+        return x + x_target[0] - x_init[0], y
+
+    def residual(theta_f):
+        return analytic_traj(-theta_f, theta_f)[0] - x_init[0]
+
+    if theta_f is None:
+        import scipy.optimize
+        theta_f = scipy.optimize.newton_krylov(residual, -np.pi/2. + 1e-1)
+        print(theta_f)
+
+    points = np.array(list(map(lambda theta: analytic_traj(theta, theta_f), np.linspace(-theta_f, theta_f, 1000))))
+    from mermoz.trajectory import Trajectory
+    return Trajectory(np.zeros(points.shape[0]),
+                      points,
+                      np.zeros(points.shape[0]),
+                      points.shape[0] - 1,
+                      coords=COORD_CARTESIAN,
+                      type='optimal')

@@ -25,9 +25,10 @@ class MDFmanager:
             os.mkdir(output_dir)
         self.output_dir = output_dir
 
-    def clean_output_dir(self):
+    def clean_output_dir(self, keep_rff=False):
         for filename in os.listdir(self.output_dir):
-            os.remove(os.path.join(self.output_dir, filename))
+            if not keep_rff or not filename.endswith('rff.h5'):
+                os.remove(os.path.join(self.output_dir, filename))
 
     def dump_trajs(self, traj_list, filename=None):
         filename = self.trajs_filename if filename is None else filename

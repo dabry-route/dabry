@@ -15,6 +15,8 @@ from mdisplay.misc import windy_cm
 from mermoz.wind import DiscreteWind
 from mermoz.misc import *
 
+path_colors = ['b', 'g', 'r', 'c', 'm', 'y']
+
 
 class TrajStats:
 
@@ -51,7 +53,7 @@ class PostProcessing:
                     self.va = AIRSPEED_DEFAULT
 
         wind_fp = os.path.join(self.output_dir, self.wind_fn)
-        self.wind = DiscreteWind()
+        self.wind = DiscreteWind(interp='linear')
         self.wind.load(wind_fp)
 
     def stats(self, fancynormplot=False, only_opti=False):
@@ -60,7 +62,7 @@ class PostProcessing:
         f = h5py.File(traj_fp, "r")
         ntr = len(f.values())
         fig, ax = plt.subplots(ncols=3, nrows=2)
-        decorate(ax[0, 0], 'Delay per length unit', 'Point', '[s/m]', ylim=(0., 3/self.va))
+        decorate(ax[0, 0], 'Delay per length unit', 'Point', '[s/m]', ylim=(0., 3 / self.va))
         decorate(ax[0, 1], 'Crosswind', 'Point', '[m/s]', ylim=(-1. * self.va, 1. * self.va))
         decorate(ax[0, 2], 'Tangent wind', 'Point', '[m/s]', ylim=(-1. * self.va, 1. * self.va))
         decorate(ax[1, 0], 'Ground speed', 'Point', '[m/s]', ylim=(0., 2. * self.va))
@@ -71,20 +73,21 @@ class PostProcessing:
                 points = np.zeros(traj['data'].shape)
                 points[:] = traj['data']
                 nt = traj.attrs['last_index']
+                color = path_colors[traj.attrs['label'] % len(path_colors)]
                 tstats = self.point_stats(points, last_index=nt)
-                ax[0, 0].plot(1 / tstats.gs, label=f'{k}')
-                ax[0, 1].plot(tstats.cw)
-                ax[0, 2].plot(tstats.tw)
+                ax[0, 0].plot(1 / tstats.gs, label=f'{k}' + ('_opt' if traj.attrs['type'] == 'optimal' else ''), color=color)
+                ax[0, 1].plot(tstats.cw, color=color)
+                ax[0, 2].plot(tstats.tw, color=color)
                 x = np.linspace(0, nt - 1, nt - 1)
                 y = np.sqrt(tstats.cw ** 2 + tstats.tw ** 2)
                 if fancynormplot:
                     xx = np.linspace(0, nt - 1, 10 * (nt - 1))
                     yy = itp.interp1d(x, y)(xx)
-                    ax[1, 1].scatter(xx, yy, c=windy_cm(yy / windy_cm.norm_max), s=0.5)
+                    ax[1, 1].scatter(xx, yy, c=windy_cm(yy / windy_cm.norm_max), s=0.5, color=color)
                 else:
-                    ax[1, 1].plot(x, y)
+                    ax[1, 1].plot(x, y, color=color)
                 ax[1, 0].plot(tstats.gs)
-                print(f'{k} : {tstats.duration/3600:.2f}h, {tstats.length/1000:.2f}km')
+                print(f'{k} : {tstats.duration / 3600:.2f}h, {tstats.length / 1000:.2f}km')
         f.close()
         ax[0, 0].legend()
         plt.show()
@@ -105,7 +108,7 @@ class PostProcessing:
         tw = np.zeros(n - 1)
         controls = np.zeros(n - 1)
         duration = 0.
-        length = float(np.sum(np.linalg.norm(points[:n-1] - points[1:n], axis=1)))
+        length = float(np.sum(np.linalg.norm(points[:n - 1] - points[1:n], axis=1)))
         for i in range(n - 1):
             p = np.zeros(2)
             p2 = np.zeros(2)
@@ -120,12 +123,12 @@ class PostProcessing:
             w_arg = atan2(w[1], w[0])
             right = w_norm / self.va * sin(w_arg - dx_arg)
 
-            def gs_f(uu):
-                return (np.array((cos(uu), sin(uu))) * self.va + w) @ e_dx
+            def gs_f(uu, va, w, e_dx):
+                return (np.array((cos(uu), sin(uu))) * va + w) @ e_dx
 
-            u = max([dx_arg - asin(right), dx_arg + asin(right) - pi], key=gs_f)
+            u = max([dx_arg - asin(right), dx_arg + asin(right) - pi], key=lambda uu: gs_f(uu, self.va, w, e_dx))
 
-            gs[i] = gs_v = gs_f(u)
+            gs[i] = gs_v = gs_f(u, self.va, w, e_dx)
             cw[i] = np.cross(e_dx, w)
             tw[i] = e_dx @ w
             controls[i] = u
@@ -136,5 +139,5 @@ class PostProcessing:
 
 
 if __name__ == '__main__':
-    pp = PostProcessing('/home/bastien/Documents/work/mermoz/output/example_solver_double-gyre-kularatne2016_rp')
+    pp = PostProcessing('/home/bastien/Documents/work/mermoz/output/example_solver-rp_double-gyre-li2020_20')
     pp.stats(only_opti=True)

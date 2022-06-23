@@ -131,16 +131,15 @@ class ParamsSummary:
         except AttributeError:
             date_wind = 0.
         factor = RAD_TO_DEG if pb.coords == COORD_GCS else 1.
-        self.params = {
-            'coords': pb.coords,
-            'bl_wind': tuple(factor * pb.bl),
-            'tr_wind': tuple(factor * pb.tr),
-            'nx_wind': nx_wind,
-            'ny_wind': ny_wind,
-            'date_wind': date_wind,
-            'point_init': tuple(factor * pb.x_init),
-            'point_target': tuple(factor * pb.x_target),
-        }
+        self.add_param('coords', pb.coords)
+        self.add_param('bl_wind', tuple(factor * pb.bl))
+        self.add_param('tr_wind', tuple(factor * pb.tr))
+        self.add_param('nx_wind', nx_wind)
+        self.add_param('ny_wind', ny_wind)
+        self.add_param('date_wind', date_wind)
+        self.add_param('point_init', tuple(factor * pb.x_init))
+        self.add_param('point_target', tuple(factor * pb.x_target))
+        self.add_param('airspeed', pb.model.v_a)
 
     def process_params(self):
         params = self.params

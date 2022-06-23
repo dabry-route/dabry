@@ -1,17 +1,16 @@
 import time
-
-import numpy as np
 import os
 
 from mermoz.problem import IndexedProblem, problems
 from mermoz.rft import RFT
+from mermoz.misc import *
 from mermoz.shooting import Shooting
 from mermoz.mdf_manager import MDFmanager
 from mermoz.params_summary import ParamsSummary
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id = 2
+    pb_id = 1
 
     run_rft = False
     run_pmp = True
@@ -26,7 +25,7 @@ if __name__ == '__main__':
     mdfm.clean_output_dir()
 
     pb = IndexedProblem(pb_id, seed=2)
-    print(pb.bl)
+    print(pb.descr)
 
     mdfm.dump_wind(pb.model.wind, nx=51, ny=51, bl=pb.bl, tr=pb.tr)
 
@@ -39,14 +38,14 @@ if __name__ == '__main__':
 
     if run_rft:
         # Setting front tracking algorithm
-        nx_rft = 51
-        ny_rft = 51
-        nt_rft = 10
+        nx_rft = 101
+        ny_rft = 101
+        nt_rft = 20
 
         delta_x = (pb.tr[0] - pb.bl[0]) / (nx_rft - 1)
         delta_y = (pb.tr[1] - pb.bl[1]) / (ny_rft - 1)
 
-        print(f"Tracking reachability front ({nx_rft}x{ny_rft}, dx={delta_x:.2E}, dy={delta_y:.2E})... ", end='')
+        print(f"Tracking reachability front ({nx_rft}x{ny_rft}, dx={delta_x:.2E}, dy={delta_y:.2E})... ")
         t_start = time.time()
 
         rft = RFT(pb.bl, pb.tr, T, nx_rft, ny_rft, nt_rft, pb, pb.x_init, kernel='matlab', coords=pb.coords)
@@ -59,12 +58,9 @@ if __name__ == '__main__':
 
         rft.dump_rff(output_dir)
 
-        k = 0
-        while True:
-            if rft.value(pb.x_target, k) < 0.:
-                nt_rft_eff = k
-                break
-            k += 1
+        nt_rft_eff = rft.get_first_index(pb.x_target)
+        if nt_rft_eff == -1:
+            nt_rft_eff = nt_rft - 1
 
         ps.add_param('nt_rft', nt_rft)
         ps.add_param('nx_rft', nx_rft)
@@ -74,7 +70,7 @@ if __name__ == '__main__':
 
     if run_pmp:
         # Set a list of initial adjoint states for the shooting method
-        nt_pmp = 100
+        nt_pmp = 1000
         initial_headings = np.linspace(0.1, 2 * np.pi - 0.1, 30)
         list_p = list(map(lambda theta: -np.array([np.cos(theta), np.sin(theta)]), initial_headings))
 
@@ -96,5 +92,11 @@ if __name__ == '__main__':
 
         ps.add_param('nt_pmp', nt_pmp)
         ps.add_param('pmp_time', pmp_time)
+
+    if pb_id == 1:
+        # Linear wind case comes with an analytical solution
+        alyt_traj = linear_wind_alyt_traj(pb.model.v_a, pb.model.wind.gradient[0, 1], pb.x_init, pb.x_target)
+        pb.trajs.append(alyt_traj)
+        mdfm.dump_trajs(pb.trajs)
 
     ps.dump()

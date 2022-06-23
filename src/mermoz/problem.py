@@ -1,12 +1,11 @@
-import numpy as np
+import h5py
 from mdisplay.geodata import GeoData
 from mpl_toolkits.basemap import Basemap
-from numpy import ndarray
 
 from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
-from mermoz.mdf_manager import MDFmanager
-from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind
+from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
+    PointSymWind
 from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
@@ -15,7 +14,10 @@ problems = {
     0: ['Three vortices', '3vor'],
     1: ['Linear wind', 'linear'],
     2: ['Honolulu Vancouver', 'honolulu-vancouver'],
-    3: ['Double Gyre Li2020', 'double-gyre-li2020']
+    3: ['Double Gyre Li2020', 'double-gyre-li2020'],
+    4: ['Double Gyre Kularatne2016', 'double-gyre-ku2016'],
+    5: ['Point symmetric Techy2011', 'pointsym-techy2011'],
+    6: ['Three obstacles', '3obs'],
 }
 
 
@@ -152,6 +154,29 @@ class MermozProblem:
             del self.trajs[index]
 
 
+class DatabaseProblem(MermozProblem):
+
+    def __init__(self, wind_fpath, x_init=None, x_target=None, airspeed=AIRSPEED_DEFAULT):
+        total_wind = DiscreteWind(interp='linear')
+        total_wind.load(wind_fpath)
+        print(f'Problem from database : {wind_fpath}')
+
+        with h5py.File(wind_fpath, 'r') as f:
+            coords = f.attrs['coords']
+            print(coords)
+            if x_init is None:
+                print('Automatic parameters')
+                bl = np.array((f['grid'][0, 0, 0], f['grid'][0, 0, 1]))
+                tr = np.array((f['grid'][-1, -1, 0], f['grid'][-1, -1, 1]))
+                offset = (tr - bl) * 0.1
+                x_init = bl + offset
+                x_target = tr - offset
+
+        zermelo_model = ZermeloGeneralModel(airspeed, coords=coords)
+        zermelo_model.update_wind(total_wind)
+        super().__init__(zermelo_model, x_init, x_target, coords)
+
+
 class IndexedProblem(MermozProblem):
 
     def __init__(self, i, seed=0):
@@ -218,15 +243,14 @@ class IndexedProblem(MermozProblem):
             tr = factor * np.array([1.2, 1.])
 
             linear_wind = LinearWind(gradient, origin, value_origin)
-            total_wind = DiscreteWind()
-            # Sample analytic linear wind to a grid
-            total_wind.load_from_wind(linear_wind, 51, 51, bl, tr, coords)
+            # total_wind = DiscreteWind()
+            # total_wind.load_from_wind(linear_wind, 51, 51, bl, tr, coords)
 
             # Creates the cinematic model
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
-            zermelo_model.update_wind(total_wind)
+            zermelo_model.update_wind(linear_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
 
         elif i == 2:
             v_a = 23.
@@ -264,8 +288,75 @@ class IndexedProblem(MermozProblem):
             tr = sf * np.array((510, 510))
             coords = COORD_CARTESIAN
 
-            from mermoz.wind import DoubleGyreWind
             total_wind = DoubleGyreWind(0., 0., 500., 500., 1.)
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+
+        elif i == 4:
+            v_a = 0.05
+
+            sf = 1.
+
+            x_init = sf * np.array((0.6, 0.6))
+            x_target = sf * np.array((2.4, 2.4))
+            bl = sf * np.array((0.5, 0.5))
+            tr = sf * np.array((2.5, 2.5))
+            coords = COORD_CARTESIAN
+
+            total_wind = DoubleGyreWind(0.5, 0.5, 2., 2., pi * 0.02)
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+
+        elif i == 5:
+            v_a = 23.
+            sf = 1e6
+
+            x_init = sf * np.array((0., 0.))
+            x_target = sf * np.array((1., 0.))
+            bl = sf * np.array((-0.1, -1.))
+            tr = sf * np.array((1.1, 1.))
+            coords = COORD_CARTESIAN
+
+            gamma = v_a / sf * 1.
+            omega = 0.
+            total_wind = PointSymWind(sf * 0.5, sf * 0.3, gamma, omega)
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+
+        elif i == 6:
+
+            v_a = 23.
+
+            sf = 3e6
+
+            x_init = sf * np.array((0., 0.))
+            x_target = sf * np.array((1., 0.))
+            bl = sf * np.array((-0.15, -1.15))
+            tr = sf * np.array((1.15, 1.15))
+            coords = COORD_CARTESIAN
+
+            const_wind = UniformWind(np.array([1., 1.]))
+
+            c1 = sf * np.array((0.5, 0.))
+            c2 = sf * np.array((0.5, 0.1))
+            c3 = sf * np.array((0.5, -0.1))
+
+            obstacle1 = RadialGaussWind(c1[0], c1[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
+            obstacle2 = RadialGaussWind(c2[0], c2[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
+            obstacle3 = RadialGaussWind(c3[0], c3[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
+
+            alty_wind = obstacle1 + obstacle2 + obstacle3 + const_wind
+
+            total_wind = alty_wind  # DiscreteWind()
 
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
@@ -276,3 +367,4 @@ class IndexedProblem(MermozProblem):
             raise IndexError(f'No problem with index {i}')
 
         self.descr = problems[i][0]
+        print(self.descr)

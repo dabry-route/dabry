@@ -1,7 +1,5 @@
-import sys
 import time
-import numpy as np
-from math import asin
+from math import atan2
 
 from mermoz.model import ZermeloGeneralModel
 from mermoz.problem import MermozProblem
@@ -25,7 +23,8 @@ class SolverRP:
                  nx_rft,
                  ny_rft,
                  nt_rft,
-                 nt_pmp=1000):
+                 nt_pmp=1000,
+                 only_opti_extremals=False):
         self.mp = mp
         self.x_init = np.zeros(2)
         self.x_init[:] = mp.x_init
@@ -38,6 +37,8 @@ class SolverRP:
         # Means nt_rft_eff is the smallest n such that
         # phi[n-1](x_target) > 0. and phi[n](x_target) < 0.
         self.nt_rft_eff = None
+
+        self.only_opti_extremals = only_opti_extremals
 
         self.nt_pmp = nt_pmp
 
@@ -72,8 +73,7 @@ class SolverRP:
                                     domain=self.mp.domain, mask_land=False)
 
     def solve(self):
-        other_time = 0.
-        print(f"Tracking reachability front ({self.nx_rft}x{self.ny_rft}x{self.nt_rft})... ", end='')
+        print(f"Tracking reachability front ({self.nx_rft}x{self.ny_rft}x{self.nt_rft})... ")
         t_start = time.time()
         self.rft.compute()
 
@@ -84,7 +84,7 @@ class SolverRP:
         normal, T, self.nt_rft_eff = self.rft.get_normal(self.x_target, compute=False)
         self.T = 1.1 * T
 
-        auto_psi = asin(normal[1])
+        auto_psi = atan2(normal[1], normal[0])
 
         psi_min = auto_psi - DEG_TO_RAD * 10.
         psi_max = auto_psi + DEG_TO_RAD * 10.
@@ -108,7 +108,7 @@ class SolverRP:
         solver.setup()
 
         t_start = time.time()
-        success = solver.solve_fancy()
+        success = solver.solve_fancy(dump_only_opti=self.only_opti_extremals)
         if not success:
             print(f"Shooting failed, enlarging sector")
             for sector in [(psi_min - 10. * DEG_TO_RAD, psi_min),
