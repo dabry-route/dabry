@@ -192,7 +192,8 @@ def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
     if theta_f is None:
         import scipy.optimize
         theta_f = scipy.optimize.newton_krylov(residual, -np.pi/2. + 1e-1)
-        print(theta_f)
+        print(f'theta_f : {theta_f}')
+    print(f'T : {2 / w * np.tan(theta_f)}')
 
     points = np.array(list(map(lambda theta: analytic_traj(theta, theta_f), np.linspace(-theta_f, theta_f, 1000))))
     from mermoz.trajectory import Trajectory

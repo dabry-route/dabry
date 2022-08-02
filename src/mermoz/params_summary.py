@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import time
 
 import markdown
 import datetime
@@ -53,6 +54,7 @@ class ParamsSummary:
             self.params[k] = v
 
     def dump(self, fname=None, nohtml=False):
+        # self.add_param('gen_time', time.time())
         self.process_params()
         fname = self.params_fname if fname is None else fname
         with open(os.path.join(self.output_dir, fname), 'w') as f:

@@ -4,7 +4,7 @@ import os
 
 import h5py
 
-from mermoz.problem import problems, DatabaseProblem
+from mermoz.problem import problems, DatabaseProblem, IndexedProblem
 from mermoz.misc import *
 from mermoz.trajectory import Trajectory
 from mermoz.post_processing import PostProcessing
@@ -14,7 +14,7 @@ from mermoz.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id = 0
+    pb_id = 9
 
     output_dir = f'/home/bastien/Documents/work/mermoz/output/example_pa_{problems[pb_id][1]}'
     if not os.path.exists(output_dir):
@@ -29,7 +29,8 @@ if __name__ == '__main__':
         bl = np.array((np.array(f['grid'][:, :, 0]).min(), np.array(f['grid'][:, :, 1]).min()))
         tr = np.array((np.array(f['grid'][:, :, 0]).max(), np.array(f['grid'][:, :, 1]).max()))
 
-    pb = DatabaseProblem(wind_fpath)
+    # pb = DatabaseProblem(wind_fpath)
+    pb = IndexedProblem(pb_id)
 
     if pb.coords == COORD_GCS:
         print('Not handling GCS for now', file=sys.stderr)
@@ -76,16 +77,16 @@ if __name__ == '__main__':
     # l0 = L / 10.
     import scipy.optimize
 
-    sol = scipy.optimize.minimize(loss, np.array((l0, l0)), bounds=((-2 * l0, 2 * l0), (-2 * l0, 2 * l0)),
-                                  method='L-BFGS-B', args=(pb.x_init, pb.x_target))
-    print(sol)
-    print(sol['x'])
-    traj = Trajectory(np.zeros(nt),
-                      fourier_traj(sol['x'], pb.x_init, pb.x_target),
-                      np.zeros(nt),
-                      nt,
-                      coords=pb.coords)
-    trajs.append(traj)
+    # sol = scipy.optimize.minimize(loss, np.array((l0, l0)), bounds=((-2 * l0, 2 * l0), (-2 * l0, 2 * l0)),
+    #                               method='L-BFGS-B', args=(pb.x_init, pb.x_target))
+    # print(sol)
+    # print(sol['x'])
+    # traj = Trajectory(np.zeros(nt),
+    #                   fourier_traj(sol['x'], pb.x_init, pb.x_target),
+    #                   np.zeros(nt),
+    #                   nt,
+    #                   coords=pb.coords)
+    # trajs.append(traj)
     i = 0
     N = 3
     N_samples = [5, 7, 9]

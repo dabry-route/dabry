@@ -10,8 +10,7 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id = 8
-    seed = 0
+    pb_id, seed = 10, 0
     cache = False
 
     # Create a file manager to dump problem data

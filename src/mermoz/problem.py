@@ -20,7 +20,9 @@ problems = {
     5: ['Point symmetric Techy2011', 'pointsym-techy2011'],
     6: ['Three obstacles', '3obs'],
     7: ['San-Juan Dublin Ortho', 'sanjuan-dublin-ortho'],
-    8: ['Big Rankine vortex', 'big_rankine']
+    8: ['Big Rankine vortex', 'big_rankine'],
+    9: ['Four vortices', '4vor'],
+    10: ['Dakar Natal', 'dakar-natal'],
 }
 
 
@@ -418,6 +420,38 @@ class IndexedProblem(MermozProblem):
             zermelo_model.update_wind(alty_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+
+        elif i == 9:
+            v_a = 23.
+            coords = COORD_CARTESIAN
+
+            factor = 1e6
+            factor_speed = v_a
+
+            x_init = factor * np.array([0., 0.])
+            x_target = factor * np.array([1., 0.])
+
+            bl = factor * np.array([-0.2, -1.])
+            tr = factor * np.array([1.2, 1.])
+
+            omega = factor * np.array(((0.5, 0.5),
+                              (0.5, 0.2),
+                              (0.5, -0.2),
+                              (0.5, -0.5)))
+            strength = factor * factor_speed * np.array([1., -1., 1.5, -1.5])
+            radius = factor * np.array([1e-1, 1e-1, 1e-1, 1e-1])
+            vortices = [RankineVortexWind(omega[i, 0], omega[i, 1], strength[i], radius[i]) for i in range(len(omega))]
+            const_wind = UniformWind(np.array([0., 0.]))
+
+            alty_wind = sum(vortices, const_wind)
+            # total_wind = DiscreteWind()
+            # total_wind.load_from_wind(alty_wind, 101, 101, bl, tr, coords=coords)
+
+            zermelo_model = ZermeloGeneralModel(v_a)
+            zermelo_model.update_wind(alty_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+
 
         else:
             raise IndexError(f'No problem with index {i}')

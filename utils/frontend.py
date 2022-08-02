@@ -20,6 +20,8 @@ class FrontendHandler:
         self.display = None
         self.case_name = None
         self.dd = None
+        # Default directory containing mermoz output files
+        self.output_dir = '/home/bastien/Documents/work/mermoz/output'
         self.output_path = None
         self.mode = mode
         self.pp_params = {}
@@ -52,7 +54,7 @@ class FrontendHandler:
             if self.case_name == 'example_ft_linearwind':
                 self.display.draw_rff()
 
-        elif self.case_name == 'example_front_tracking':
+        elif self.case_name == 'XXXexample_front_tracking':
             self.display.set_coords('gcs')
             self.display.set_title('Front tracking example')
 
@@ -60,11 +62,11 @@ class FrontendHandler:
 
             self.display.load_params()
             self.display.draw_wind()
-            self.display.draw_rff()
+            self.display.draw_rff(debug=False)
             self.display.draw_trajs(nolabels=True)
             self.display.draw_point_by_name('Natal')
 
-        elif self.case_name == 'example_front_tracking2' or self.case_name == 'example_front_tracking_linearinterp':
+        elif self.case_name == 'XXXexample_front_tracking2' or self.case_name == 'example_front_tracking_linearinterp':
             self.display.set_coords('gcs')
             self.display.set_title('Front tracking example')
 
@@ -207,7 +209,7 @@ class FrontendHandler:
             self.display.load_params()
             self.display.setup()
             self.display.draw_wind(wind_nointerp=True)
-            #self.display.draw_trajs(nolabels=False, opti_only=False)
+            # self.display.draw_trajs(nolabels=False, opti_only=False)
             # self.display.draw_solver()
             self.display.draw_rff()
 
@@ -239,30 +241,30 @@ class FrontendHandler:
             self.display.draw_wind(wind_nointerp=True)
             self.display.draw_trajs(nolabels=False, opti_only=False)
             # self.display.draw_solver()
-            self.display.draw_rff(slice=(1,10))
+            self.display.draw_rff(slice=(1, 10))
 
         elif 'solver' in self.case_name:
             print(f'Using default solver setup script for unknown case "{self.case_name}"', file=sys.stderr)
             self.display.nocontrols = True
-            self.display.set_title('Solver')
+            self.display.set_title(os.path.basename(self.output_path))
             self.display.load_params()
-            self.display.setup(projection='ortho')
+            self.display.setup()
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=False)
             self.display.draw_rff()
             self.display.draw_solver()
         elif 'wf' in self.case_name:
             print(f'Using default wind field setup script for unknown case "{self.case_name}"', file=sys.stderr)
-            self.display.set_title('Wind field')
+            self.display.set_title(os.path.basename(self.output_path))
             self.display.load_params()
             self.display.setup()
             self.display.draw_wind()
         else:
             print(f'Using default setup script for unknown case "{self.case_name}"', file=sys.stderr)
             self.display.nocontrols = True
-            self.display.set_title('Example')
+            self.display.set_title(os.path.basename(self.output_path))
             self.display.load_params()
-            self.display.setup(projection='ortho')
+            self.display.setup()
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=True)
             self.display.draw_rff()
@@ -290,15 +292,17 @@ class FrontendHandler:
                     new_ol.append(e.split('example_')[1])
             kwargs = {'description': "Choose one:",
                       'options': new_ol}
-            if default_value is not None:
+            if default_value is not None and os.path.exists(os.path.join(example_path, default_value)):
                 kwargs['value'] = default_value
             self.dd = Dropdown(**kwargs)
+
             def handler(change):
                 try:
                     with open(cache_fp, 'w') as f:
                         f.writelines(change['new'])
                 except KeyError:
                     pass
+
             self.dd.observe(handler, names='value')
             display(self.dd)
         else:
@@ -306,29 +310,41 @@ class FrontendHandler:
                 def __init__(self, value):
                     self.__dict__.update(value=value)
 
-            if latest:
-                all_subdirs = [d for d in os.listdir(os.path.abspath(os.path.join('..', 'output')))]
-                latest_subdir = max(all_subdirs, key=os.path.getmtime)
-                print(latest_subdir)
-                self.dd = ns(os.path.basename(latest_subdir).split('example_')[1])
-            try:
-                cache_fp = os.path.join('..', 'output', '.frontend_cache2.txt')
-                sel_dir = easygui.diropenbox(default=os.path.join('..', 'output'))
-                if sel_dir in os.path.abspath(os.path.join('..', 'output')):
-                    print('To open example, double-click directory. Opening last file.')
-                    with open(cache_fp, 'r') as f:
-                        sel_dir = f.readline()
-                        print(sel_dir)
-                    self.dd = ns(os.path.basename(sel_dir).split('example_')[1])
-                else:
-                    self.dd = ns(os.path.basename(sel_dir).split('example_')[1])
-                    with open(cache_fp, 'w') as f:
-                        f.writelines(sel_dir)
-
-            except IndexError:
-                print('Directory shall start with "example_"', file=sys.stderr)
+            cache_fp = os.path.join('..', 'output', '.frontend_cache2.txt')
+            last = '{LAST}'
+            latest = '{LATEST}'
+            nlist = [dd for dd in os.listdir(self.output_dir) if
+                     os.path.isdir(os.path.join(self.output_dir, dd)) and not dd.startswith('.')]
+            name = easygui.choicebox('Choose example', 'Example1', [latest, last] + list(sorted(nlist)))
+            if name is None:
+                print('No example selected, quitting', file=sys.stderr)
                 exit(1)
+            sel_dir = os.path.join(self.output_dir, name)
+            # sel_dir = easygui.diropenbox(default=os.path.join('..', 'output'))
+            if name == last:
+                print('Opening last file')
+                with open(cache_fp, 'r') as f:
+                    sel_dir = f.readline()
+                    print(sel_dir)
+                self.dd = ns(os.path.basename(sel_dir))
+            elif name == latest:
+                print('Opening latest file')
+                all_subdirs = list(map(lambda n: os.path.join(self.output_dir, n), nlist))
+                all_params = []
+                for dd in all_subdirs:
+                    params_path = os.path.join(dd, 'params.json')
+                    if os.path.exists(params_path):
+                        all_params.append(params_path)
 
+                latest_subdir = os.path.dirname(max(all_params, key=os.path.getmtime))
+                print(latest_subdir)
+                self.dd = ns(os.path.basename(latest_subdir))
+
+            else:
+                # self.dd = ns(os.path.basename(sel_dir).split('example_')[1])
+                self.dd = ns(os.path.basename(sel_dir))
+                with open(cache_fp, 'w') as f:
+                    f.writelines(sel_dir)
 
     def run_frontend(self, ex_name=None, noparams=True, opti_only=False, noshow=False):
         # if self.mode == 'default':
@@ -340,7 +356,7 @@ class FrontendHandler:
         #         self.output_path = os.path.join('..', 'output', ex_name)
         #     self.case_name = os.path.basename(self.output_path)
         if self.mode in ['notebook', 'default']:
-            self.output_path = os.path.join('..', 'output', f'example_{self.dd.value}')
+            self.output_path = os.path.join('..', 'output', self.example_name())
             self.case_name = os.path.basename(self.output_path)
         elif self.mode == 'user':
             pass
@@ -357,18 +373,21 @@ class FrontendHandler:
 
     def show_params(self):
         from IPython.core.display import HTML
-        return HTML(filename=os.path.join('..', 'output', 'example_' + self.dd.value, 'params.html'))
+        return HTML(filename=os.path.join('..', 'output', self.example_name(), 'params.html'))
+
+    def example_name(self):
+        return ('example_' if self.mode == 'notebook' else '') + f'{self.dd.value}'
 
     def post_processing(self):
-        with open(os.path.join('..', 'output', f'example_{self.dd.value}', 'params.json'), 'r') as f:
+        with open(os.path.join('..', 'output', self.example_name(), 'params.json'), 'r') as f:
             params = json.load(f)
 
         opti_ceil = params['target_radius']
-        #print(opti_ceil)
+        # print(opti_ceil)
 
         factor = DEG_TO_RAD if params['coords'] == COORD_GCS else 1.
         target = factor * np.array(params['point_target'])
-        #print(target)
+        # print(target)
 
         reach_time_nowind = params['geodesic_time']
 
@@ -379,7 +398,7 @@ class FrontendHandler:
 
         self.traj_stats = []
 
-        with h5py.File(os.path.join('..', 'output', f'example_{self.dd.value}', 'trajectories.h5')) as f:
+        with h5py.File(os.path.join('..', 'output', self.example_name(), 'trajectories.h5')) as f:
             for i, traj in enumerate(f.values()):
                 coords = traj.attrs['coords']
                 last_index = traj.attrs['last_index']
@@ -393,7 +412,7 @@ class FrontendHandler:
                     p = factor * np.array(p)
                     if k > 0:
                         length += distance(p, last_p, coords=coords)
-                    if notfound and distance(p, target, coords=coords) < 1.05*opti_ceil:
+                    if notfound and distance(p, target, coords=coords) < 1.05 * opti_ceil:
                         reach_time = traj["ts"][k]
                         notfound = False
                     last_p[:] = p
@@ -425,8 +444,12 @@ class FrontendHandler:
             'id': -2,
             'name': 'no-wind geodesic',
             'duration': params['geodesic_time'],
-            'length': params['geodesic_length']
+            'length': 1.,
         }
+        try:
+            tst['length'] = params['geodesic_length']
+        except KeyError:
+            tst['length'] = reach_time_nowind / params['airspeed']
         self.traj_stats.append(tst)
 
         self.pp_params['reach_time_geodesic'] = reach_time_nowind
@@ -487,11 +510,11 @@ class FrontendHandler:
 
         s = "| Id | Name | Duration | Length | Mean groundspeed | \n|---|:---:|---|---|---|\n"
         for tst in self.traj_stats:
-            s += f"| {tst['id']} | {tst['name']} | {ft(tst['duration'])} | {fl(tst['length'])} | {3.6 * tst['length']/tst['duration']:.2f} km/h |\n"
-        from IPython.core.display import display, Markdown, HTML
-        #display(HTML("<style>.rendered_html { font-size: 30px; }</style>"))
-        display(Markdown(s))
+            s += f"| {tst['id']} | {tst['name']} | {ft(tst['duration'])} | {fl(tst['length'])} | {3.6 * tst['length'] / tst['duration']:.2f} km/h |\n"
 
+        from IPython.core.display import display, Markdown, HTML
+        # display(HTML("<style>.rendered_html { font-size: 30px; }</style>"))
+        display(Markdown(s))
 
 
 if __name__ == '__main__':

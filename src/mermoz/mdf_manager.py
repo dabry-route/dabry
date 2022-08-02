@@ -107,49 +107,68 @@ class MDFmanager:
             dset = f.create_dataset('grid', (dwind.nx, dwind.ny, 2), dtype='f8')
             dset[:] = factor * dwind.grid
 
-    def dump_wind_from_grib2(self, srcfile, bl, tr, dstname=None, coords=COORD_GCS):
+    def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=COORD_GCS):
         if coords == COORD_CARTESIAN:
             print('Cartesian conversion not handled yet', file=sys.stderr)
             exit(1)
+        if type(srcfiles) == str:
+            srcfiles = [srcfiles]
         filename = self.wind_filename if dstname is None else dstname
         filepath = os.path.join(self.output_dir, filename)
-        grib_name = os.path.basename(srcfile)
-        grbs = pygrib.open(srcfile)
-        grb = grbs.select(name='U component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
-        lon_b = rectify(bl[0], tr[0])
-        U, lats, lons = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
-        grb = grbs.select(name='V component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
-        V, _, _ = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
-        ny, nx = U.shape
-        print(f'nx : {nx}, ny : {ny}')
 
-        if lons.max() > 180.:
-            newlons = np.zeros(lons.shape)
-            newlons[:] = lons - 360.
-            lons[:] = newlons
+        def process(grbfile, setup=False, nx=None, ny=None):
+            grbs = pygrib.open(grbfile)
+            grb = grbs.select(name='U component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
+            lon_b = rectify(bl[0], tr[0])
+            U, lats, lons = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
+            grb = grbs.select(name='V component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
+            V, _, _ = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
+            if setup:
+                if lons.max() > 180.:
+                    newlons = np.zeros(lons.shape)
+                    newlons[:] = lons - 360.
+                    lons[:] = newlons
 
-        newlats = np.zeros(lats.shape)
-        newlats = lats[::-1, :]
-        lats[:] = newlats
+                newlats = np.zeros(lats.shape)
+                newlats[:] = lats[::-1, :]
+                lats[:] = newlats
 
-        grid = np.zeros((nx, ny, 2))
-        grid[:] = np.transpose(np.stack((lons, lats)), (2, 1, 0))
+                ny, nx = U.shape
+                print(f'nx : {nx}, ny : {ny}')
+                grid = np.zeros((nx, ny, 2))
+                grid[:] = np.transpose(np.stack((lons, lats)), (2, 1, 0))
+                return nx, ny, grid
+            else:
+                if nx is None or ny is None:
+                    print('Missing nx or ny', file=sys.stderr)
+                    exit(1)
+                UV = np.zeros((nx, ny, 2))
+                UV[:] = np.transpose(np.stack((U, V)), (2, 1, 0))
+                return UV
+
+        # First fetch grid parameters
+        nx, ny, grid = process(srcfiles[0], setup=True)
+        nt = len(srcfiles)
+        UVs = np.zeros((nt, nx, ny, 2))
+        dates = np.zeros((nt,))
+        for k, grbfile in enumerate(srcfiles):
+            UV = process(grbfile, nx=nx, ny=ny)
+            UVs[k, :] = UV
+            dates[k] = self._grib_date_to_unix(os.path.basename(grbfile))
 
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = coords
             f.attrs['units_grid'] = U_DEG
             f.attrs['analytical'] = False
-            dset = f.create_dataset('data', (1, nx, ny, 2), dtype='f8')
-            UV = np.zeros((nx, ny, 2))
-            UV[:] = np.transpose(np.stack((U, V)), (2, 1, 0))
-            dset[0, :] = UV
-            dset = f.create_dataset('ts', (1,), dtype='f8')
-            dset[0] = self._grib_date_to_unix(grib_name)
-            factor = 1. # (RAD_TO_DEG if coords == COORD_GCS else 1.)
+            dset = f.create_dataset('data', (nt, nx, ny, 2), dtype='f8')
+            dset[:] = UVs
+            dset = f.create_dataset('ts', (nt,), dtype='f8')
+            dset[:] = dates
+            factor = 1.  # (RAD_TO_DEG if coords == COORD_GCS else 1.)
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
             dset[:] = factor * grid
 
-        return nx, ny
+        return nt, nx, ny
 
 
 if __name__ == '__main__':
@@ -162,4 +181,3 @@ if __name__ == '__main__':
     bl = np.array((-50., -40.))
     tr = np.array((10., 40.))
     mdfm.dump_wind_from_grib2(data_filepath, bl, tr)
-

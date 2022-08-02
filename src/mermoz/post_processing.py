@@ -137,5 +137,5 @@ class PostProcessing:
 
 
 if __name__ == '__main__':
-    pp = PostProcessing('/home/bastien/Documents/work/mermoz/output/example_solver-rp_linear')
+    pp = PostProcessing('/home/bastien/Documents/work/mermoz/output/example_solver-pa_linear_0')
     pp.stats(only_opti=True)
