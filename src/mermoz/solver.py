@@ -29,8 +29,9 @@ class Solver:
                  int_prec_factor=1e-2,
                  opti_ceil=5e-2,
                  n_min_opti=1,
-                 adaptive_int_step=True,
-                 nt_pmp=1000):
+                 adaptive_int_step=False,
+                 nt_pmp=1000,
+                 max_shoot=100):
         self.mp = mp
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
@@ -88,6 +89,8 @@ class Solver:
         self.opti_indexes = []
         self.opti_headings = {}
         self.opti_time = {}
+
+        self.max_shoot = max_shoot
 
         self.iter = 0
 
@@ -273,10 +276,14 @@ class Solver:
         print(f'* Iteration {self.iter} - {n_trajs} trajectories - {len(self.opti_indexes)}/{self.n_min_opti} optima')
 
     def adj_from_dir(self, d):
+        n = np.zeros(2)
         if self.mp.coords == COORD_CARTESIAN:
-            return np.array([-np.cos(d), -np.sin(d)])
+            n[:] = np.array([np.cos(d), np.sin(d)])
+
         elif self.mp.coords == COORD_GCS:
-            return np.array([-np.sin(d), -np.cos(d)])
+            n[:] = np.array([np.sin(d), np.cos(d)])
+
+        return -1*n# / (self.mp.model.v_a + self.mp.model.wind.value(self.mp.x_init) @ n)
 
     def solve_fancy(self, max_depth=10, debug=False, dump_only_opti=False):
 
@@ -318,7 +325,7 @@ class Solver:
         t_start2 = time.time()
 
         try:
-            while len(self.shoot_queue) != 0:
+            while len(self.shoot_queue) != 0 and self.iter < self.max_shoot:
                 self.iter += 1
                 print(f"It {self.iter:>3} - ", end='')
                 _, obj = heappop(self.shoot_queue)

@@ -11,20 +11,6 @@ from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
 
-problems = {
-    0: ['Three vortices', '3vor'],
-    1: ['Linear wind', 'linear'],
-    2: ['Honolulu Vancouver', 'honolulu-vancouver'],
-    3: ['Double Gyre Li2020', 'double-gyre-li2020'],
-    4: ['Double Gyre Kularatne2016', 'double-gyre-ku2016'],
-    5: ['Point symmetric Techy2011', 'pointsym-techy2011'],
-    6: ['Three obstacles', '3obs'],
-    7: ['San-Juan Dublin Ortho', 'sanjuan-dublin-ortho'],
-    8: ['Big Rankine vortex', 'big_rankine'],
-    9: ['Four vortices', '4vor'],
-    10: ['Dakar Natal', 'dakar-natal'],
-}
-
 
 class MermozProblem:
     """
@@ -98,7 +84,10 @@ class MermozProblem:
                 self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1] and \
                                         (self.bm is None or not self.bm.is_land(factor * x[0], factor * x[1]))
         else:
-            self.domain = domain
+            if self.bl is not None and self.tr is not None:
+                self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1] and domain(x)
+            else:
+                self.domain = domain
 
         self._feedback = None
         self.trajs = []
@@ -183,6 +172,20 @@ class DatabaseProblem(MermozProblem):
 
 
 class IndexedProblem(MermozProblem):
+
+    problems = {
+        0: ['Three vortices', '3vor'],
+        1: ['Linear wind', 'linear'],
+        2: ['Honolulu Vancouver', 'honolulu-vancouver'],
+        3: ['Double Gyre Li2020', 'double-gyre-li2020'],
+        4: ['Double Gyre Kularatne2016', 'double-gyre-ku2016'],
+        5: ['Point symmetric Techy2011', 'pointsym-techy2011'],
+        6: ['Three obstacles', '3obs'],
+        7: ['San-Juan Dublin Ortho', 'sanjuan-dublin-ortho'],
+        8: ['Big Rankine vortex', 'big_rankine'],
+        9: ['Four vortices', '4vor'],
+        10: ['One obstacle', '1obs'],
+    }
 
     def __init__(self, i, seed=0):
         if i == 0:
@@ -366,7 +369,14 @@ class IndexedProblem(MermozProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+            def domain(x):
+                f = 1.0
+                b = (x[0] - c1[0]) ** 2 + (x[1] - c1[1]) ** 2 > (f * sf * 0.1) ** 2
+                b = b and (x[0] - c2[0]) ** 2 + (x[1] - c2[1]) ** 2 > (f * sf * 0.1) ** 2
+                b = b and (x[0] - c3[0]) ** 2 + (x[1] - c3[1]) ** 2 > (f * sf * 0.1) ** 2
+                return b
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, domain=domain, bl=bl, tr=tr)
 
         elif i == 7:
             v_a = 23.
@@ -452,9 +462,35 @@ class IndexedProblem(MermozProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
 
+        elif i == 10:
+
+            v_a = 23.
+
+            sf = 3e6
+
+            x_init = sf * np.array((0., 0.))
+            x_target = sf * np.array((1., 0.))
+            bl = sf * np.array((-0.15, -1.15))
+            tr = sf * np.array((1.15, 1.15))
+            coords = COORD_CARTESIAN
+
+            const_wind = UniformWind(np.array([1., 0.]))
+
+            c1 = sf * np.array((0.5, 0.))
+
+            obstacle1 = RadialGaussWind(c1[0], c1[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
+
+            alty_wind = obstacle1 + const_wind
+
+            total_wind = alty_wind  # DiscreteWind()
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
 
         else:
             raise IndexError(f'No problem with index {i}')
 
-        self.descr = problems[i][0]
+        self.descr = IndexedProblem.problems[i][0]
         print(self.descr)

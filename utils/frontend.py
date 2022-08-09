@@ -242,6 +242,13 @@ class FrontendHandler:
             self.display.draw_trajs(nolabels=False, opti_only=False)
             # self.display.draw_solver()
             self.display.draw_rff(slice=(1, 10))
+        elif self.case_name in ['example_solver-rp_1obs']:
+            self.display.nocontrols = True
+            self.display.set_title('Test obstacle')
+            self.display.load_params()
+            self.display.setup()
+            self.display.draw_wind()
+            self.display.draw_trajs()
 
         elif 'solver' in self.case_name:
             print(f'Using default solver setup script for unknown case "{self.case_name}"', file=sys.stderr)

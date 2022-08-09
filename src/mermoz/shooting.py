@@ -97,6 +97,7 @@ class Shooting(ABC):
 
         if self.p_init is None:
             raise ValueError("No initial value provided for adjoint state")
+        print(f'p_init : {tuple(self.p_init)}, |p_init| : {np.linalg.norm(self.p_init)}')
         if custom_int:
             timestamps = np.zeros(self.N_iter)
             states = np.zeros((self.N_iter, 2))
