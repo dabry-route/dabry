@@ -6,7 +6,7 @@ from pyproj import Proj
 from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
 from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
-    PointSymWind
+    PointSymWind, BandGaussWind
 from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
@@ -29,6 +29,7 @@ class MermozProblem:
                  x_target,
                  coords,
                  domain=None,
+                 phi_obs=None,
                  bl=None,
                  tr=None,
                  autodomain=True,
@@ -88,6 +89,25 @@ class MermozProblem:
                 self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1] and domain(x)
             else:
                 self.domain = domain
+
+        if phi_obs is not None:
+            self.phi_obs = phi_obs
+            dx = self._geod_l / 1e6
+            self.grad_phi_obs = {}
+            for k, phi in self.phi_obs.items():
+                self.grad_phi_obs[k] = \
+                    lambda x: np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
+                                        1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
+
+            def _in_obs(x):
+                for k, phi in enumerate(self.phi_obs.values()):
+                    if phi(x) < 0.:
+                        return k
+                return -1
+
+            self.in_obs = _in_obs
+        else:
+            self.in_obs = lambda x: -1
 
         self._feedback = None
         self.trajs = []
@@ -172,7 +192,6 @@ class DatabaseProblem(MermozProblem):
 
 
 class IndexedProblem(MermozProblem):
-
     problems = {
         0: ['Three vortices', '3vor'],
         1: ['Linear wind', 'linear'],
@@ -445,9 +464,9 @@ class IndexedProblem(MermozProblem):
             tr = factor * np.array([1.2, 1.])
 
             omega = factor * np.array(((0.5, 0.5),
-                              (0.5, 0.2),
-                              (0.5, -0.2),
-                              (0.5, -0.5)))
+                                       (0.5, 0.2),
+                                       (0.5, -0.2),
+                                       (0.5, -0.5)))
             strength = factor * factor_speed * np.array([1., -1., 1.5, -1.5])
             radius = factor * np.array([1e-1, 1e-1, 1e-1, 1e-1])
             vortices = [RankineVortexWind(omega[i, 0], omega[i, 1], strength[i], radius[i]) for i in range(len(omega))]
@@ -480,14 +499,40 @@ class IndexedProblem(MermozProblem):
 
             obstacle1 = RadialGaussWind(c1[0], c1[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
 
-            alty_wind = obstacle1 + const_wind
+            band = BandGaussWind(sf * np.array((0., -.35)),
+                                 sf * np.array((1., 0.)),
+                                 23.,
+                                 sf * 0.05)
+
+            alty_wind = const_wind + band
 
             total_wind = alty_wind  # DiscreteWind()
 
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+            obs_center = [
+                sf * np.array((0.15, 0.1)),
+                sf * np.array((0.5, -0.1)),
+                sf * np.array((0.8, 0.1))
+            ]
+            obs_radius = sf * np.array((0.15, 0.15, 0.15))
+            phi_obs = {}
+            for i in range(obs_radius.shape[0]):
+                def f(x, c=obs_center[i], r=obs_radius[i]):
+                    return (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
+
+                phi_obs[i] = f
+            # c = sf * np.array((0.5, 0.2))
+            # r = sf * 0.1
+            # c2 = sf * np.array((0.5, -0.2))
+            # r2 = sf * 0.05
+            # phi_obs = {}
+            # phi_obs[0] = lambda x: (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
+            # phi_obs[1] = lambda x: (x - c2) @ np.diag((2., 1.)) @ (x - c2) - r2 ** 2
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
+                                                 phi_obs=phi_obs)
 
         else:
             raise IndexError(f'No problem with index {i}')

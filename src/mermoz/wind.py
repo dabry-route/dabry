@@ -1,3 +1,4 @@
+import numpy as np
 import scipy.interpolate as itp
 
 import h5py
@@ -835,6 +836,30 @@ class RadialGaussWind(Wind):
         nabla_e_r = np.array([[b ** 2 / r ** 3, - a * b / r ** 3],
                               [-a * b / r ** 3, a ** 2 / r ** 3]])
         return np.einsum('i,j->ij', e_r, dv) + self.ampl(r) * nabla_e_r
+
+class BandGaussWind(Wind):
+    """
+    Linear band of gaussian wind
+    """
+
+    def __init__(self, origin, vect, ampl, sdev):
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        self.origin = np.zeros(2)
+        self.origin[:] = origin
+        self.vect = np.zeros(2)
+        self.vect = vect / np.linalg.norm(vect)
+        self.ampl = ampl
+        self.sdev = sdev
+
+    def value(self, x):
+        dist = np.abs(np.cross(self.vect, x - self.origin))
+        intensity = self.ampl * np.exp(-0.5*(dist/self.sdev)**2)
+        return self.vect * intensity
+
+    def d_value(self, x):
+        dx = 1e-6
+        return np.column_stack((1/dx * (self.value(x + np.array((dx, 0.))) - self.value(x)),
+                                1 / dx * (self.value(x + np.array((0., dx))) - self.value(x))))
 
 
 if __name__ == '__main__':

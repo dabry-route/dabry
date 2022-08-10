@@ -86,7 +86,7 @@ class MDFmanager:
             if nx is None or ny is None:
                 print(f'Please provide grid shape "nx=..., ny=..." to sample analytical wind "{wind}"')
                 exit(1)
-            dwind = DiscreteWind(force_analytical=True)
+            dwind = DiscreteWind(force_analytical=False)
             dwind.load_from_wind(wind, nx, ny, bl, tr, coords, nodiff=True)
         else:
             dwind = wind

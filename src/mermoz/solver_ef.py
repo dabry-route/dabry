@@ -20,7 +20,7 @@ def heappop(a):
 
 class FrontPoint:
 
-    def __init__(self, identifier, tsa):
+    def __init__(self, identifier, tsa, i_obs=-1, ccw=True):
         """
         :param identifier: The front point unique identifier
         :param tsa: The point in (id_time, time, state, adjoint) form
@@ -29,6 +29,8 @@ class FrontPoint:
         self.tsa = (tsa[0], tsa[1], np.zeros(2), np.zeros(2))
         self.tsa[2][:] = tsa[2]
         self.tsa[3][:] = tsa[3]
+        self.i_obs = i_obs
+        self.ccw = ccw
 
 
 class Relations:
@@ -152,7 +154,7 @@ class SolverEF:
         while len(self.active) != 0:
             _, a = heappop(self.active)
             it = a.tsa[0]
-            t, x, p, status = self.step_single(a.tsa[1:])
+            t, x, p, status, i_obs, ccw = self.step_single(a.tsa[1:], a.i_obs, a.ccw)
             tsa = (t, np.zeros(2), np.zeros(2))
             tsa[1][:] = x
             tsa[2][:] = p
@@ -161,7 +163,7 @@ class SolverEF:
                 self.rel.deactivate(a.i)
             else:
                 if not polyfront.contains(Point(*x)):
-                    na = FrontPoint(a.i, (it + 1,) + self.trajs[a.i][it + 1])
+                    na = FrontPoint(a.i, (it + 1,) + self.trajs[a.i][it + 1], i_obs, ccw)
                     self.new_points[a.i] = na
                 else:
                     self.rel.remove(a.i)
@@ -170,8 +172,9 @@ class SolverEF:
         for na in list(self.new_points.values()):
             _, iu = self.rel.get(na.i)
             if self.rel.is_active(iu):
-                # Case 1, both points are active
-                if np.linalg.norm(na.tsa[2] - self.new_points[iu].tsa[2]) > self.abs_nb_ceil:
+                # Case 1, both points are active and at least one lies out of an obstacle
+                if np.linalg.norm(na.tsa[2] - self.new_points[iu].tsa[2]) > self.abs_nb_ceil\
+                        and (na.i_obs < 0 or self.new_points[iu].i_obs < 0):
                     self.step_between(na.i, iu)
             else:
                 pass
@@ -220,9 +223,11 @@ class SolverEF:
             self.trajs[i][it] = tsa
             iit = it
             status = True
+            i_obs = -1
+            ccw = True
             while iit <= self.it:
                 iit += 1
-                t, x, p, status = self.step_single(self.trajs[i][iit - 1])
+                t, x, p, status, i_obs, ccw = self.step_single(self.trajs[i][iit - 1], i_obs, ccw)
                 tsa = (t, np.zeros(2), np.zeros(2))
                 tsa[1][:] = x
                 tsa[2][:] = p
@@ -236,25 +241,47 @@ class SolverEF:
                 self.rel.deactivate(i)
             self.new_points[i] = na
 
-    def step_single(self, ap):
-        # For the moment, simple Euler scheme
+    def step_single(self, ap, i_obs=-1, ccw=True):
         x = np.zeros(2)
         p = np.zeros(2)
         x[:] = ap[1]
         p[:] = ap[2]
         t = ap[0]
-        status = True
-        s = Shooting(self.mp.model.dyn, np.zeros(2), 0.)
-        u = s.control(x, p, t)
-        dyn_x = self.mp.model.dyn.value(x, u, t)
-        A = -self.mp.model.dyn.d_value__d_state(x, u, t).transpose()
-        dyn_p = A.dot(p)
-        x += self.dt * dyn_x
-        p += self.dt * dyn_p
-        t += self.dt
-        if not self.mp.domain(x):
-            status = False
-        return t, x, p, status
+        if i_obs == -1:
+            # For the moment, simple Euler scheme
+            u = control_time_opti(x, p, t, self.mp.coords)
+            dyn_x = self.mp.model.dyn.value(x, u, t)
+            A = -self.mp.model.dyn.d_value__d_state(x, u, t).transpose()
+            dyn_p = A.dot(p)
+            x += self.dt * dyn_x
+            p += self.dt * dyn_p
+            t += self.dt
+        else:
+            # Obstacle mode. Follow the obstacle boundary as fast as possible
+            dx = self.mp._geod_l / 1e6
+            phi = self.mp.phi_obs[i_obs]
+            grad = np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
+                                    1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
+            n = grad / np.linalg.norm(grad)
+            # n = self.mp.grad_phi_obs[i_obs](x) / np.linalg.norm(self.mp.grad_phi_obs[i_obs](x))
+            theta = atan2(*n[::-1])
+            u = theta + (-1. if not ccw else 1.) * acos(-self.mp.model.wind.value(x) @ n / self.mp.model.v_a)
+            dyn_x = self.mp.model.dyn.value(x, u, t)
+            x += self.dt * dyn_x
+            p[:] = - np.array((np.cos(u), np.sin(u)))
+            t += self.dt
+
+        status = self.mp.domain(x)
+        if status and i_obs < 0:
+            i_obs = self.mp.in_obs(x)
+            if i_obs >= 0:
+                dx = self.mp._geod_l / 1e6
+                phi = self.mp.phi_obs[i_obs]
+                grad = np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
+                                 1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
+                # ccw = np.cross(self.mp.grad_phi_obs[i_obs](x), dyn_x) > 0.
+                ccw = np.cross(grad, dyn_x) > 0.
+        return t, x, p, status, i_obs, ccw
 
     def solve(self):
         self.setup()

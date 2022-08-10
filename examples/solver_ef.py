@@ -13,7 +13,7 @@ from mermoz.wind import DiscreteWind
 if __name__ == '__main__':
     # Choose problem ID
     pb_id, seed = 6, 0
-    cache = True
+    cache = False
 
     # Create a file manager to dump problem data
     mdfm = MDFmanager()
@@ -35,7 +35,7 @@ if __name__ == '__main__':
     mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, bl=pb.bl, tr=pb.tr)
 
     # Setting the solver
-    solver_ef = SolverEF(pb, max_steps=100)
+    solver_ef = SolverEF(pb, max_steps=300)
 
     t_start = time.time()
     solver_ef.solve()

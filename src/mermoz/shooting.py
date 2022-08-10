@@ -70,18 +70,6 @@ class Shooting(ABC):
     def set_adjoint(self, p_init: ndarray):
         self.p_init[:] = p_init
 
-    def control(self, x, p, t):
-        if self.coords == COORD_CARTESIAN:
-            v = -p / np.linalg.norm(p)
-            res = np.arctan2(v[1], v[0])
-        elif self.coords == COORD_GCS:
-            v = - np.diag([1 / cos(x[1]), 1.]) @ p
-            v = v / np.linalg.norm(v)
-            res = np.pi / 2. - np.arctan2(v[1], v[0])
-        else:
-            exit(1)
-        return res
-
     def integrate(self, verbose=False, custom_int=True):
         """
         Integrate trajectory thanks to the shooting method with an explicit Euler scheme
@@ -108,7 +96,7 @@ class Shooting(ABC):
             p = self.p_init
             states[0] = x
             adjoints[0] = p
-            u = controls[0] = self.control(x, p, 0.)
+            u = controls[0] = control_time_opti(x, p, 0., self.coords)
             interrupted = False
             optimal = False
             list_dt = []
@@ -131,7 +119,7 @@ class Shooting(ABC):
                         optimal = True
                         break
                     t += dt
-                    u = self.control(x, p, t)
+                    u = control_time_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -151,7 +139,7 @@ class Shooting(ABC):
                     dt = 1 / self.dyn.wind.grad_norm(x) * self.factor
                     t += dt
                     list_dt.append(dt)
-                    u = self.control(x, p, t)
+                    u = control_time_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -195,7 +183,7 @@ class Shooting(ABC):
                     x[:] = z[:2]
                     p = np.zeros(2)
                     p[:] = z[2:]
-                    u = self.control(x, p, t)
+                    u = control_time_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -210,7 +198,7 @@ class Shooting(ABC):
                     if not self.domain(zz[i, :2]):
                         last_index = i + 1
                         break
-                controls = np.array(list(map(lambda z: self.control(z[:2], z[2:], 0), zz)))
+                controls = np.array(list(map(lambda z: control_time_opti(z[:2], z[2:], 0, self.coords), zz)))
                 return AugmentedTraj(timestamps, zz[:, :2], zz[:, 2:], controls, last_index=last_index, type=TRAJ_PMP,
                                      interrupted=(last_index != self.N_iter), coords=self.coords)
             else:
@@ -224,7 +212,7 @@ class Shooting(ABC):
                     x[:] = z[:2]
                     p = np.zeros(2)
                     p[:] = z[2:]
-                    u = self.control(x, p, t)
+                    u = control_time_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -252,9 +240,9 @@ class Shooting(ABC):
                     last_index += 1
                     states[last_index, :] = z[:2]
                     adjoints[last_index, :] = z[2:]
-                    controls[last_index] = self.control(z[:2], z[2:], solver.t)
+                    controls[last_index] = control_time_opti(z[:2], z[2:], solver.t, self.coords)
                     if last_index == self.N_iter - 1:
                         break
-                controls = np.array(list(map(lambda z: self.control(z[:2], z[2:], 0), np.concatenate((states, adjoints), axis=0))))
+                controls = np.array(list(map(lambda z: control_time_opti(z[:2], z[2:], 0, self.coords), np.concatenate((states, adjoints), axis=0))))
                 return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter, type=TRAJ_PMP,
                                      interrupted=False, coords=self.coords)

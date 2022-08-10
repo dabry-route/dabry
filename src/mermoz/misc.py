@@ -164,6 +164,17 @@ def enlarge(bl, tr, factor=1.1):
     return c - factor * half_delta, c + factor * half_delta
 
 
+def control_time_opti(x, p, t, coords):
+    if coords == COORD_CARTESIAN:
+        v = -p / np.linalg.norm(p)
+        res = np.arctan2(v[1], v[0])
+    else:  # coords == COORD_GCS
+        v = - np.diag([1 / cos(x[1]), 1.]) @ p
+        v = v / np.linalg.norm(v)
+        res = np.pi / 2. - np.arctan2(v[1], v[0])
+    return res
+
+
 def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
     """
     Return the analytical solution to minimum time of travel between
@@ -191,7 +202,7 @@ def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
 
     if theta_f is None:
         import scipy.optimize
-        theta_f = scipy.optimize.newton_krylov(residual, -np.pi/2. + 1e-1)
+        theta_f = scipy.optimize.newton_krylov(residual, -np.pi / 2. + 1e-1)
         print(f'theta_f : {theta_f}')
     print(f'T : {2 / w * np.tan(theta_f)}')
 
