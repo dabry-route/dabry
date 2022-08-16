@@ -1,10 +1,13 @@
 import time
 import os
 
+import numpy as np
+
 from mermoz.mdf_manager import MDFmanager
 from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *
 from mermoz.problem import IndexedProblem
+from mermoz.shooting import Shooting
 from mermoz.solver_ef import SolverEF
 from mermoz.solver_rp import SolverRP
 from mermoz.wind import DiscreteWind
@@ -12,7 +15,7 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 6, 0
+    pb_id, seed = 10, 1
     cache = False
 
     # Create a file manager to dump problem data
@@ -35,22 +38,37 @@ if __name__ == '__main__':
     mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, bl=pb.bl, tr=pb.tr)
 
     # Setting the solver
-    solver_ef = SolverEF(pb, max_steps=300)
+    solver = SolverEF(pb, max_steps=120, hard_obstacles=not seed)
+    #solver = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
 
     t_start = time.time()
-    solver_ef.solve()
+    solver.solve()
     t_end = time.time()
     time_rp = t_end - t_start
+
+    trajs = solver.get_trajs()
+    m = None
+    k0 = -1
+    for k, traj in enumerate(trajs):
+        candidate = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1))
+        if m is None or m > candidate:
+            m = candidate
+            k0 = k
 
     # solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
     # if cache:
     #     solver_rp.rft.load_cache(os.path.join(output_dir, 'rff.h5'))
     # solver_rp.solve()
     # if not cache:
-    #     solver_rp.rft.dump_rff(output_dir)
+    #solver.rft.dump_rff(output_dir)
+    shooting = Shooting(pb.model.dyn, pb.x_init, pb._geod_l / pb.model.v_a)
+    shooting.set_adjoint(solver.p_inits[k0])
+    traj = shooting.integrate()
+    traj.type = 'optimal'
+    pb.trajs.append(traj)
 
-    mdfm.dump_trajs(solver_ef.get_trajs())
-    # mdfm.dump_trajs(solver_rp.mp.trajs)
+    mdfm.dump_trajs(trajs)
+    mdfm.dump_trajs(pb.trajs)
 
     ps = ParamsSummary()
     ps.set_output_dir(output_dir)

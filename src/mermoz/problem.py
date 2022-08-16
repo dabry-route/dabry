@@ -388,14 +388,16 @@ class IndexedProblem(MermozProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            def domain(x):
-                f = 1.0
-                b = (x[0] - c1[0]) ** 2 + (x[1] - c1[1]) ** 2 > (f * sf * 0.1) ** 2
-                b = b and (x[0] - c2[0]) ** 2 + (x[1] - c2[1]) ** 2 > (f * sf * 0.1) ** 2
-                b = b and (x[0] - c3[0]) ** 2 + (x[1] - c3[1]) ** 2 > (f * sf * 0.1) ** 2
-                return b
+            obs_center = [c1, c2, c3]
+            obs_radius = sf * np.array((0.13, 0.13, 0.13))
+            phi_obs = {}
+            for i in range(obs_radius.shape[0]):
+                def f(x, c=obs_center[i], r=obs_radius[i]):
+                    return (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, domain=domain, bl=bl, tr=tr)
+                phi_obs[i] = f
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, phi_obs=phi_obs, bl=bl, tr=tr)
 
         elif i == 7:
             v_a = 23.
@@ -493,36 +495,53 @@ class IndexedProblem(MermozProblem):
             tr = sf * np.array((1.15, 1.15))
             coords = COORD_CARTESIAN
 
-            const_wind = UniformWind(np.array([1., 0.]))
-
-            c1 = sf * np.array((0.5, 0.))
-
-            obstacle1 = RadialGaussWind(c1[0], c1[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
-
-            band = BandGaussWind(sf * np.array((0., -.35)),
-                                 sf * np.array((1., 0.)),
-                                 23.,
-                                 sf * 0.05)
-
-            alty_wind = const_wind + band
-
-            total_wind = alty_wind  # DiscreteWind()
-
-            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
-            zermelo_model.update_wind(total_wind)
-
             obs_center = [
                 sf * np.array((0.15, 0.1)),
                 sf * np.array((0.5, -0.1)),
                 sf * np.array((0.8, 0.1))
             ]
             obs_radius = sf * np.array((0.15, 0.15, 0.15))
+
+            const_wind = UniformWind(np.array([1., 0.]))
+            band = BandGaussWind(sf * np.array((0., -.35)),
+                                 sf * np.array((1., 0.)),
+                                 23.,
+                                 sf * 0.05)
+
+            if seed:
+                obs_radius *= 0.85
+                total_wind = const_wind + \
+                             RadialGaussWind(
+                                 obs_center[0][0],
+                                 obs_center[0][1],
+                                 obs_radius[0],
+                                 1 / 2 * 0.2,
+                                 v_a * 5.) + \
+                             RadialGaussWind(
+                                 obs_center[1][0],
+                                 obs_center[1][1],
+                                 obs_radius[1],
+                                 1 / 2 * 0.2,
+                                 v_a * 5.) + \
+                             RadialGaussWind(
+                                 obs_center[2][0],
+                                 obs_center[2][1],
+                                 obs_radius[2],
+                                 1 / 2 * 0.2,
+                                 v_a * 5.)
+                obs_radius *= 1.1/0.9
+            else:
+                total_wind = const_wind + band
             phi_obs = {}
-            for i in range(obs_radius.shape[0]):
-                def f(x, c=obs_center[i], r=obs_radius[i]):
+            for k in range(obs_radius.shape[0]):
+                def f(x, c=obs_center[k], r=obs_radius[k]):
                     return (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
 
-                phi_obs[i] = f
+                phi_obs[k] = f
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
             # c = sf * np.array((0.5, 0.2))
             # r = sf * 0.1
             # c2 = sf * np.array((0.5, -0.2))

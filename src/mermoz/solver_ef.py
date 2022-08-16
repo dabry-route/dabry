@@ -90,7 +90,7 @@ class SolverEF:
     Solver for the navigation problem using progressive extremal field computation
     """
 
-    def __init__(self, mp: MermozProblem, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30):
+    def __init__(self, mp: MermozProblem, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30, hard_obstacles=True):
         self.mp = mp
         self.N_disc_init = N_disc_init
         # Neighbouring distance ceil
@@ -114,7 +114,7 @@ class SolverEF:
         self.max_steps = max_steps
 
         self.N_filling_steps = 4
-
+        self.hard_obstacles = hard_obstacles
         self.rel = None
 
     def new_index(self):
@@ -214,13 +214,19 @@ class SolverEF:
         points = np.zeros((self.N_filling_steps, 2))
         points[:] = np.einsum('i,j->ij', 1 - alpha, pl[1]) \
                     + np.einsum('i,j->ij', alpha, pu[1])
+        new_p_inits = np.einsum('i,j->ij', 1 - alpha, self.p_inits[ill]) \
+                    + np.einsum('i,j->ij', alpha, self.p_inits[iuu])
         new_indexes = [self.new_index() for _ in range(self.N_filling_steps)]
         for k in range(self.N_filling_steps):
             i = new_indexes[k]
             t = pl[0]
             tsa = (t, points[k], adjoints[k])
+            # if self.mp.in_obs(points[k]):
+            #     continue
             self.trajs[i] = {}
             self.trajs[i][it] = tsa
+            self.p_inits[i] = np.zeros(2)
+            self.p_inits[i][:] = new_p_inits[k]
             iit = it
             status = True
             i_obs = -1
@@ -247,7 +253,7 @@ class SolverEF:
         x[:] = ap[1]
         p[:] = ap[2]
         t = ap[0]
-        if i_obs == -1:
+        if i_obs == -1 or not self.hard_obstacles:
             # For the moment, simple Euler scheme
             u = control_time_opti(x, p, t, self.mp.coords)
             dyn_x = self.mp.model.dyn.value(x, u, t)
