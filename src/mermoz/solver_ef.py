@@ -4,6 +4,7 @@ from math import atan2
 from shapely.geometry import Polygon, Point
 
 from mermoz.misc import *
+from mermoz.model import ZermeloGeneralModel
 from mermoz.problem import MermozProblem
 from mermoz.shooting import Shooting
 from mermoz.trajectory import AugmentedTraj
@@ -92,6 +93,26 @@ class SolverEF:
 
     def __init__(self, mp: MermozProblem, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30, hard_obstacles=True):
         self.mp = mp
+
+        # Create the dual problem, i.e. going from target to init in the mirror wind (multiplication by -1)
+        dual_model = ZermeloGeneralModel(self.mp.model.v_a, self.mp.coords)
+        dual_model.update_wind(self.mp.model.wind.dualize())
+
+        kwargs = {}
+        for k, v in self.mp.__dict__.items():
+            if k == 'model':
+                kwargs[k] = dual_model
+            elif k == 'x_init':
+                kwargs[k] = np.zeros(2)
+                kwargs[k][:] = self.mp.x_target
+            elif k == 'x_target':
+                kwargs[k] = np.zeros(2)
+                kwargs[k][:] = self.mp.x_init
+            else:
+                kwargs[k] = v
+
+        self.mp_dual = MermozProblem(**kwargs)
+
         self.N_disc_init = N_disc_init
         # Neighbouring distance ceil
         self.abs_nb_ceil = rel_nb_ceil * mp._geod_l
@@ -133,7 +154,7 @@ class SolverEF:
             i = self.new_index()
             self.p_inits[i] = np.zeros(2)
             self.p_inits[i][:] = p
-            a = FrontPoint(i, (0, 0., self.mp.x_init, p))
+            a = FrontPoint(i, (0, 0., self.mp_dual.x_init, p))
             heappush(self.active, (1., a))
             self.trajs[k] = {}
             self.trajs[k][a.tsa[0]] = a.tsa[1:]
@@ -255,47 +276,77 @@ class SolverEF:
         t = ap[0]
         if i_obs == -1 or not self.hard_obstacles:
             # For the moment, simple Euler scheme
-            u = control_time_opti(x, p, t, self.mp.coords)
-            dyn_x = self.mp.model.dyn.value(x, u, t)
-            A = -self.mp.model.dyn.d_value__d_state(x, u, t).transpose()
+            u = control_time_opti(x, p, t, self.mp_dual.coords)
+            dyn_x = self.mp_dual.model.dyn.value(x, u, t)
+            A = -self.mp_dual.model.dyn.d_value__d_state(x, u, t).transpose()
             dyn_p = A.dot(p)
             x += self.dt * dyn_x
             p += self.dt * dyn_p
             t += self.dt
         else:
             # Obstacle mode. Follow the obstacle boundary as fast as possible
-            dx = self.mp._geod_l / 1e6
-            phi = self.mp.phi_obs[i_obs]
+            dx = self.mp_dual._geod_l / 1e6
+            phi = self.mp_dual.phi_obs[i_obs]
             grad = np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
                                     1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
             n = grad / np.linalg.norm(grad)
             # n = self.mp.grad_phi_obs[i_obs](x) / np.linalg.norm(self.mp.grad_phi_obs[i_obs](x))
             theta = atan2(*n[::-1])
-            u = theta + (-1. if not ccw else 1.) * acos(-self.mp.model.wind.value(x) @ n / self.mp.model.v_a)
-            dyn_x = self.mp.model.dyn.value(x, u, t)
+            u = theta + (-1. if not ccw else 1.) * acos(-self.mp_dual.model.wind.value(x) @ n / self.mp_dual.model.v_a)
+            dyn_x = self.mp_dual.model.dyn.value(x, u, t)
             x += self.dt * dyn_x
             p[:] = - np.array((np.cos(u), np.sin(u)))
             t += self.dt
 
-        status = self.mp.domain(x)
+        status = self.mp_dual.domain(x)
         if status and i_obs < 0:
-            i_obs = self.mp.in_obs(x)
+            i_obs = self.mp_dual.in_obs(x)
             if i_obs >= 0:
-                dx = self.mp._geod_l / 1e6
-                phi = self.mp.phi_obs[i_obs]
+                dx = self.mp_dual._geod_l / 1e6
+                phi = self.mp_dual.phi_obs[i_obs]
                 grad = np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
                                  1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
                 # ccw = np.cross(self.mp.grad_phi_obs[i_obs](x), dyn_x) > 0.
                 ccw = np.cross(grad, dyn_x) > 0.
         return t, x, p, status, i_obs, ccw
 
-    def solve(self):
+    def solve(self, exhaustive=False, verbose=False):
+        """
+        :param exhaustive: For complete coverage of state space by extremals
+        :param verbose: To print steps
+        :return: Minimum time to reach destination, corresponding global time index,
+        corresponding initial adjoint state
+        """
         self.setup()
         i = 0
         while len(self.active) != 0 and i < self.max_steps:
             i += 1
-            print(i)
+            if verbose:
+                print(i)
             self.step_global()
+        print(f'Total steps : {i}')
+        k0 = None
+        m = None
+        iit_opt = 0
+        for k, traj in self.trajs.items():
+            for iit in traj.keys():
+                candidate = np.linalg.norm(traj[iit][1] - self.mp_dual.x_target)
+                if m is None or m > candidate:
+                    m = candidate
+                    k0 = k
+                    iit_opt = iit
+        return self.trajs[k0][iit_opt][0], iit_opt, self.p_inits[k0]
+
+    def control(self, x):
+        m = None
+        p = np.zeros(2)
+        for k, v in self.trajs.items():
+            for vv in v.values():
+                candidate = (vv[1] - x) @ (vv[1] - x)
+                if m is None or candidate < m:
+                    m = candidate
+                    p[:] = vv[2]
+        return atan2(*p[::-1])
 
     def get_trajs(self):
         res = []
@@ -311,6 +362,6 @@ class SolverEF:
                 adjoints[k, :] = e[2]
 
             res.append(
-                AugmentedTraj(timestamps, points, adjoints, controls, last_index=n, coords=self.mp.coords, label=it))
+                AugmentedTraj(timestamps, points, adjoints, controls, last_index=n, coords=self.mp_dual.coords, label=it, type=TRAJ_PMP))
 
         return res

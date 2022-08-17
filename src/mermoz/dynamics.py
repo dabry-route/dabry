@@ -1,3 +1,4 @@
+import sys
 from abc import ABC, abstractmethod
 
 from mermoz.misc import *
@@ -63,10 +64,10 @@ class ZermeloDyn(Dynamics):
         self.v_a = v_a
 
     def value(self, x, u, t):
-        return self.v_a * np.array([np.cos(u), np.sin(u)]) + self.wind.value(x)
+        return self.v_a * np.array([np.cos(u), np.sin(u)]) + self.wind.value(t, x)
 
     def d_value__d_state(self, x, u, t):
-        return self.wind.d_value(x)
+        return self.wind.d_value(t, x)
 
     def __str__(self):
         return 'Zermelo dynamics'

@@ -1,4 +1,5 @@
 import h5py
+import numpy as np
 from mdisplay.geodata import GeoData
 from mpl_toolkits.basemap import Basemap
 from pyproj import Proj
@@ -6,7 +7,7 @@ from pyproj import Proj
 from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
 from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
-    PointSymWind, BandGaussWind
+    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind
 from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
@@ -33,7 +34,7 @@ class MermozProblem:
                  bl=None,
                  tr=None,
                  autodomain=True,
-                 mask_land=True):
+                 mask_land=True, **kwargs):
         self.model = model
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
@@ -204,6 +205,7 @@ class IndexedProblem(MermozProblem):
         8: ['Big Rankine vortex', 'big_rankine'],
         9: ['Four vortices', '4vor'],
         10: ['One obstacle', '1obs'],
+        11: ['Moving obstacle', 'movobs'],
     }
 
     def __init__(self, i, seed=0):
@@ -246,8 +248,10 @@ class IndexedProblem(MermozProblem):
             const_wind = UniformWind(np.array([0., 0.]))
 
             alty_wind = 3. * const_wind + vortex1 + vortex2 + vortex3
-            total_wind = DiscreteWind()
-            total_wind.load_from_wind(alty_wind, 101, 101, bl, tr, coords=coords)
+            total_wind = LCWind(np.array((3., 1., 1., 1.)),
+                                (const_wind, vortex1, vortex2, vortex3))
+            # total_wind = DiscreteWind()
+            # total_wind.load_from_wind(alty_wind, 101, 101, bl, tr, coords=coords)
 
             zermelo_model = ZermeloGeneralModel(v_a)
             zermelo_model.update_wind(total_wind)
@@ -497,7 +501,7 @@ class IndexedProblem(MermozProblem):
 
             obs_center = [
                 sf * np.array((0.15, 0.1)),
-                sf * np.array((0.5, -0.1)),
+                sf * np.array((0.5, -0.2)),
                 sf * np.array((0.8, 0.1))
             ]
             obs_radius = sf * np.array((0.15, 0.15, 0.15))
@@ -529,7 +533,7 @@ class IndexedProblem(MermozProblem):
                                  obs_radius[2],
                                  1 / 2 * 0.2,
                                  v_a * 5.)
-                obs_radius *= 1.1/0.9
+                obs_radius *= 1.1 / 0.9
             else:
                 total_wind = const_wind + band
             phi_obs = {}
@@ -552,6 +556,43 @@ class IndexedProblem(MermozProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  phi_obs=phi_obs)
+        elif i == 11:
+
+            v_a = 23.
+
+            sf = 3e6
+
+            x_init = sf * np.array((0., 0.))
+            x_target = sf * np.array((1., 0.))
+            bl = sf * np.array((-0.15, -1.15))
+            tr = sf * np.array((1.15, 1.15))
+            coords = COORD_CARTESIAN
+
+            nt = 20
+
+            obs_x = sf * np.linspace(0.5, 0.5, nt)
+            obs_y = sf * np.linspace(-0.5, 0.5, nt)
+            obs_center = np.column_stack((obs_x, obs_y))
+            obs_radius = sf * np.linspace(0.15, 0.15, nt)
+            obs_sdev = np.linspace(1 / 2 * 0.2, 1 / 2 * 0.2, nt)
+            obs_v_max = np.linspace(v_a * 5., v_a * 5., nt)
+
+            total_wind = RadialGaussWindT(obs_center, obs_radius, obs_sdev, obs_v_max,
+                                          1.2 * distance(x_init, x_target, coords) / v_a)
+
+            # phi_obs = {}
+            # for k in range(obs_radius.shape[0]):
+            #     def f(x, c=obs_center[k], r=obs_radius[k]):
+            #         return (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
+            #
+            #     phi_obs[k] = f
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+                                                 #phi_obs=phi_obs)
+
 
         else:
             raise IndexError(f'No problem with index {i}')

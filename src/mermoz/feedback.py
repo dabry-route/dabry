@@ -99,7 +99,7 @@ class FixedHeadingFB(Feedback):
             e_theta_0 = np.array([np.cos(self.theta_0), np.sin(self.theta_0)])
         elif self.coords == COORD_GCS:
             e_theta_0 = np.array([np.sin(self.theta_0), np.cos(self.theta_0)])
-        wind = self.wind.value(x)
+        wind = self.wind.value(0., x)
         wind_ortho = np.cross(e_theta_0, wind)
         r = -wind_ortho / self.v_a
         if r > 1.:
@@ -135,7 +135,7 @@ class TargetFB(Feedback):
         self.coords = coords
         self.zero_ceil = 1e-3
 
-    def value(self, x: ndarray) -> ndarray:
+    def value(self, x: ndarray):
         # Assuming GCS
         if self.coords == COORD_GCS:
             # Got to 3D cartesian assuming spherical earth
@@ -158,7 +158,7 @@ class TargetFB(Feedback):
             return 0.
 
         e_target = e_target / np.linalg.norm(e_target)
-        wind = self.wind.value(x)
+        wind = self.wind.value(0., x)
         wind_ortho = np.cross(e_target, wind)
         r = -wind_ortho / self.v_a
         if r > 1.:
@@ -185,3 +185,13 @@ class WindAlignedFB(Feedback):
         wind = self.wind.value(x)
         theta = np.arctan2(wind[1], wind[0])
         return theta
+
+
+class FunFB(Feedback):
+
+    def __init__(self, value_func):
+        super().__init__(1, Wind())
+        self._value_func = value_func
+
+    def value(self, x):
+        return self._value_func(x)

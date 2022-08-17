@@ -76,7 +76,7 @@ class MDFmanager:
                 for attr, val in traj.attrs.items():
                     print(f'{attr} : {val}')
 
-    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, bl=None, tr=None, coords=COORD_CARTESIAN):
+    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None, coords=COORD_CARTESIAN, force_analytical=False):
         if wind.is_dumpable == 0:
             print('Error : Wind is not dumpable to file', file=sys.stderr)
             exit(1)
@@ -86,8 +86,11 @@ class MDFmanager:
             if nx is None or ny is None:
                 print(f'Please provide grid shape "nx=..., ny=..." to sample analytical wind "{wind}"')
                 exit(1)
-            dwind = DiscreteWind(force_analytical=False)
-            dwind.load_from_wind(wind, nx, ny, bl, tr, coords, nodiff=True)
+            dwind = DiscreteWind(force_analytical=force_analytical)
+            kwargs = {}
+            if nt is not None:
+                kwargs['nt'] = nt
+            dwind.load_from_wind(wind, nx, ny, bl, tr, coords, nodiff=True, **kwargs)
         else:
             dwind = wind
         with h5py.File(filepath, 'w') as f:

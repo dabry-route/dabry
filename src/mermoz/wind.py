@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 import scipy.interpolate as itp
 
@@ -11,7 +13,8 @@ from mermoz.misc import *
 
 class Wind:
 
-    def __init__(self, value_func=None, d_value_func=None, descr='', is_analytical=False, **kwargs):
+    def __init__(self, value_func=None, d_value_func=None, descr='', is_analytical=False, t_start=0.,
+                 t_end=None, nt=1, **kwargs):
         """
         Builds a windfield which is a smooth vector field of space
         value_func Function taking a point in space (ndarray) and returning the
@@ -34,12 +37,40 @@ class Wind:
         # When grid is not regularly spaced
         self.unstructured = False
 
+        # When wind is time-varying, bounds for the time window
+        # A none upper bound means no time variation
+        self.t_start = t_start
+        self.t_end = t_end
+        self.nt = nt
+
         # To remember if an analytical wind was discretized for
         # display purposes.
         self.is_analytical = is_analytical
 
+        # True if dualization operation flips wind (mulitplication by -1)
+        # False if dualization operation leaves wind unchanged
+        self.dualizable = True
+
         for k, v in kwargs.items():
             self.__dict__[k] = v
+
+    def _index(self, t):
+        """
+        Get nearest lowest index for time discrete grid
+        :param t: The required time
+        :return: Nearest lowest index for time, coefficient for the linear interpolation
+        """
+        if self.nt == 1:
+            return 0, 0.
+        if t < self.t_start or t > self.t_end:
+            print(f'Time {t} out of ({self.t_start}, {self.t_end})', file=sys.stderr)
+            exit(1)
+        tau = (t - self.t_start) / (self.t_end - self.t_start)
+        i, alpha = int(tau * (self.nt - 1)), tau * (self.nt - 1) - int(tau * (self.nt - 1))
+        if i == self.nt - 1:
+            i = self.nt - 2
+            alpha = 1.
+        return i, alpha
 
     def __add__(self, other):
         """
@@ -50,8 +81,8 @@ class Wind:
         """
         if not isinstance(other, Wind):
             raise TypeError(f"Unsupported type for addition : {type(other)}")
-        value_func = lambda x: self.value(x) + other.value(x)
-        d_value_func = lambda x: self.d_value(x) + other.d_value(x)
+        value_func = lambda t, x: self.value(t, x) + other.value(t, x)
+        d_value_func = lambda t, x: self.d_value(t, x) + other.d_value(t, x)
         descr = self.descr + ', ' + other.descr
         is_analytical = self.is_analytical and other.is_analytical
         # d = self.__dict__
@@ -64,7 +95,7 @@ class Wind:
                     d_value_func=d_value_func,
                     descr=descr,
                     is_analytical=is_analytical)
-                    #**d)
+        # **d)
 
     def __mul__(self, other):
         """
@@ -77,8 +108,8 @@ class Wind:
             other = float(other)
         if not isinstance(other, float):
             raise TypeError(f"Unsupported type for multiplication : {type(other)}")
-        value_func = lambda x: other * self.value(x)
-        d_value_func = lambda x: other * self.d_value(x)
+        value_func = lambda t, x: other * self.value(t, x)
+        d_value_func = lambda t, x: other * self.d_value(t, x)
         descr = self.descr
         is_analytical = self.is_analytical
         # d = self.__dict__
@@ -91,7 +122,7 @@ class Wind:
                     d_value_func=d_value_func,
                     descr=descr,
                     is_analytical=is_analytical)
-                    #**d)
+        # **d)
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -215,7 +246,7 @@ class DiscreteWind(Wind):
                 self.ny = resample * ny_wind
                 self.grid = np.zeros((self.nx, self.ny, 2))
                 self.grid[:] = np.array(np.meshgrid(np.linspace(self.x_min, self.x_max, self.nx),
-                                                 np.linspace(self.y_min, self.y_max, self.ny))).transpose((2, 1, 0))
+                                                    np.linspace(self.y_min, self.y_max, self.ny))).transpose((2, 1, 0))
                 grid_wind = np.zeros(wind_data['grid'].shape)
                 grid_wind[:] = np.array(wind_data['grid'])
                 u_wind = np.zeros((nx_wind, ny_wind))
@@ -224,12 +255,14 @@ class DiscreteWind(Wind):
                 v_wind[:] = np.array(wind_data['data'][0, :, :, 1])
                 u_itp = np.zeros((self.nx, self.ny))
                 u_itp[:] = itp.griddata(grid_wind.reshape((nx_wind * ny_wind, 2)),
-                                     u_wind.reshape((nx_wind * ny_wind,)),
-                                     self.grid.reshape((self.nx * self.ny, 2)), method='linear', fill_value=0.).reshape((self.nx, self.ny))
+                                        u_wind.reshape((nx_wind * ny_wind,)),
+                                        self.grid.reshape((self.nx * self.ny, 2)), method='linear',
+                                        fill_value=0.).reshape((self.nx, self.ny))
                 v_itp = np.zeros((self.nx, self.ny))
                 v_itp[:] = itp.griddata(grid_wind.reshape((nx_wind * ny_wind, 2)),
-                                     v_wind.reshape((nx_wind * ny_wind,)),
-                                     self.grid.reshape((self.nx * self.ny, 2)), method='linear', fill_value=0.).reshape((self.nx, self.ny))
+                                        v_wind.reshape((nx_wind * ny_wind,)),
+                                        self.grid.reshape((self.nx * self.ny, 2)), method='linear',
+                                        fill_value=0.).reshape((self.nx, self.ny))
                 self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
                 for kt in range(self.nt):
                     self.uv[kt, :] = np.stack((u_itp, v_itp), axis=2)
@@ -254,7 +287,7 @@ class DiscreteWind(Wind):
 
         print('Done')
 
-    def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, skip_coord_check=False):
+    def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, nt=1, skip_coord_check=False):
         self.coords = coords
         self.units_grid = 'meters' if coords == COORD_CARTESIAN else 'degrees'
         self.unstructured = wind.unstructured
@@ -269,18 +302,23 @@ class DiscreteWind(Wind):
         self.y_min = bl[1]
         self.y_max = tr[1]
 
-        self.nt, self.nx, self.ny = 1, nx, ny
+        self.nt, self.nx, self.ny = nt, nx, ny
         self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
         self.grid = np.zeros((self.nx, self.ny, 2))
         delta_x = (self.x_max - self.x_min) / (self.nx - 1)
         delta_y = (self.y_max - self.y_min) / (self.ny - 1)
-        for i in range(self.nx):
-            for j in range(self.ny):
-                point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
-                self.uv[0, i, j, :] = wind.value(point)
-                self.grid[i, j, :] = point
-
         self.ts = np.zeros((self.nt,))
+        for k in range(self.nt):
+            if nt > 1:
+                self.ts[k] = wind.t_start + (k / (self.nt - 1)) * (wind.t_end - wind.t_start)
+            for i in range(self.nx):
+                for j in range(self.ny):
+                    point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
+                    if nt > 1:
+                        self.uv[k, i, j, :] = wind.value(self.ts[k], point)
+                    else:
+                        self.uv[k, i, j, :] = wind.value(0., point)
+                    self.grid[i, j, :] = point
 
         # Post processing
         # Loading derivatives
@@ -289,16 +327,20 @@ class DiscreteWind(Wind):
             self.d_u__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
             self.d_v__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
             self.d_v__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-            for i in range(1, self.nx - 1):
-                for j in range(1, self.ny - 1):
-                    point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
-                    diff = wind.d_value(point)
-                    self.d_u__d_x[0, i - 1, j - 1] = diff[0, 0]
-                    self.d_u__d_y[0, i - 1, j - 1] = diff[0, 1]
-                    self.d_v__d_x[0, i - 1, j - 1] = diff[1, 0]
-                    self.d_v__d_y[0, i - 1, j - 1] = diff[1, 1]
+            for k in range(self.nt):
+                for i in range(1, self.nx - 1):
+                    for j in range(1, self.ny - 1):
+                        point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
+                        if nt > 1:
+                            diff = wind.d_value(self.ts[k], point)
+                        else:
+                            diff = wind.d_value(0., point)
+                        self.d_u__d_x[0, i - 1, j - 1] = diff[0, 0]
+                        self.d_u__d_y[0, i - 1, j - 1] = diff[0, 1]
+                        self.d_v__d_x[0, i - 1, j - 1] = diff[1, 0]
+                        self.d_v__d_y[0, i - 1, j - 1] = diff[1, 1]
 
-    def value(self, x, units=U_METERS):
+    def value(self, t, x, units=U_METERS):
         """
         :param x: Point at which to give wind interpolation
         :param units: Units in which x is given
@@ -313,6 +355,8 @@ class DiscreteWind(Wind):
         xx = (x[0] - self.x_min) / (self.x_max - self.x_min)
         yy = (x[1] - self.y_min) / (self.y_max - self.y_min)
 
+        it, alpha = self._index(t)
+
         eps = self.clipping_tol
         if xx < 0. - eps or xx >= 1. or yy < 0. - eps or yy >= 1.:
             # print(f"Real windfield undefined at ({x[0]:.3f}, {x[1]:.3f})")
@@ -320,7 +364,11 @@ class DiscreteWind(Wind):
 
         if self.interp == 'pwc':
             try:
-                return self.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
+                if self.nt == 1:
+                    return self.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
+                else:
+                    return (1 - alpha) * self.uv[it, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)] + \
+                           alpha * self.uv[it + 1, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
             except ValueError:
                 return np.zeros(2)
 
@@ -338,10 +386,16 @@ class DiscreteWind(Wind):
             # Tile bottom left corner y-coordinate
             yij = delta_y * j + self.y_min
             b = (x[1] - yij) / delta_y
-            return (1 - b) * ((1 - a) * self.uv[0, i, j] + a * self.uv[0, i + 1, j]) + \
-                   b * ((1 - a) * self.uv[0, i, j + 1] + a * self.uv[0, i + 1, j + 1])
+            if self.nt == 1:
+                return (1 - b) * ((1 - a) * self.uv[0, i, j] + a * self.uv[0, i + 1, j]) + b * (
+                        (1 - a) * self.uv[0, i, j + 1] + a * self.uv[0, i + 1, j + 1])
+            else:
+                return (1 - alpha) * ((1 - b) * ((1 - a) * self.uv[it, i, j] + a * self.uv[it, i + 1, j]) +
+                                      b * ((1 - a) * self.uv[it, i, j + 1] + a * self.uv[it, i + 1, j + 1])) + \
+                       alpha * ((1 - b) * ((1 - a) * self.uv[it + 1, i, j] + a * self.uv[it + 1, i + 1, j]) +
+                                b * ((1 - a) * self.uv[it + 1, i, j + 1] + a * self.uv[it + 1, i + 1, j + 1]))
 
-    def d_value(self, x, units=U_METERS):
+    def d_value(self, t, x, units=U_METERS):
         """
         :param x: Point at which to give wind interpolation
         :param units: Units in which x is given
@@ -352,6 +406,8 @@ class DiscreteWind(Wind):
 
         nx = self.nx
         ny = self.ny
+
+        it, alpha = self._index(t)
 
         factor = 1.  # (DEG_TO_RAD if self.coords == COORD_GCS and units == U_DEG else 1.)
 
@@ -368,8 +424,14 @@ class DiscreteWind(Wind):
         if self.interp == 'pwc':
             try:
                 i, j = int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)
-                return np.array([[self.d_u__d_x[0, i, j], self.d_u__d_y[0, i, j]],
-                                 [self.d_v__d_x[0, i, j], self.d_v__d_y[0, i, j]]])
+                if self.nt == 1:
+                    return np.array([[self.d_u__d_x[0, i, j], self.d_u__d_y[0, i, j]],
+                                     [self.d_v__d_x[0, i, j], self.d_v__d_y[0, i, j]]])
+                else:
+                    return (1 - alpha) * np.array([[self.d_u__d_x[it, i, j], self.d_u__d_y[it, i, j]],
+                                                   [self.d_v__d_x[it, i, j], self.d_v__d_y[it, i, j]]]) + \
+                           alpha * np.array([[self.d_u__d_x[it + 1, i, j], self.d_u__d_y[it + 1, i, j]],
+                                             [self.d_v__d_x[it + 1, i, j], self.d_v__d_y[it + 1, i, j]]])
             except (ValueError, IndexError) as e:
                 return np.array([[0., 0.],
                                  [0., 0.]])
@@ -382,10 +444,20 @@ class DiscreteWind(Wind):
             a = (x[0] - xij) / delta_x
             yij = delta_y * j + self.y_min
             b = (x[1] - yij) / delta_y
-            d_uv__d_x = 1. / delta_x * ((1 - b) * (self.uv[0, i + 1, j] - self.uv[0, i, j]) +
-                                        b * (self.uv[0, i + 1, j + 1] - self.uv[0, i, j + 1]))
-            d_uv__d_y = 1. / delta_y * ((1 - a) * (self.uv[0, i, j + 1] - self.uv[0, i, j]) +
-                                        a * (self.uv[0, i + 1, j + 1] - self.uv[0, i + 1, j]))
+            if self.nt == 1:
+                d_uv__d_x = 1. / delta_x * ((1 - b) * (self.uv[0, i + 1, j] - self.uv[0, i, j]) +
+                                            b * (self.uv[0, i + 1, j + 1] - self.uv[0, i, j + 1]))
+                d_uv__d_y = 1. / delta_y * ((1 - a) * (self.uv[0, i, j + 1] - self.uv[0, i, j]) +
+                                            a * (self.uv[0, i + 1, j + 1] - self.uv[0, i + 1, j]))
+            else:
+                d_uv__d_x = 1. / delta_x * ((1 - alpha) * ((1 - b) * (self.uv[it, i + 1, j] - self.uv[it, i, j]) +
+                                                           b * (self.uv[it, i + 1, j + 1] - self.uv[it, i, j + 1])) +
+                                            alpha * ((1 - b) * (self.uv[it + 1, i + 1, j] - self.uv[it + 1, i, j]) +
+                                                     b * (self.uv[it + 1, i + 1, j + 1] - self.uv[it + 1, i, j + 1])))
+                d_uv__d_y = 1. / delta_y * ((1 - alpha) * ((1 - a) * (self.uv[it, i, j + 1] - self.uv[it, i, j]) +
+                                                           a * (self.uv[it, i + 1, j + 1] - self.uv[it, i + 1, j])) +
+                                            alpha * ((1 - a) * (self.uv[it + 1, i, j + 1] - self.uv[it + 1, i, j]) +
+                                                     a * (self.uv[it + 1, i + 1, j + 1] - self.uv[it + 1, i + 1, j])))
             return np.stack((d_uv__d_x, d_uv__d_y), axis=1)
 
     def compute_derivatives(self):
@@ -539,10 +611,10 @@ class UniformWind(Wind):
         self.descr = f'Uniform'  # ({np.linalg.norm(self.wind_vector):.2f} m/s, {math.floor(180 / np.pi * np.arctan2(self.wind_vector[1], self.wind_vector[0]))})'
         self.is_analytical = True
 
-    def value(self, x):
+    def value(self, t, x):
         return self.wind_vector
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         return np.array([[0., 0.],
                          [0., 0.]])
 
@@ -568,13 +640,13 @@ class VortexWind(Wind):
         self.descr = f'Vortex'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
         self.is_analytical = True
 
-    def value(self, x):
+    def value(self, t, x):
         r = np.linalg.norm(x - self.omega)
         e_theta = np.array([-(x - self.omega)[1] / r,
                             (x - self.omega)[0] / r])
         return self.gamma / (2 * np.pi * r) * e_theta
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         r = np.linalg.norm(x - self.omega)
         x_omega = self.x_omega
         y_omega = self.y_omega
@@ -611,7 +683,7 @@ class RankineVortexWind(Wind):
     def max_speed(self):
         return self.gamma / (self.radius * 2 * np.pi)
 
-    def value(self, x):
+    def value(self, t, x):
         r = np.linalg.norm(x - self.omega)
         if r < self.zero_ceil * self.radius:
             return np.zeros(2)
@@ -623,7 +695,7 @@ class RankineVortexWind(Wind):
         else:
             return f * 1 / r * e_theta
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         r = np.linalg.norm(x - self.omega)
         if r < self.zero_ceil * self.radius:
             return np.zeros((2, 2))
@@ -723,10 +795,10 @@ class LinearWind(Wind):
         self.value_origin[:] = value_origin
         self.is_analytical = True
 
-    def value(self, x):
+    def value(self, t, x):
         return self.gradient.dot(x - self.origin) + self.value_origin
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         return self.gradient
 
 
@@ -809,13 +881,14 @@ class RadialGaussWind(Wind):
         self.v_max = v_max
         self.zero_ceil = 1e-3
         self.is_analytical = True
+        self.dualizable = False
 
     def ampl(self, r):
         if r < self.zero_ceil * self.radius:
             return 0.
         return self.v_max * exp(-(log(r / self.radius)) ** 2 / (2 * self.sdev ** 2))
 
-    def value(self, x):
+    def value(self, t, x):
         xx = x - self.center
         r = np.linalg.norm(xx)
         if r < self.zero_ceil * self.radius:
@@ -824,7 +897,7 @@ class RadialGaussWind(Wind):
         v = self.ampl(r)
         return v * e_r
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         xx = x - self.center
         r = np.linalg.norm(xx)
         if r < self.zero_ceil * self.radius:
@@ -836,6 +909,77 @@ class RadialGaussWind(Wind):
         nabla_e_r = np.array([[b ** 2 / r ** 3, - a * b / r ** 3],
                               [-a * b / r ** 3, a ** 2 / r ** 3]])
         return np.einsum('i,j->ij', e_r, dv) + self.ampl(r) * nabla_e_r
+
+
+class RadialGaussWindT(Wind):
+    """
+    Time-varying version of radial Gauss wind
+    """
+
+    def __init__(self, center, radius, sdev, v_max, t_end, t_start=0.):
+        """
+        :param center: ndarray of size nt x 2
+        :param radius: ndarray of size nt
+        :param sdev: ndarray of size nt
+        :param v_max: ndarray of size nt
+        :param t_end: end of time window. Wind is supposed to be regularly sampled in the time window
+        :param t_start: beginning of time window.
+        """
+        super().__init__(value_func=self.value, d_value_func=self.d_value, t_start=t_start, t_end=t_end,
+                         nt=radius.shape[0])
+
+        self.center = np.zeros(center.shape)
+        self.radius = np.zeros(radius.shape)
+        self.sdev = np.zeros(sdev.shape)
+        self.v_max = np.zeros(v_max.shape)
+
+        self.center[:] = center
+        self.radius[:] = radius
+        self.sdev[:] = sdev
+        self.v_max[:] = v_max
+
+        self.zero_ceil = 1e-3
+        self.is_analytical = True
+        self.dualizable = False
+
+    def ampl(self, t, r):
+        i, alpha = self._index(t)
+        radius = (1 - alpha) * self.radius[i] + alpha * self.radius[i + 1]
+        v_max = (1 - alpha) * self.v_max[i] + alpha * self.v_max[i + 1]
+        sdev = (1 - alpha) * self.sdev[i] + alpha * self.sdev[i + 1]
+        if r < self.zero_ceil * radius:
+            return 0.
+        return v_max * exp(-(log(r / radius)) ** 2 / (2 * sdev ** 2))
+
+    def value(self, t, x):
+        i, alpha = self._index(t)
+        center = (1 - alpha) * self.center[i] + alpha * self.center[i + 1]
+        radius = (1 - alpha) * self.radius[i] + alpha * self.radius[i + 1]
+        xx = x - center
+        r = np.linalg.norm(xx)
+        if r < self.zero_ceil * radius:
+            return np.zeros(2)
+        e_r = (x - center) / r
+        v = self.ampl(t, r)
+        return v * e_r
+
+    def d_value(self, t, x):
+        i, alpha = self._index(t)
+        center = (1 - alpha) * self.center[i] + alpha * self.center[i + 1]
+        radius = (1 - alpha) * self.radius[i] + alpha * self.radius[i + 1]
+        sdev = (1 - alpha) * self.sdev[i] + alpha * self.sdev[i + 1]
+        xx = x - center
+        r = np.linalg.norm(xx)
+        if r < self.zero_ceil * radius:
+            return np.zeros((2, 2))
+        e_r = (x - center) / r
+        a = (x - center)[0]
+        b = (x - center)[1]
+        dv = -log(r / radius) * self.ampl(t, r) / (r ** 2 * sdev ** 2) * np.array([xx[0], xx[1]])
+        nabla_e_r = np.array([[b ** 2 / r ** 3, - a * b / r ** 3],
+                              [-a * b / r ** 3, a ** 2 / r ** 3]])
+        return np.einsum('i,j->ij', e_r, dv) + self.ampl(t, r) * nabla_e_r
+
 
 class BandGaussWind(Wind):
     """
@@ -853,14 +997,41 @@ class BandGaussWind(Wind):
 
     def value(self, x):
         dist = np.abs(np.cross(self.vect, x - self.origin))
-        intensity = self.ampl * np.exp(-0.5*(dist/self.sdev)**2)
+        intensity = self.ampl * np.exp(-0.5 * (dist / self.sdev) ** 2)
         return self.vect * intensity
 
     def d_value(self, x):
         dx = 1e-6
-        return np.column_stack((1/dx * (self.value(x + np.array((dx, 0.))) - self.value(x)),
+        return np.column_stack((1 / dx * (self.value(x + np.array((dx, 0.))) - self.value(x)),
                                 1 / dx * (self.value(x + np.array((0., dx))) - self.value(x))))
 
+class LCWind(Wind):
+    """
+    Linear combination of winds. Handles the "dualization" of the windfield, i.e. multiplying by -1 everything
+    except wind virtual obstacles
+    """
+    def __init__(self, coeffs, winds):
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        self.coeffs = np.zeros(coeffs.shape[0])
+        self.coeffs[:] = coeffs
+        self.winds = winds
+
+        self.lcwind = sum((c * self.winds[i] for i, c in enumerate(self.coeffs)), UniformWind(np.zeros(2)))
+
+    def value(self, t, x):
+        return self.lcwind.value(t, x)
+
+    def d_value(self, t, x):
+        return self.lcwind.d_value(t, x)
+
+    def dualize(self):
+        new_coeffs = np.zeros(self.coeffs.shape[0])
+        for i, c in enumerate(self.coeffs):
+            if self.winds[i].dualizable:
+                new_coeffs[i] = -1. * c
+            else:
+                new_coeffs[i] = c
+        return LCWind(new_coeffs, self.winds)
 
 if __name__ == '__main__':
     wind = DiscreteWind(interp='linear')
