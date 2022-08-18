@@ -17,7 +17,7 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 0, 0
+    pb_id, seed = 7, 0
     cache = False
 
     # Create a file manager to dump problem data
@@ -37,18 +37,21 @@ if __name__ == '__main__':
     # pb.model.wind = d_wind
 
     # Log windfield to file
-    mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, bl=pb.bl, tr=pb.tr)
+    mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
 
     # Setting the solver
-    solver = SolverEF(pb, max_steps=200, hard_obstacles=not seed)
+    solver = SolverEF(pb, max_steps=100, hard_obstacles=not seed)
     # solver = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
 
     t_start = time.time()
     reach_time, iit, p_init = solver.solve()
     t_end = time.time()
     time_rp = t_end - t_start
+    solver.set_primal(True)
+    print('start primal')
+    solver.solve(verbose=True)
 
-    trajs = solver.get_trajs()
+    trajs = solver.get_trajs(primal_only=True)
     m = None
     k0 = -1
     for k, traj in enumerate(trajs):
@@ -97,8 +100,8 @@ if __name__ == '__main__':
     """
 
     pb.load_feedback(FunFB(solver.control))
-    sc = TimedSC(reach_time)
-    pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time/iit)
+    sc = TimedSC(0.9*reach_time)
+    pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time/ iit)
 
     pb.load_feedback(ConstantFB(0.5))
     pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit)

@@ -92,22 +92,22 @@ class SolverEF:
     """
 
     def __init__(self, mp: MermozProblem, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30, hard_obstacles=True):
-        self.mp = mp
+        self.mp_primal = mp
 
         # Create the dual problem, i.e. going from target to init in the mirror wind (multiplication by -1)
-        dual_model = ZermeloGeneralModel(self.mp.model.v_a, self.mp.coords)
-        dual_model.update_wind(self.mp.model.wind.dualize())
+        dual_model = ZermeloGeneralModel(self.mp_primal.model.v_a, self.mp_primal.coords)
+        dual_model.update_wind(self.mp_primal.model.wind.dualize())
 
         kwargs = {}
-        for k, v in self.mp.__dict__.items():
+        for k, v in self.mp_primal.__dict__.items():
             if k == 'model':
                 kwargs[k] = dual_model
             elif k == 'x_init':
                 kwargs[k] = np.zeros(2)
-                kwargs[k][:] = self.mp.x_target
+                kwargs[k][:] = self.mp_primal.x_target
             elif k == 'x_target':
                 kwargs[k] = np.zeros(2)
-                kwargs[k][:] = self.mp.x_init
+                kwargs[k][:] = self.mp_primal.x_init
             else:
                 kwargs[k] = v
 
@@ -121,40 +121,71 @@ class SolverEF:
         else:
             self.dt = .01 * mp._geod_l / mp.model.v_a
 
+        # This group shall be reinitialized before new resolution
         # Contains augmented state points (id, time, state, adjoint) used to expand extremal field
         self.active = []
         self.new_points = {}
         self.p_inits = {}
-        self.trajs = {}
         self.lsets = []
+        self.rel = None
+
+        self.trajs_primal = {}
+        self.trajs_dual = {}
+        # Default mode is dual problem
+        self.mode_primal = False
+        self.mp = self.mp_dual
+        self.trajs = self.trajs_dual
+        self.max_extremals = 500
 
         self.it = 0
 
-        self._index = 0
+        self._index_p = 0
+        self._index_d = 0
 
         self.max_steps = max_steps
 
         self.N_filling_steps = 4
         self.hard_obstacles = hard_obstacles
-        self.rel = None
+
+        self.debug = False
+
 
     def new_index(self):
-        i = self._index
-        self._index += 1
+        if self.mode_primal:
+            i = self._index_p
+            self._index_p += 1
+        else:
+            i = self._index_d
+            self._index_d += 1
         return i
+
+    def set_primal(self, b):
+        self.mode_primal = b
+        if b:
+            self.mp = self.mp_primal
+            self.trajs = self.trajs_primal
+        else:
+            self.mp = self.mp_dual
+            self.trajs = self.trajs_dual
 
     def setup(self):
         """
         Push all possible angles to active list from init point
         :return: None
         """
+        self.active = []
+        self.new_points = {}
+        self.p_inits = {}
+        self.lsets = []
+        self.rel = None
+        self.it = 0
         for k in range(self.N_disc_init):
             theta = 2 * np.pi * k / self.N_disc_init
             p = np.array((np.cos(theta), np.sin(theta)))
             i = self.new_index()
             self.p_inits[i] = np.zeros(2)
             self.p_inits[i][:] = p
-            a = FrontPoint(i, (0, 0., self.mp_dual.x_init, p))
+            a = FrontPoint(i, (0, 0., self.mp.x_init, p))
             heappush(self.active, (1., a))
             self.trajs[k] = {}
             self.trajs[k][a.tsa[0]] = a.tsa[1:]
@@ -172,8 +203,12 @@ class SolverEF:
         polyfront = Polygon(front)
 
         # Step the entire active list, look for domain violation and front collapse
+        active_list = []
+        obstacle_list = []
+        front_list = []
         while len(self.active) != 0:
             _, a = heappop(self.active)
+            active_list.append(a.i)
             it = a.tsa[0]
             t, x, p, status, i_obs, ccw = self.step_single(a.tsa[1:], a.i_obs, a.ccw)
             tsa = (t, np.zeros(2), np.zeros(2))
@@ -182,12 +217,18 @@ class SolverEF:
             self.trajs[a.i][it + 1] = tsa
             if not status and self.rel.is_active(a.i):
                 self.rel.deactivate(a.i)
+                obstacle_list.append(a.i)
             else:
                 if not polyfront.contains(Point(*x)):
                     na = FrontPoint(a.i, (it + 1,) + self.trajs[a.i][it + 1], i_obs, ccw)
                     self.new_points[a.i] = na
                 else:
                     self.rel.remove(a.i)
+                    front_list.append(a.i)
+        if self.debug:
+            print(f'     Active : {tuple(active_list)}')
+            print(f'   Obstacle : {tuple(obstacle_list)}')
+            print(f'      Front : {tuple(front_list)}')
 
         # Fill in holes when extremals get too far from one another
         for na in list(self.new_points.values()):
@@ -196,6 +237,7 @@ class SolverEF:
                 # Case 1, both points are active and at least one lies out of an obstacle
                 if np.linalg.norm(na.tsa[2] - self.new_points[iu].tsa[2]) > self.abs_nb_ceil\
                         and (na.i_obs < 0 or self.new_points[iu].i_obs < 0):
+                    print(f'Stepping between {na.i}, {iu}')
                     self.step_between(na.i, iu)
             else:
                 pass
@@ -276,34 +318,34 @@ class SolverEF:
         t = ap[0]
         if i_obs == -1 or not self.hard_obstacles:
             # For the moment, simple Euler scheme
-            u = control_time_opti(x, p, t, self.mp_dual.coords)
-            dyn_x = self.mp_dual.model.dyn.value(x, u, t)
-            A = -self.mp_dual.model.dyn.d_value__d_state(x, u, t).transpose()
+            u = control_time_opti(x, p, t, self.mp.coords)
+            dyn_x = self.mp.model.dyn.value(x, u, t)
+            A = -self.mp.model.dyn.d_value__d_state(x, u, t).transpose()
             dyn_p = A.dot(p)
             x += self.dt * dyn_x
             p += self.dt * dyn_p
             t += self.dt
         else:
             # Obstacle mode. Follow the obstacle boundary as fast as possible
-            dx = self.mp_dual._geod_l / 1e6
-            phi = self.mp_dual.phi_obs[i_obs]
+            dx = self.mp._geod_l / 1e6
+            phi = self.mp.phi_obs[i_obs]
             grad = np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
                                     1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
             n = grad / np.linalg.norm(grad)
             # n = self.mp.grad_phi_obs[i_obs](x) / np.linalg.norm(self.mp.grad_phi_obs[i_obs](x))
             theta = atan2(*n[::-1])
-            u = theta + (-1. if not ccw else 1.) * acos(-self.mp_dual.model.wind.value(x) @ n / self.mp_dual.model.v_a)
-            dyn_x = self.mp_dual.model.dyn.value(x, u, t)
+            u = theta + (-1. if not ccw else 1.) * acos(-self.mp.model.wind.value(x) @ n / self.mp.model.v_a)
+            dyn_x = self.mp.model.dyn.value(x, u, t)
             x += self.dt * dyn_x
             p[:] = - np.array((np.cos(u), np.sin(u)))
             t += self.dt
 
-        status = self.mp_dual.domain(x)
+        status = self.mp.domain(x)
         if status and i_obs < 0:
-            i_obs = self.mp_dual.in_obs(x)
+            i_obs = self.mp.in_obs(x)
             if i_obs >= 0:
-                dx = self.mp_dual._geod_l / 1e6
-                phi = self.mp_dual.phi_obs[i_obs]
+                dx = self.mp._geod_l / 1e6
+                phi = self.mp.phi_obs[i_obs]
                 grad = np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
                                  1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
                 # ccw = np.cross(self.mp.grad_phi_obs[i_obs](x), dyn_x) > 0.
@@ -317,9 +359,10 @@ class SolverEF:
         :return: Minimum time to reach destination, corresponding global time index,
         corresponding initial adjoint state
         """
+        if verbose: self.debug = True
         self.setup()
         i = 0
-        while len(self.active) != 0 and i < self.max_steps:
+        while len(self.active) != 0 and i < self.max_steps and len(self.trajs) < self.max_extremals:
             i += 1
             if verbose:
                 print(i)
@@ -330,7 +373,7 @@ class SolverEF:
         iit_opt = 0
         for k, traj in self.trajs.items():
             for iit in traj.keys():
-                candidate = np.linalg.norm(traj[iit][1] - self.mp_dual.x_target)
+                candidate = np.linalg.norm(traj[iit][1] - self.mp.x_target)
                 if m is None or m > candidate:
                     m = candidate
                     k0 = k
@@ -348,9 +391,13 @@ class SolverEF:
                     p[:] = vv[2]
         return atan2(*p[::-1])
 
-    def get_trajs(self):
+    def get_trajs(self, primal_only=False):
         res = []
-        for it, t in self.trajs.items():
+        if not primal_only:
+            trajs = {**self.trajs_primal, **self.trajs_dual}
+        else:
+            trajs = self.trajs_primal
+        for it, t in trajs.items():
             n = len(t)
             timestamps = np.zeros(n)
             points = np.zeros((n, 2))
@@ -358,10 +405,11 @@ class SolverEF:
             controls = np.zeros(n)
             for k, e in enumerate(list(t.values())):
                 timestamps[k] = e[0]
+                print(timestamps[k])
                 points[k, :] = e[1]
                 adjoints[k, :] = e[2]
 
             res.append(
-                AugmentedTraj(timestamps, points, adjoints, controls, last_index=n, coords=self.mp_dual.coords, label=it, type=TRAJ_PMP))
+                AugmentedTraj(timestamps, points, adjoints, controls, last_index=n, coords=self.mp.coords, label=it, type=TRAJ_PMP))
 
         return res

@@ -62,15 +62,27 @@ class Wind:
         """
         if self.nt == 1:
             return 0, 0.
-        if t < self.t_start or t > self.t_end:
-            print(f'Time {t} out of ({self.t_start}, {self.t_end})', file=sys.stderr)
+        # if t < self.t_start or t > self.t_end:
+        #     print(f'Time {t} out of ({self.t_start}, {self.t_end})', file=sys.stderr)
+        #     exit(1)
+        if t < self.t_start:
+            print(f'Time {t} lower than lower time bound{self.t_start}', file=sys.stderr)
             exit(1)
+        if t > self.t_end:
+            # Freeze wind to last frame
+            return self.nt - 2, 1.
         tau = (t - self.t_start) / (self.t_end - self.t_start)
         i, alpha = int(tau * (self.nt - 1)), tau * (self.nt - 1) - int(tau * (self.nt - 1))
         if i == self.nt - 1:
             i = self.nt - 2
             alpha = 1.
         return i, alpha
+
+    def dualize(self):
+        a = -1.
+        if not self.dualizable:
+            a = 1.
+        return a * self
 
     def __add__(self, other):
         """
@@ -802,6 +814,38 @@ class LinearWind(Wind):
         return self.gradient
 
 
+class LinearWindT(Wind):
+
+    def __init__(self, gradient, origin, value_origin, t_end):
+        """
+        :param gradient: The wind gradient, shape (nt, 2, 2)
+        :param origin: The origin point for the origin value, shape (2,)
+        :param value_origin: The origin value, shape (2,)
+        """
+        super().__init__(value_func=self.value, d_value_func=self.d_value, t_end=t_end)
+
+        self.gradient = np.zeros(gradient.shape)
+        self.origin = np.zeros(origin.shape)
+        self.value_origin = np.zeros(value_origin.shape)
+
+        self.gradient[:] = gradient
+        self.origin[:] = origin
+        self.value_origin[:] = value_origin
+        self.is_analytical = True
+        self.nt = self.gradient.shape[0]
+
+    def value(self, t, x):
+        i, alpha = self._index(t)
+        return ((1 - alpha) * self.gradient[i] + alpha * self.gradient[i + 1]) @ (x - self.origin) + self.value_origin
+
+    def d_value(self, t, x):
+        i, alpha = self._index(t)
+        return (1 - alpha) * self.gradient[i] + alpha * self.gradient[i + 1]
+
+    def dualize(self):
+        return -1. * LinearWindT(self.gradient[::-1, :, :], self.origin, self.value_origin, self.t_end)
+
+
 class PointSymWind(Wind):
     """
     From Techy 2011 (DOI 10.1007/s11370-011-0092-9)
@@ -853,11 +897,11 @@ class DoubleGyreWind(Wind):
         self.ampl = ampl
         self.is_analytical = True
 
-    def value(self, x):
+    def value(self, t, x):
         xx = np.diag((self.kx, self.ky)) @ (x - self.center)
         return self.ampl * np.array((-sin(xx[0]) * cos(xx[1]), cos(xx[0]) * sin(xx[1])))
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         xx = np.diag((self.kx, self.ky)) @ (x - self.center)
         return self.ampl * np.array([[-self.kx * cos(xx[0]) * cos(xx[1]), self.ky * sin(xx[0]) * sin(xx[1])],
                                      [-self.kx * sin(xx[0]) * sin(xx[1]), self.ky * cos(xx[0]) * cos(xx[1])]])
@@ -995,21 +1039,23 @@ class BandGaussWind(Wind):
         self.ampl = ampl
         self.sdev = sdev
 
-    def value(self, x):
+    def value(self, t, x):
         dist = np.abs(np.cross(self.vect, x - self.origin))
         intensity = self.ampl * np.exp(-0.5 * (dist / self.sdev) ** 2)
         return self.vect * intensity
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         dx = 1e-6
         return np.column_stack((1 / dx * (self.value(x + np.array((dx, 0.))) - self.value(x)),
                                 1 / dx * (self.value(x + np.array((0., dx))) - self.value(x))))
+
 
 class LCWind(Wind):
     """
     Linear combination of winds. Handles the "dualization" of the windfield, i.e. multiplying by -1 everything
     except wind virtual obstacles
     """
+
     def __init__(self, coeffs, winds):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
         self.coeffs = np.zeros(coeffs.shape[0])
@@ -1017,6 +1063,18 @@ class LCWind(Wind):
         self.winds = winds
 
         self.lcwind = sum((c * self.winds[i] for i, c in enumerate(self.coeffs)), UniformWind(np.zeros(2)))
+        nt = None
+        t_end = None
+        for wind in self.winds:
+            if wind.nt > 1:
+                if nt is None:
+                    nt = wind.nt
+                    t_end = wind.t_end
+                else:
+                    print('Cannot handle combination of multiple time-varying winds for the moment', file=sys.stderr)
+                    exit(1)
+        self.nt = nt if nt is not None else 1
+        self.t_end = t_end
 
     def value(self, t, x):
         return self.lcwind.value(t, x)
@@ -1032,6 +1090,7 @@ class LCWind(Wind):
             else:
                 new_coeffs[i] = c
         return LCWind(new_coeffs, self.winds)
+
 
 if __name__ == '__main__':
     wind = DiscreteWind(interp='linear')

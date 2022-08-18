@@ -7,7 +7,7 @@ from pyproj import Proj
 from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
 from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
-    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind
+    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT
 from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
@@ -206,6 +206,7 @@ class IndexedProblem(MermozProblem):
         9: ['Four vortices', '4vor'],
         10: ['One obstacle', '1obs'],
         11: ['Moving obstacle', 'movobs'],
+        12: ['Time-varying linear wind', 'tvlinear']
     }
 
     def __init__(self, i, seed=0):
@@ -514,25 +515,28 @@ class IndexedProblem(MermozProblem):
 
             if seed:
                 obs_radius *= 0.85
-                total_wind = const_wind + \
-                             RadialGaussWind(
-                                 obs_center[0][0],
-                                 obs_center[0][1],
-                                 obs_radius[0],
-                                 1 / 2 * 0.2,
-                                 v_a * 5.) + \
-                             RadialGaussWind(
-                                 obs_center[1][0],
-                                 obs_center[1][1],
-                                 obs_radius[1],
-                                 1 / 2 * 0.2,
-                                 v_a * 5.) + \
-                             RadialGaussWind(
-                                 obs_center[2][0],
-                                 obs_center[2][1],
-                                 obs_radius[2],
-                                 1 / 2 * 0.2,
-                                 v_a * 5.)
+                total_wind = LCWind(
+                    np.ones(4),
+                    (const_wind,
+                     RadialGaussWind(
+                         obs_center[0][0],
+                         obs_center[0][1],
+                         obs_radius[0],
+                         1 / 2 * 0.2,
+                         v_a * 5.),
+                     RadialGaussWind(
+                         obs_center[1][0],
+                         obs_center[1][1],
+                         obs_radius[1],
+                         1 / 2 * 0.2,
+                         v_a * 5.),
+                     RadialGaussWind(
+                         obs_center[2][0],
+                         obs_center[2][1],
+                         obs_radius[2],
+                         1 / 2 * 0.2,
+                         v_a * 5.))
+                )
                 obs_radius *= 1.1 / 0.9
             else:
                 total_wind = const_wind + band
@@ -571,14 +575,18 @@ class IndexedProblem(MermozProblem):
             nt = 20
 
             obs_x = sf * np.linspace(0.5, 0.5, nt)
-            obs_y = sf * np.linspace(-0.5, 0.5, nt)
+            obs_y = sf * np.linspace(-0.2, 0.2, nt)
             obs_center = np.column_stack((obs_x, obs_y))
             obs_radius = sf * np.linspace(0.15, 0.15, nt)
             obs_sdev = np.linspace(1 / 2 * 0.2, 1 / 2 * 0.2, nt)
             obs_v_max = np.linspace(v_a * 5., v_a * 5., nt)
 
-            total_wind = RadialGaussWindT(obs_center, obs_radius, obs_sdev, obs_v_max,
-                                          1.2 * distance(x_init, x_target, coords) / v_a)
+            total_wind = LCWind(
+                np.ones(2),
+                (UniformWind(np.array((5., -5.))),
+                 RadialGaussWindT(obs_center, obs_radius, obs_sdev, obs_v_max,
+                                          1.2 * distance(x_init, x_target, coords) / v_a))
+            )
 
             # phi_obs = {}
             # for k in range(obs_radius.shape[0]):
@@ -591,8 +599,36 @@ class IndexedProblem(MermozProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
-                                                 #phi_obs=phi_obs)
+            # phi_obs=phi_obs)
 
+        elif i == 12:
+            v_a = 23.
+            coords = COORD_CARTESIAN
+
+            factor = 1e6
+            x_init = factor * np.array([0., 0.])
+            x_target = factor * np.array([1., 0.])
+
+            nt = 20
+
+            gradient = np.array([[np.zeros(nt), np.linspace(3*v_a / factor, 0 * v_a / factor, nt)],
+                                 [np.zeros(nt), np.zeros(nt)]]).transpose((2, 0, 1))
+
+            origin = np.array([0., 0.])
+            value_origin = np.array([0., 0.])
+
+            bl = factor * np.array([-0.2, -1.])
+            tr = factor * np.array([1.2, 1.])
+
+            linear_wind = LinearWindT(gradient, origin, value_origin, t_end=factor / v_a)
+            # total_wind = DiscreteWind()
+            # total_wind.load_from_wind(linear_wind, 51, 51, bl, tr, coords)
+
+            # Creates the cinematic model
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(linear_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
 
         else:
             raise IndexError(f'No problem with index {i}')

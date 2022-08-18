@@ -31,7 +31,7 @@ class FrontendHandler:
             self.display.set_title('Geodesic approximation with extremals')
             bl = np.array([-76., 30.])
             tr = np.array([5., 60.])
-            self.display.load_params()
+            self.display.import_params()
             self.display.set_coords('gcs')
             self.display.setup(bl=bl, tr=tr)
             self.display.draw_trajs(nolabels=True)
@@ -47,7 +47,7 @@ class FrontendHandler:
             self.display.set_coords('cartesian')
             self.display.set_title('Analytic solution comparison')
             self.display.setup()
-            self.display.load_params()
+            self.display.import_params()
             self.display.draw_wind()
             self.display.draw_trajs()
             self.display.draw_point(1e6, 0., label='Target')
@@ -60,7 +60,7 @@ class FrontendHandler:
 
             self.display.setup(projection='lcc')
 
-            self.display.load_params()
+            self.display.import_params()
             self.display.draw_wind()
             self.display.draw_rff(debug=False)
             self.display.draw_trajs(nolabels=True)
@@ -72,7 +72,7 @@ class FrontendHandler:
 
             self.display.setup(projection='lcc')
 
-            self.display.load_params()
+            self.display.import_params()
             self.display.draw_wind()
             self.display.draw_rff()
             self.display.draw_trajs(nolabels=True)
@@ -86,7 +86,7 @@ class FrontendHandler:
 
             self.display.setup(projection='lcc')
 
-            self.display.load_params()
+            self.display.import_params()
             self.display.draw_wind()
             self.display.draw_rff()
             self.display.draw_trajs(nolabels=True)
@@ -100,7 +100,7 @@ class FrontendHandler:
 
             self.display.setup()
 
-            self.display.load_params()
+            self.display.import_params()
             self.display.draw_wind()
             self.display.draw_rff()
             self.display.draw_trajs(nolabels=True)
@@ -108,7 +108,7 @@ class FrontendHandler:
         elif self.case_name == 'example_solver':
             self.display.nocontrols = True
             self.display.set_title('Solver test')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup()
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=True)
@@ -120,7 +120,7 @@ class FrontendHandler:
             self.display.set_coords('cartesian')
             self.display.set_title('Front tracking on Rankine vortices')
             self.display.setup()
-            self.display.load_params()
+            self.display.import_params()
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=True, filename='../example_solver/trajectories.h5')
             self.display.draw_rff()
@@ -128,7 +128,7 @@ class FrontendHandler:
         elif self.case_name == 'example_solver_dn':
             self.display.nocontrols = True
             self.display.set_title('Solver')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup(projection='lcc')
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=False, opti_only=True)
@@ -141,7 +141,7 @@ class FrontendHandler:
         elif self.case_name == 'example_solver_test':
             self.display.nocontrols = True
             self.display.set_title('Solver')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup(projection='ortho')
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=False)
@@ -154,7 +154,7 @@ class FrontendHandler:
         elif 'double-gyre-ku2016' in self.case_name or 'double-gyre-li2020' in self.case_name:
             self.display.nocontrols = True
             self.display.set_title(f'{self.case_name.split("-")[-1]}')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup()
             self.display.draw_wind(autoscale=True, wind_nointerp=True)
             self.display.draw_trajs(nolabels=True, opti_only=opti_only)
@@ -177,7 +177,7 @@ class FrontendHandler:
         elif '3obs' in self.case_name:
             self.display.nocontrols = True
             self.display.set_title('3obs')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup()
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=False, opti_only=False)
@@ -186,7 +186,7 @@ class FrontendHandler:
         elif 'big_rankine' in self.case_name:
             self.display.nocontrols = True
             self.display.set_title('big-rankine')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup()
             self.display.draw_wind(wind_nointerp=True)
             self.display.draw_trajs(nolabels=False, opti_only=False)
@@ -196,7 +196,7 @@ class FrontendHandler:
         elif self.case_name in ['example_test_grib']:
             self.display.nocontrols = True
             self.display.set_title('Test grib')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup(projection='ortho')
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=False, opti_only=False)
@@ -206,7 +206,7 @@ class FrontendHandler:
         elif self.case_name in ['example_test_flatten']:
             self.display.nocontrols = True
             self.display.set_title('Test flatten')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup()
             self.display.draw_wind(wind_nointerp=True)
             # self.display.draw_trajs(nolabels=False, opti_only=False)
@@ -216,7 +216,7 @@ class FrontendHandler:
         elif self.case_name in ['example_solver_dakar-natal']:
             self.display.nocontrols = True
             self.display.set_title('Optimal trajectory between Dakar and Natal')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup()
             self.display.draw_wind()
             self.display.draw_trajs(nolabels=False, opti_only=False)
@@ -226,17 +226,17 @@ class FrontendHandler:
         elif self.case_name in ['example_test_flatten_ref']:
             self.display.nocontrols = True
             self.display.set_title('Test flatten')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup(projection='ortho')
             self.display.draw_wind(wind_nointerp=True)
             self.display.draw_trajs(nolabels=False, opti_only=False)
             # self.display.draw_solver()
             self.display.draw_rff()
 
-        elif self.case_name in ['example_solver_san-juan_dublin_ortho', 'example_solver-rp_sanjuan-dublin-ortho']:
+        elif self.case_name in ['XXXexample_solver_san-juan_dublin_ortho', 'XXXexample_solver-rp_sanjuan-dublin-ortho']:
             self.display.nocontrols = True
             self.display.set_title('Test flatten')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup()
             self.display.draw_wind(wind_nointerp=True)
             self.display.draw_trajs(nolabels=False, opti_only=False)
@@ -245,7 +245,7 @@ class FrontendHandler:
         elif self.case_name in ['example_solver-rp_1obs']:
             self.display.nocontrols = True
             self.display.set_title('Test obstacle')
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup()
             self.display.draw_wind()
             self.display.draw_trajs()
@@ -254,28 +254,24 @@ class FrontendHandler:
             print(f'Using default solver setup script for unknown case "{self.case_name}"', file=sys.stderr)
             self.display.nocontrols = True
             self.display.set_title(os.path.basename(self.output_path))
-            self.display.load_params()
-            self.display.setup()
-            self.display.draw_wind()
-            self.display.draw_trajs(nolabels=False)
-            self.display.draw_rff()
-            self.display.draw_solver()
+            self.display.import_params()
+            self.display.load_all()
+            self.display.setup(debug=True)
+            self.display.draw_all()
         elif 'wf' in self.case_name:
             print(f'Using default wind field setup script for unknown case "{self.case_name}"', file=sys.stderr)
             self.display.set_title(os.path.basename(self.output_path))
-            self.display.load_params()
+            self.display.import_params()
             self.display.setup()
             self.display.draw_wind()
         else:
             print(f'Using default setup script for unknown case "{self.case_name}"', file=sys.stderr)
             self.display.nocontrols = True
             self.display.set_title(os.path.basename(self.output_path))
-            self.display.load_params()
+            self.display.import_params()
+            self.display.load_all()
             self.display.setup()
-            self.display.draw_wind()
-            self.display.draw_trajs(nolabels=True)
-            self.display.draw_rff()
-            self.display.draw_solver()
+            self.display.draw_all()
 
     def select_example(self, *args, latest=False):
         if self.mode == 'user':
