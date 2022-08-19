@@ -536,7 +536,7 @@ class RFT:
         else:
             k = self.get_index(point) - 1
 
-        lam = self.value(point, k + 1) / (self.value(point, k + 1) - self.value(point, k))
+        lam = self._value(point, k + 1) / (self._value(point, k + 1) - self._value(point, k))
 
         # Linear interpolation gradient at point gives the normal
         d_phi__d_x = 1. / delta_x * ((1 - b) * (self.phi[i + 1, j, k] - self.phi[i, j, k]) +
@@ -561,10 +561,9 @@ class RFT:
         eps = 1e-4
         tl = self.ts[0]
         tu = self.ts[-1]
-        t = 2 * eps
-        while t > eps:
-            t_new = self.value(0.5 * (tl + tu), x)
-            if t_new > 0.:
+        while tu - tl > eps:
+            t_new = 0.5 * (tl + tu)
+            if self.value(t_new, x) > 0.:
                 tu = t_new
             else:
                 tl = t_new

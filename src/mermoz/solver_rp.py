@@ -63,8 +63,7 @@ class SolverRP:
         t_end = time.time()
         time_rft = t_end - t_start
 
-        k0 = self.rft.get_time(self.mp.x_target)
-        T = self.rft.ts[k0]
+        T = self.rft.get_time(self.mp.x_target)
         self.mp_dual.load_feedback(FunFB(lambda x: self.rft.control(x)))
         sc = TimedSC(T)
         traj = self.mp_dual.integrate_trajectory(self.mp_dual.x_init, sc, 1000, T/999)
