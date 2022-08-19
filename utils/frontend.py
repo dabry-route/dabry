@@ -251,21 +251,22 @@ class FrontendHandler:
             self.display.draw_trajs()
 
         elif 'solver' in self.case_name:
-            print(f'Using default solver setup script for unknown case "{self.case_name}"', file=sys.stderr)
+            Display._info(f'Using default solver setup script for unknown case "{self.case_name}"')
             self.display.nocontrols = True
             self.display.set_title(os.path.basename(self.output_path))
             self.display.import_params()
             self.display.load_all()
-            self.display.setup(debug=True)
+            self.display.setup()
             self.display.draw_all()
         elif 'wf' in self.case_name:
-            print(f'Using default wind field setup script for unknown case "{self.case_name}"', file=sys.stderr)
+            Display._info(f'Using default wind field setup script for unknown case "{self.case_name}"')
             self.display.set_title(os.path.basename(self.output_path))
             self.display.import_params()
+            self.display.load_all()
             self.display.setup()
             self.display.draw_wind()
         else:
-            print(f'Using default setup script for unknown case "{self.case_name}"', file=sys.stderr)
+            Display._info(f'Using default setup script for unknown case "{self.case_name}"')
             self.display.nocontrols = True
             self.display.set_title(os.path.basename(self.output_path))
             self.display.import_params()

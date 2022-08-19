@@ -149,7 +149,29 @@ class MermozProblem:
                                   stop_cond=sc,
                                   max_iter=max_iter,
                                   int_step=int_step)
-        self.trajs.append(integrator.integrate(x_init))
+        traj = integrator.integrate(x_init)
+        self.trajs.append(traj)
+        return traj
+
+    def dualize(self):
+        # Create the dual problem, i.e. going from target to init in the mirror wind (multiplication by -1)
+        dual_model = ZermeloGeneralModel(self.model.v_a, self.coords)
+        dual_model.update_wind(self.model.wind.dualize())
+
+        kwargs = {}
+        for k, v in self.__dict__.items():
+            if k == 'model':
+                kwargs[k] = dual_model
+            elif k == 'x_init':
+                kwargs[k] = np.zeros(2)
+                kwargs[k][:] = self.x_target
+            elif k == 'x_target':
+                kwargs[k] = np.zeros(2)
+                kwargs[k][:] = self.x_init
+            else:
+                kwargs[k] = v
+
+        return MermozProblem(**kwargs)
 
     def eliminate_trajs(self, target, tol: float):
         """
@@ -620,7 +642,7 @@ class IndexedProblem(MermozProblem):
             bl = factor * np.array([-0.2, -1.])
             tr = factor * np.array([1.2, 1.])
 
-            linear_wind = LinearWindT(gradient, origin, value_origin, t_end=factor / v_a)
+            linear_wind = LinearWindT(gradient, origin, value_origin, t_end=0.5 * factor / v_a)
             # total_wind = DiscreteWind()
             # total_wind.load_from_wind(linear_wind, 51, 51, bl, tr, coords)
 

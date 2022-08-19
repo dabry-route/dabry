@@ -93,25 +93,7 @@ class SolverEF:
 
     def __init__(self, mp: MermozProblem, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30, hard_obstacles=True):
         self.mp_primal = mp
-
-        # Create the dual problem, i.e. going from target to init in the mirror wind (multiplication by -1)
-        dual_model = ZermeloGeneralModel(self.mp_primal.model.v_a, self.mp_primal.coords)
-        dual_model.update_wind(self.mp_primal.model.wind.dualize())
-
-        kwargs = {}
-        for k, v in self.mp_primal.__dict__.items():
-            if k == 'model':
-                kwargs[k] = dual_model
-            elif k == 'x_init':
-                kwargs[k] = np.zeros(2)
-                kwargs[k][:] = self.mp_primal.x_target
-            elif k == 'x_target':
-                kwargs[k] = np.zeros(2)
-                kwargs[k][:] = self.mp_primal.x_init
-            else:
-                kwargs[k] = v
-
-        self.mp_dual = MermozProblem(**kwargs)
+        self.mp_dual = mp.dualize()
 
         self.N_disc_init = N_disc_init
         # Neighbouring distance ceil
@@ -128,6 +110,7 @@ class SolverEF:
         self.p_inits = {}
         self.lsets = []
         self.rel = None
+        self.n_points = 0
 
         self.trajs_primal = {}
         self.trajs_dual = {}
@@ -135,7 +118,7 @@ class SolverEF:
         self.mode_primal = False
         self.mp = self.mp_dual
         self.trajs = self.trajs_dual
-        self.max_extremals = 500
+        self.max_extremals = 1000
 
         self.it = 0
 
@@ -179,6 +162,7 @@ class SolverEF:
         self.lsets = []
         self.rel = None
         self.it = 0
+        self.n_points = 0
         for k in range(self.N_disc_init):
             theta = 2 * np.pi * k / self.N_disc_init
             p = np.array((np.cos(theta), np.sin(theta)))
@@ -211,6 +195,7 @@ class SolverEF:
             active_list.append(a.i)
             it = a.tsa[0]
             t, x, p, status, i_obs, ccw = self.step_single(a.tsa[1:], a.i_obs, a.ccw)
+            self.n_points += 1
             tsa = (t, np.zeros(2), np.zeros(2))
             tsa[1][:] = x
             tsa[2][:] = p
@@ -237,7 +222,8 @@ class SolverEF:
                 # Case 1, both points are active and at least one lies out of an obstacle
                 if np.linalg.norm(na.tsa[2] - self.new_points[iu].tsa[2]) > self.abs_nb_ceil\
                         and (na.i_obs < 0 or self.new_points[iu].i_obs < 0):
-                    print(f'Stepping between {na.i}, {iu}')
+                    if self.debug:
+                        print(f'Stepping between {na.i}, {iu}')
                     self.step_between(na.i, iu)
             else:
                 pass
@@ -297,6 +283,7 @@ class SolverEF:
             while iit <= self.it:
                 iit += 1
                 t, x, p, status, i_obs, ccw = self.step_single(self.trajs[i][iit - 1], i_obs, ccw)
+                self.n_points += 1
                 tsa = (t, np.zeros(2), np.zeros(2))
                 tsa[1][:] = x
                 tsa[2][:] = p
@@ -367,7 +354,13 @@ class SolverEF:
             if verbose:
                 print(i)
             self.step_global()
-        print(f'Total steps : {i}')
+        if i == self.max_steps:
+            print(f'Stopped on iteration limit {self.max_steps}')
+        elif len(self.trajs) == self.max_extremals:
+            print(f'Stopped on extremals limit {self.max_extremals}')
+        else:
+            print(f'Stopped empty active list')
+        print(f'Steps : {i}, Extremals : {len(self.trajs)}, Points : {self.n_points}')
         k0 = None
         m = None
         iit_opt = 0
@@ -383,7 +376,7 @@ class SolverEF:
     def control(self, x):
         m = None
         p = np.zeros(2)
-        for k, v in self.trajs.items():
+        for k, v in self.trajs_dual.items():
             for vv in v.values():
                 candidate = (vv[1] - x) @ (vv[1] - x)
                 if m is None or candidate < m:
@@ -391,12 +384,14 @@ class SolverEF:
                     p[:] = vv[2]
         return atan2(*p[::-1])
 
-    def get_trajs(self, primal_only=False):
+    def get_trajs(self, primal_only=False, dual_only=False):
         res = []
-        if not primal_only:
-            trajs = {**self.trajs_primal, **self.trajs_dual}
-        else:
+        if primal_only:
             trajs = self.trajs_primal
+        elif dual_only:
+            trajs = self.trajs_dual
+        else:
+            trajs = {**self.trajs_primal, **self.trajs_dual}
         for it, t in trajs.items():
             n = len(t)
             timestamps = np.zeros(n)
@@ -405,7 +400,6 @@ class SolverEF:
             controls = np.zeros(n)
             for k, e in enumerate(list(t.values())):
                 timestamps[k] = e[0]
-                print(timestamps[k])
                 points[k, :] = e[1]
                 adjoints[k, :] = e[2]
 

@@ -280,7 +280,7 @@ class RFT:
             for i in range(self.nx - 1):
                 for j in range(self.ny - 1):
                     point = factor * np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
-                    value = self.mp.model.wind.value(point)
+                    value = self.mp.model.wind.value(0., point)
                     u[i, j] = value[0]
                     v[i, j] = value[1]
             np.savetxt(os.path.join(self.matlabLS_path, 'input', 'u.txt'), u, delimiter=",")
@@ -400,7 +400,7 @@ class RFT:
             dset[:, :, 1] = factor * Y
 
     def build_front(self, point):
-        k = self.get_first_index(point) - 1
+        k = self.get_index(point) - 1
         # TODO : make that more general
         # For the moment, store it in first front
         lam = self.value(point, k + 1) / (self.value(point, k + 1) - self.value(point, k))
@@ -433,6 +433,11 @@ class RFT:
         return (1 - b) * ((1 - a) * self.phi[i, j, timeindex] + a * self.phi[i + 1, j, timeindex]) + b * (
                 (1 - a) * self.phi[i, j + 1, timeindex] + a * self.phi[i + 1, j + 1, timeindex])
 
+    def control(self, x, backward=False):
+        factor = 1. if backward else -1.
+        s = factor * self.get_normal(x)[0]
+        return atan2(s[1], s[0])
+
     def backward_traj(self, point, new_target, ceil, T, model, N_disc=100):
         """
         Build backward trajectory starting from given endpoint
@@ -443,12 +448,8 @@ class RFT:
         x0 = np.zeros(2)
         x0[:] = point
 
-        def control(x):
-            s = self.get_normal(x)[0]
-            return atan2(s[1], s[0])
-
         def f(x, t):
-            u = control(x)
+            u = self.control(x)
             return - model.dyn.value(x, u, 0.)
         timestamps = np.linspace(0., T, N_disc)
         dt = T / N_disc
@@ -460,10 +461,10 @@ class RFT:
             if distance(points[k, :], new_target, coords=self.coords) < ceil:
                 break
         #points = np.array(odeint(f, x0, timestamps))
-        controls = np.array(list(map(control, points)))
-        return Trajectory(timestamps, points, controls, k, optimal=True, coords=self.coords)
+        controls = np.array(list(map(self.control, points)))
+        return Trajectory(timestamps, points[::-1], controls, k, optimal=True, coords=self.coords)
 
-    def get_first_index(self, point):
+    def get_index(self, point):
         """
         Get first time index for which given point is in a front
         :param point: Point to check
@@ -528,7 +529,7 @@ class RFT:
         if index is not None:
             k = index
         else:
-            k = self.get_first_index(point) - 1
+            k = self.get_index(point) - 1
 
         lam = self.value(point, k + 1) / (self.value(point, k + 1) - self.value(point, k))
 

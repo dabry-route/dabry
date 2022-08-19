@@ -320,13 +320,13 @@ class DiscreteWind(Wind):
         delta_x = (self.x_max - self.x_min) / (self.nx - 1)
         delta_y = (self.y_max - self.y_min) / (self.ny - 1)
         self.ts = np.zeros((self.nt,))
-        for k in range(self.nt):
-            if nt > 1:
+        for k in range(nt):
+            if wind.nt > 1:
                 self.ts[k] = wind.t_start + (k / (self.nt - 1)) * (wind.t_end - wind.t_start)
             for i in range(self.nx):
                 for j in range(self.ny):
                     point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
-                    if nt > 1:
+                    if wind.nt > 1:
                         self.uv[k, i, j, :] = wind.value(self.ts[k], point)
                     else:
                         self.uv[k, i, j, :] = wind.value(0., point)
@@ -570,6 +570,15 @@ class DiscreteWind(Wind):
     def _rotate_wind(self, u, v, x, y):
         bm = Basemap(projection='ortho', lon_0=self.lon_0, lat_0=self.lat_0)
         return np.array(bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
+
+    def dualize(self):
+        # Override method so that the dual of a DiscreteWind stays a DiscreteWind and
+        # is not casted to Wind
+        wind = DiscreteWind()
+        bl = (self.x_min, self.y_min)
+        tr = (self.x_max, self.y_max)
+        wind.load_from_wind(-1. * self, self.nx, self.ny, bl, tr, self.coords)
+        return wind
 
 
 class TwoSectorsWind(Wind):

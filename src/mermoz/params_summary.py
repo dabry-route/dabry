@@ -138,8 +138,8 @@ class ParamsSummary:
         if total_wind.nt > 1:
             self.add_param('nt_wind', total_wind.nt)
         self.add_param('date_wind', date_wind)
-        self.add_param('point_init', tuple(factor * pb.x_init))
-        self.add_param('point_target', tuple(factor * pb.x_target))
+        self.add_param('x_init', tuple(factor * pb.x_init))
+        self.add_param('x_target', tuple(factor * pb.x_target))
         self.add_param('airspeed', pb.model.v_a)
 
     def process_params(self):
