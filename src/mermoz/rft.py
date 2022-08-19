@@ -406,7 +406,7 @@ class RFT:
         lam = self.value(point, k + 1) / (self.value(point, k + 1) - self.value(point, k))
         self.phi[:, :, 0] = lam * self.phi[:, :, k] + (1 - lam) * self.phi[:, :, k + 1]
 
-    def value(self, point, timeindex):
+    def _value(self, point, timeindex):
         """
         Compute phi value at given point and timestamp using linear interpolation
         :param point: Point at which to compute the front function
@@ -433,6 +433,10 @@ class RFT:
         return (1 - b) * ((1 - a) * self.phi[i, j, timeindex] + a * self.phi[i + 1, j, timeindex]) + b * (
                 (1 - a) * self.phi[i, j + 1, timeindex] + a * self.phi[i + 1, j + 1, timeindex])
 
+    def value(self, t, x):
+        k, alpha = self._index(t)
+        return (1 - alpha) * self._value(x, k) + alpha * self._value(x, k + 1)
+
     def control(self, x, backward=False):
         factor = 1. if backward else -1.
         s = factor * self.get_normal(x)[0]
@@ -451,16 +455,17 @@ class RFT:
         def f(x, t):
             u = self.control(x)
             return - model.dyn.value(x, u, 0.)
+
         timestamps = np.linspace(0., T, N_disc)
         dt = T / N_disc
         points = np.zeros((N_disc, 2))
         points[0, :] = point
         k = 0
         for k in range(1, N_disc):
-            points[k, :] = f(points[k-1, :], 0.) * dt + points[k-1, :]
+            points[k, :] = f(points[k - 1, :], 0.) * dt + points[k - 1, :]
             if distance(points[k, :], new_target, coords=self.coords) < ceil:
                 break
-        #points = np.array(odeint(f, x0, timestamps))
+        # points = np.array(odeint(f, x0, timestamps))
         controls = np.array(list(map(self.control, points)))
         return Trajectory(timestamps, points[::-1], controls, k, optimal=True, coords=self.coords)
 
@@ -544,8 +549,37 @@ class RFT:
         d_phi__d_y = 1. / delta_y * ((1 - a) * (self.phi[i, j + 1, k + 1] - self.phi[i, j, k + 1]) +
                                      a * (self.phi[i + 1, j + 1, k + 1] - self.phi[i + 1, j, k + 1]))
         d_phi_kp1 = np.array((d_phi__d_x, d_phi__d_y))
-        d_phi = lam * d_phi_k / np.linalg.norm(d_phi_k) + (1-lam) * d_phi_kp1 / np.linalg.norm(d_phi_kp1)
+        d_phi = lam * d_phi_k / np.linalg.norm(d_phi_k) + (1 - lam) * d_phi_kp1 / np.linalg.norm(d_phi_kp1)
         return d_phi / np.linalg.norm(d_phi), self.max_time * (k + 1) / self.nt, k + 1
+
+    def get_time(self, x):
+        """
+        Get time for which phi(t, x) = 0 by dichotomia
+        :param x: The point at which to fetch the time value
+        :return: The time value
+        """
+        eps = 1e-4
+        tl = self.ts[0]
+        tu = self.ts[-1]
+        t = 2 * eps
+        while t > eps:
+            t_new = self.value(0.5 * (tl + tu), x)
+            if t_new > 0.:
+                tu = t_new
+            else:
+                tl = t_new
+        return tl
+
+    def _index(self, t):
+        if t > self.ts[-1]:
+            return self.nt - 2, 1.
+        if t < self.ts[0]:
+            return 0, 0.
+        else:
+            tt = (t - self.ts[0]) / (self.ts[-1] - self.ts[0])
+            if int(tt * (self.nt - 1)) == self.nt - 1:
+                return self.nt - 2, 1.
+            return int(tt * (self.nt - 1)), tt * (self.nt - 1) - int(tt * (self.nt - 1))
 
 
 if __name__ == '__main__':

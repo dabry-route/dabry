@@ -267,6 +267,8 @@ class SolverEF:
                     + np.einsum('i,j->ij', alpha, self.p_inits[iuu])
         new_indexes = [self.new_index() for _ in range(self.N_filling_steps)]
         for k in range(self.N_filling_steps):
+            if not self.mp.domain(points[k]):
+                continue
             i = new_indexes[k]
             t = pl[0]
             tsa = (t, points[k], adjoints[k])
@@ -283,13 +285,13 @@ class SolverEF:
             while iit <= self.it:
                 iit += 1
                 t, x, p, status, i_obs, ccw = self.step_single(self.trajs[i][iit - 1], i_obs, ccw)
+                if not status:
+                    break
                 self.n_points += 1
                 tsa = (t, np.zeros(2), np.zeros(2))
                 tsa[1][:] = x
                 tsa[2][:] = p
                 self.trajs[i][iit] = tsa
-                if not status:
-                    break
 
             na = FrontPoint(i, (iit,) + self.trajs[i][iit])
             self.rel.add(i, ill if k == 0 else new_indexes[k - 1], iuu)
@@ -298,6 +300,7 @@ class SolverEF:
             self.new_points[i] = na
 
     def step_single(self, ap, i_obs=-1, ccw=True):
+        obs_fllw_strategy = False
         x = np.zeros(2)
         p = np.zeros(2)
         x[:] = ap[1]
@@ -313,28 +316,31 @@ class SolverEF:
             p += self.dt * dyn_p
             t += self.dt
         else:
-            # Obstacle mode. Follow the obstacle boundary as fast as possible
-            dx = self.mp._geod_l / 1e6
-            phi = self.mp.phi_obs[i_obs]
-            grad = np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
-                                    1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
-            n = grad / np.linalg.norm(grad)
-            # n = self.mp.grad_phi_obs[i_obs](x) / np.linalg.norm(self.mp.grad_phi_obs[i_obs](x))
-            theta = atan2(*n[::-1])
-            u = theta + (-1. if not ccw else 1.) * acos(-self.mp.model.wind.value(x) @ n / self.mp.model.v_a)
-            dyn_x = self.mp.model.dyn.value(x, u, t)
-            x += self.dt * dyn_x
-            p[:] = - np.array((np.cos(u), np.sin(u)))
-            t += self.dt
+            if obs_fllw_strategy:
+                # Obstacle mode. Follow the obstacle boundary as fast as possible
+                dx = self.mp._geod_l / 1e6
+                phi = self.mp.phi_obs[i_obs]
+                grad = np.array((1 / dx * (phi(t, x + np.array((dx, 0.))) - phi(t, x)),
+                                        1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
+                n = grad / np.linalg.norm(grad)
+                # n = self.mp.grad_phi_obs[i_obs](x) / np.linalg.norm(self.mp.grad_phi_obs[i_obs](x))
+                theta = atan2(*n[::-1])
+                u = theta + (-1. if not ccw else 1.) * acos(-self.mp.model.wind.value(t, x) @ n / self.mp.model.v_a)
+                dyn_x = self.mp.model.dyn.value(x, u, t)
+                x += self.dt * dyn_x
+                p[:] = - np.array((np.cos(u), np.sin(u)))
+                t += self.dt
+            else:
+                pass
 
         status = self.mp.domain(x)
         if status and i_obs < 0:
-            i_obs = self.mp.in_obs(x)
+            i_obs = self.mp.in_obs(t, x)
             if i_obs >= 0:
                 dx = self.mp._geod_l / 1e6
                 phi = self.mp.phi_obs[i_obs]
-                grad = np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
-                                 1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
+                grad = np.array((1 / dx * (phi(t, x + np.array((dx, 0.))) - phi(t, x)),
+                                 1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
                 # ccw = np.cross(self.mp.grad_phi_obs[i_obs](x), dyn_x) > 0.
                 ccw = np.cross(grad, dyn_x) > 0.
         return t, x, p, status, i_obs, ccw

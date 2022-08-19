@@ -97,18 +97,18 @@ class MermozProblem:
             self.grad_phi_obs = {}
             for k, phi in self.phi_obs.items():
                 self.grad_phi_obs[k] = \
-                    lambda x: np.array((1 / dx * (phi(x + np.array((dx, 0.))) - phi(x)),
-                                        1 / dx * (phi(x + np.array((0., dx))) - phi(x))))
+                    lambda t, x: np.array((1 / dx * (phi(t, x + np.array((dx, 0.))) - phi(t, x)),
+                                           1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
 
-            def _in_obs(x):
+            def _in_obs(t, x):
                 for k, phi in enumerate(self.phi_obs.values()):
-                    if phi(x) < 0.:
+                    if phi(t, x) < 0.:
                         return k
                 return -1
 
             self.in_obs = _in_obs
         else:
-            self.in_obs = lambda x: -1
+            self.in_obs = lambda t, x: -1
 
         self._feedback = None
         self.trajs = []
@@ -419,7 +419,7 @@ class IndexedProblem(MermozProblem):
             obs_radius = sf * np.array((0.13, 0.13, 0.13))
             phi_obs = {}
             for i in range(obs_radius.shape[0]):
-                def f(x, c=obs_center[i], r=obs_radius[i]):
+                def f(t, x, c=obs_center[i], r=obs_radius[i]):
                     return (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
 
                 phi_obs[i] = f
@@ -564,7 +564,7 @@ class IndexedProblem(MermozProblem):
                 total_wind = const_wind + band
             phi_obs = {}
             for k in range(obs_radius.shape[0]):
-                def f(x, c=obs_center[k], r=obs_radius[k]):
+                def f(t, x, c=obs_center[k], r=obs_radius[k]):
                     return (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
 
                 phi_obs[k] = f
@@ -603,11 +603,12 @@ class IndexedProblem(MermozProblem):
             obs_sdev = np.linspace(1 / 2 * 0.2, 1 / 2 * 0.2, nt)
             obs_v_max = np.linspace(v_a * 5., v_a * 5., nt)
 
+            t_end = 1.2 * distance(x_init, x_target, coords) / v_a
+
             total_wind = LCWind(
                 np.ones(2),
                 (UniformWind(np.array((5., -5.))),
-                 RadialGaussWindT(obs_center, obs_radius, obs_sdev, obs_v_max,
-                                          1.2 * distance(x_init, x_target, coords) / v_a))
+                 RadialGaussWindT(obs_center, obs_radius, obs_sdev, obs_v_max, t_end))
             )
 
             # phi_obs = {}
@@ -620,7 +621,29 @@ class IndexedProblem(MermozProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+            phi_obs = {}
+
+            def f(t, x):
+                tt = t / t_end
+                k, alpha = None, None
+                if tt > 1.:
+                    k, alpha = nt - 2, 1.
+                elif tt < 0.:
+                    k, alpha = 0, 0.
+                else:
+                    k = int(tt * (nt - 1))
+                    if k == nt - 1:
+                        k = nt - 2
+                        alpha = 1.
+                    else:
+                        alpha = tt * (nt - 1) - k
+                c = (1 - alpha) * obs_center[k] + alpha * obs_center[k + 1]
+                r = (1 - alpha) * obs_radius[k] + alpha * obs_radius[k + 1]
+                return (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
+
+            phi_obs[0] = f
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, phi_obs=phi_obs)
             # phi_obs=phi_obs)
 
         elif i == 12:
@@ -633,7 +656,7 @@ class IndexedProblem(MermozProblem):
 
             nt = 20
 
-            gradient = np.array([[np.zeros(nt), np.linspace(3*v_a / factor, 0 * v_a / factor, nt)],
+            gradient = np.array([[np.zeros(nt), np.linspace(3 * v_a / factor, 0 * v_a / factor, nt)],
                                  [np.zeros(nt), np.zeros(nt)]]).transpose((2, 0, 1))
 
             origin = np.array([0., 0.])
