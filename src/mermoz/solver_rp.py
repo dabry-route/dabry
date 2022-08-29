@@ -67,7 +67,9 @@ class SolverRP:
         self.mp_dual.load_feedback(FunFB(lambda x: self.rft.control(x)))
         sc = TimedSC(T)
         traj = self.mp_dual.integrate_trajectory(self.mp_dual.x_init, sc, 1000, T/999)
-        traj.points[:traj.last_index] = traj.points[:traj.last_index][::-1]
+        traj.points[:] = traj.points[::-1]
+        traj.type = TRAJ_OPTIMAL
+        traj.info = 'RFT'
         #self.mp.trajs.append(self.rft.backward_traj(self.mp.x_target, self.mp.x_init, self.opti_ceil,
         #                                            self.T, self.mp.model, N_disc=1000))
         print(f"Done ({time_rft:.3f} s)")

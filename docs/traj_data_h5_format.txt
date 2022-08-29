@@ -3,6 +3,7 @@
  'type' : {'integral', 'pmp'},
  'last_index' : integer,
  'label' : integer,
+ 'info': string,
  'interrupted' : {False, True}]
 	data : (nt, 2)
 	ts : (nt, )

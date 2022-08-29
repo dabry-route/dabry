@@ -151,7 +151,7 @@ class FrontendHandler:
             self.display.map.drawgreatcircle(lon_ny, lat_ny, lon_par, lat_par, linewidth=1, color='b', alpha=0.4,
                                              linestyle='--',
                                              label='Great circle', zorder=4)
-        elif 'double-gyre-ku2016' in self.case_name or 'double-gyre-li2020' in self.case_name:
+        elif 'XXXdouble-gyre-ku2016' in self.case_name or 'XXXdouble-gyre-li2020' in self.case_name:
             self.display.nocontrols = True
             self.display.set_title(f'{self.case_name.split("-")[-1]}')
             self.display.import_params()

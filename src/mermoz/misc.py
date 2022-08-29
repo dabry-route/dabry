@@ -43,6 +43,7 @@ def rectify(a, b):
 TRAJ_PMP = 'pmp'
 TRAJ_INT = 'integral'
 TRAJ_PATH = 'path'
+TRAJ_OPTIMAL = 'optimal'
 
 EARTH_RADIUS = 6378.137e3  # [m] Earth equatorial radius
 

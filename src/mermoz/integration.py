@@ -60,4 +60,4 @@ class IntEulerExpl(Integration):
             timestamps[i] = t
             points[i] = x
             controls[i] = u
-        return Trajectory(timestamps, points, controls, last_index=i, type=TRAJ_INT, coords=self.coords)
+        return Trajectory(timestamps, points, controls, i, self.coords, type=TRAJ_INT)

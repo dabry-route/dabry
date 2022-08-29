@@ -43,6 +43,7 @@ class MDFmanager:
                 trajgroup.attrs['interrupted'] = traj.interrupted
                 trajgroup.attrs['last_index'] = traj.last_index
                 trajgroup.attrs['label'] = traj.label
+                trajgroup.attrs['info'] = traj.info
 
                 factor = (180 / np.pi if traj.coords == COORD_GCS else 1.)
 

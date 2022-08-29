@@ -141,6 +141,7 @@ class ParamsSummary:
         self.add_param('x_init', tuple(factor * pb.x_init))
         self.add_param('x_target', tuple(factor * pb.x_target))
         self.add_param('airspeed', pb.model.v_a)
+        self.add_param('target_radius', 0.05 * pb._geod_l)
 
     def process_params(self):
         params = self.params

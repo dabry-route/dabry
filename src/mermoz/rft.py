@@ -564,9 +564,9 @@ class RFT:
         while tu - tl > eps:
             t_new = 0.5 * (tl + tu)
             if self.value(t_new, x) > 0.:
-                tu = t_new
-            else:
                 tl = t_new
+            else:
+                tu = t_new
         return tl
 
     def _index(self, t):

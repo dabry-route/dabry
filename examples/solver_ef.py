@@ -17,7 +17,7 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 9, 0
+    pb_id, seed = 3, 0
     cache = False
 
     # Create a file manager to dump problem data
@@ -102,7 +102,8 @@ if __name__ == '__main__':
     pb.load_feedback(FunFB(solver.control))
     sc = TimedSC(reach_time)
     traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time/ iit)
-    #traj.type = TRAJ_PMP
+    traj.type = TRAJ_OPTIMAL
+    traj.info = 'Extremals'
 
     """
     pb.load_feedback(ConstantFB(0.5))

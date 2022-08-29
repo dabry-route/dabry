@@ -11,21 +11,23 @@ class Trajectory:
                  points: ndarray,
                  controls: ndarray,
                  last_index: int,
+                 coords,
                  optimal=False,
                  interrupted=False,
                  type=TRAJ_INT,
                  label=0,
-                 coords=COORD_GCS):
+                 info=''):
         """
         :param timestamps: A list of timestamps (t_0, ..., t_N) at which the following values were computed
         :param points: A list of points ((x_0, y_0), ..., (x_N, y_N)) describing the trajectory
         :param controls: A list of controls (u_0, ..., u_N) applied to follow the previous trajectory
         :param last_index: The index of the last significant value
+        :param coords: Type of coordinates : 'cartesian or 'gcs'
         :param optimal: Indicates if trajectory is optimal or not (for plotting)
         :param interrupted: Indicates if trajectory was interrupted during construction
         :param type: Gives the type of the trajectory : 'integral' or 'pmp'
         :param label: An optional integer label
-        :param coords: Type of coordinates : 'cartesian or 'gcs'
+        :param info: Additional information in a string
         """
         self.timestamps = np.zeros(timestamps.shape)
         self.timestamps[:] = timestamps
@@ -42,6 +44,7 @@ class Trajectory:
         self.type = type
         self.label = label
         self.coords = coords
+        self.info = info
 
     def get_final_time(self):
         return self.timestamps[self.last_index]
@@ -63,15 +66,16 @@ class AugmentedTraj(Trajectory):
                  adjoints: ndarray,
                  controls: ndarray,
                  last_index: int,
+                 coords,
                  optimal=False,
                  interrupted=False,
                  type=TRAJ_INT,
                  label=0,
-                 coords=COORD_GCS):
+                 info=''):
         """
         :param adjoints: A list of adjoint states ((p_x0, p_y0), ..., (p_xN, p_yN))
         """
-        super().__init__(timestamps, points, controls, last_index, optimal=optimal, interrupted=interrupted, type=type,
-                         label=label, coords=coords)
+        super().__init__(timestamps, points, controls, last_index, coords, optimal=optimal, interrupted=interrupted,
+                         type=type, label=label, info=info)
         self.adjoints = np.zeros(adjoints.shape)
         self.adjoints[:] = adjoints
