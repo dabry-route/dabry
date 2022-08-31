@@ -66,8 +66,12 @@ class PostProcessing:
         decorate(ax[1, 0], 'Ground speed', 'Point', '[m/s]', ylim=(0., 2. * self.va))
         decorate(ax[1, 1], 'Wind norm', 'Point', '[m/s]', ylim=(0, 1.1 * self.va))
         for k, traj in enumerate(f.values()):
-            print(traj.attrs['type'])
             if not only_opti or traj.attrs['type'] in ['integral', 'optimal']:
+                print(traj.attrs['type'], end=' ')
+                try:
+                    print(traj.attrs['info'])
+                except KeyError:
+                    print()
                 points = np.zeros(traj['data'].shape)
                 points[:] = traj['data']
                 nt = traj.attrs['last_index']
@@ -76,7 +80,7 @@ class PostProcessing:
                 ax[0, 0].plot(1 / tstats.gs, label=f'{k}' + ('_opt' if traj.attrs['type'] == 'optimal' else ''), color=color)
                 ax[0, 1].plot(tstats.cw, color=color)
                 ax[0, 2].plot(tstats.tw, color=color)
-                x = np.linspace(0, nt - 1, nt - 1)
+                x = np.linspace(0, 1., nt - 1)
                 y = np.sqrt(tstats.cw ** 2 + tstats.tw ** 2)
                 if fancynormplot:
                     xx = np.linspace(0, nt - 1, 10 * (nt - 1))
@@ -116,7 +120,7 @@ class PostProcessing:
             dx_norm = np.linalg.norm(delta_x)
             e_dx = delta_x / np.linalg.norm(delta_x)
             dx_arg = atan2(delta_x[1], delta_x[0])
-            w = self.wind.value(p)
+            w = self.wind.value(0., p)
             w_norm = np.linalg.norm(w)
             w_arg = atan2(w[1], w[0])
             right = w_norm / self.va * sin(w_arg - dx_arg)

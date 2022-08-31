@@ -183,7 +183,7 @@ class FrontendHandler:
             self.display.draw_trajs(nolabels=False, opti_only=False)
             self.display.draw_solver()
             self.display.draw_rff()
-        elif 'big_rankine' in self.case_name:
+        elif 'XXXbig_rankine' in self.case_name:
             self.display.nocontrols = True
             self.display.set_title('big-rankine')
             self.display.import_params()
@@ -257,7 +257,7 @@ class FrontendHandler:
             self.display.import_params()
             self.display.load_all()
             self.display.setup()
-            self.display.draw_all()
+            self.display.draw_all(traj_integr=True)
         elif 'wf' in self.case_name:
             Display._info(f'Using default wind field setup script for unknown case "{self.case_name}"')
             self.display.set_title(os.path.basename(self.output_path))

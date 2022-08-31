@@ -40,7 +40,7 @@ class SolverRP:
 
         self.geod_l = distance(self.x_init, self.x_target, coords=self.mp.coords)
 
-        self.T = 2. * self.geod_l / mp.model.v_a
+        self.T = 1.2 * self.geod_l / mp.model.v_a
 
         self.opti_ceil = self.geod_l / 50
         self.neighb_ceil = self.opti_ceil / 2.
@@ -64,10 +64,13 @@ class SolverRP:
         time_rft = t_end - t_start
 
         T = self.rft.get_time(self.mp.x_target)
-        self.mp_dual.load_feedback(FunFB(lambda x: self.rft.control(x)))
+        self.mp_dual.load_feedback(FunFB(lambda x: self.rft.control(x, backward=True)))
         sc = TimedSC(T)
-        traj = self.mp_dual.integrate_trajectory(self.mp_dual.x_init, sc, 1000, T/999)
-        traj.points[:] = traj.points[::-1]
+        traj = self.mp_dual.integrate_trajectory(self.mp_dual.x_init, sc, 1000, T/999, backward=True)
+        li = traj.last_index
+        lt = traj.timestamps[li - 1]
+        traj.timestamps[:li] = traj.timestamps[:li][::-1] - lt
+        traj.points[:li] = traj.points[:li][::-1]
         traj.type = TRAJ_OPTIMAL
         traj.info = 'RFT'
         #self.mp.trajs.append(self.rft.backward_traj(self.mp.x_target, self.mp.x_init, self.opti_ceil,

@@ -99,9 +99,9 @@ class SolverEF:
         # Neighbouring distance ceil
         self.abs_nb_ceil = rel_nb_ceil * mp._geod_l
         if dt is not None:
-            self.dt = dt
+            self.dt = -dt
         else:
-            self.dt = .01 * mp._geod_l / mp.model.v_a
+            self.dt = -.01 * mp._geod_l / mp.model.v_a
 
         # This group shall be reinitialized before new resolution
         # Contains augmented state points (id, time, state, adjoint) used to expand extremal field
@@ -147,9 +147,13 @@ class SolverEF:
         if b:
             self.mp = self.mp_primal
             self.trajs = self.trajs_primal
+            if self.dt < 0:
+                self.dt *= -1
         else:
             self.mp = self.mp_dual
             self.trajs = self.trajs_dual
+            if self.dt > 0:
+                self.dt *= -1
 
     def setup(self):
         """
@@ -169,7 +173,7 @@ class SolverEF:
             i = self.new_index()
             self.p_inits[i] = np.zeros(2)
             self.p_inits[i][:] = p
-            a = FrontPoint(i, (0, 0., self.mp.x_init, p))
+            a = FrontPoint(i, (0, self.mp.model.wind.t_start, self.mp.x_init, p))
             heappush(self.active, (1., a))
             self.trajs[k] = {}
             self.trajs[k][a.tsa[0]] = a.tsa[1:]
@@ -220,7 +224,7 @@ class SolverEF:
             _, iu = self.rel.get(na.i)
             if self.rel.is_active(iu):
                 # Case 1, both points are active and at least one lies out of an obstacle
-                if np.linalg.norm(na.tsa[2] - self.new_points[iu].tsa[2]) > self.abs_nb_ceil\
+                if self.mp.distance(na.tsa[2], self.new_points[iu].tsa[2]) > self.abs_nb_ceil\
                         and (na.i_obs < 0 or self.new_points[iu].i_obs < 0):
                     if self.debug:
                         print(f'Stepping between {na.i}, {iu}')
@@ -372,23 +376,28 @@ class SolverEF:
         iit_opt = 0
         for k, traj in self.trajs.items():
             for iit in traj.keys():
-                candidate = np.linalg.norm(traj[iit][1] - self.mp.x_target)
+                candidate = self.mp.distance(traj[iit][1], self.mp.x_target)
                 if m is None or m > candidate:
                     m = candidate
                     k0 = k
                     iit_opt = iit
-        return self.trajs[k0][iit_opt][0], iit_opt, self.p_inits[k0]
+        return self.mp.model.wind.t_start - self.trajs[k0][iit_opt][0], iit_opt, self.p_inits[k0]
 
     def control(self, x):
         m = None
         p = np.zeros(2)
         for k, v in self.trajs_dual.items():
             for vv in v.values():
-                candidate = (vv[1] - x) @ (vv[1] - x)
+                candidate = self.mp.distance(vv[1], x)
                 if m is None or candidate < m:
                     m = candidate
                     p[:] = vv[2]
-        return atan2(*p[::-1])
+        if self.mp.coords == COORD_CARTESIAN:
+            return atan2(*-p[::-1])
+        else:
+            mat = np.diag((1/np.cos(x[1]), 1.))
+            pl = mat @ p
+            return np.pi / 2. - atan2(*-pl[::-1])
 
     def get_trajs(self, primal_only=False, dual_only=False):
         res = []
@@ -408,7 +417,6 @@ class SolverEF:
                 timestamps[k] = e[0]
                 points[k, :] = e[1]
                 adjoints[k, :] = e[2]
-
             res.append(
                 AugmentedTraj(timestamps, points, adjoints, controls, last_index=n, coords=self.mp.coords, label=it, type=TRAJ_PMP))
 

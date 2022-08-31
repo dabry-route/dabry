@@ -92,14 +92,14 @@ class PCZermeloDyn(Dynamics):
 
     def value(self, x, psi, t):
         return self.factor * (
-                np.diag([1 / cos(x[1]), 1.]) @ (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(x)))
+                np.diag([1 / cos(x[1]), 1.]) @ (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)))
 
     def d_value__d_state(self, x, psi, t):
         wind_gradient = np.zeros((x.size, x.size))
-        wind_gradient[:] = self.wind.d_value(x)
+        wind_gradient[:] = self.wind.d_value(t, x)
         res = self.factor * np.vstack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
                                        np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
-                                       (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(x)) +
+                                       (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)) +
                                        np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1])).transpose()
         return res
 

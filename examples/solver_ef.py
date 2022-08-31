@@ -1,6 +1,7 @@
 import time
 from math import atan2
 
+from datetime import datetime
 import numpy as np
 import scipy.optimize
 
@@ -17,7 +18,7 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 3, 0
+    pb_id, seed = 7, 0
     cache = False
 
     # Create a file manager to dump problem data
@@ -45,20 +46,21 @@ if __name__ == '__main__':
 
     t_start = time.time()
     reach_time, iit, p_init = solver.solve()
+    print(f'iit : {iit}')
     t_end = time.time()
     time_ef = t_end - t_start
     print(f'Dual EF solved in {time_ef:.3f}s')
     solver.set_primal(True)
     solver.solve()
 
-    trajs = solver.get_trajs(primal_only=True)
-    m = None
-    k0 = -1
-    for k, traj in enumerate(trajs):
-        candidate = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1))
-        if m is None or m > candidate:
-            m = candidate
-            k0 = k
+    trajs = solver.get_trajs(dual_only=True)
+    # m = None
+    # k0 = -1
+    # for k, traj in enumerate(trajs):
+    #     candidate = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1))
+    #     if m is None or m > candidate:
+    #         m = candidate
+    #         k0 = k
 
     # solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
     # if cache:
@@ -100,8 +102,15 @@ if __name__ == '__main__':
     """
 
     pb.load_feedback(FunFB(solver.control))
-    sc = TimedSC(reach_time)
-    traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time/ iit)
+    if pb.model.wind.t_end is not None:
+        sc = TimedSC(pb.model.wind.t_end)
+        t_init = pb.model.wind.t_end - reach_time
+    else:
+        sc = TimedSC(reach_time)
+        t_init = pb.model.wind.t_start
+    print(datetime.fromtimestamp(reach_time))
+
+    traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=t_init)
     traj.type = TRAJ_OPTIMAL
     traj.info = 'Extremals'
 

@@ -1,5 +1,6 @@
 import json
 import os
+import scipy.io
 
 import h5py
 from matplotlib import pyplot as plt
@@ -265,26 +266,30 @@ class RFT:
                 "x_init": self.x_init[0],
                 "y_init": self.x_init[1],
                 "airspeed": self.mp.model.v_a,
-                "max_time": self.max_time,
+                "t_start": 0.,
+                "t_end": self.max_time,
                 "nt_rft": self.nt
             }
             with open(os.path.join(self.matlabLS_path, 'args.json'), 'w') as f:
                 json.dump(args, f)
 
             # Give also the wind to the matlab script
-            u = np.zeros((self.nx, self.ny))
-            v = np.zeros((self.nx, self.ny))
+            uv = np.zeros((2, self.nx, self.ny, self.nt))
 
             factor = 1 / EARTH_RADIUS if self.coords == COORD_GCS else 1.
 
-            for i in range(self.nx - 1):
-                for j in range(self.ny - 1):
-                    point = factor * np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
-                    value = self.mp.model.wind.value(0., point)
-                    u[i, j] = value[0]
-                    v[i, j] = value[1]
+            for k in range(self.nt - 1):
+                for i in range(self.nx - 1):
+                    for j in range(self.ny - 1):
+                        point = factor * np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
+                        value = self.mp.model.wind.value(k * self.delta_t, point)
+                        uv[:, i, j, k] = value
+            d = {'data' : uv}
+            scipy.io.savemat(os.path.join(self.matlabLS_path, 'input', 'wind.mat'), d)
+            """
             np.savetxt(os.path.join(self.matlabLS_path, 'input', 'u.txt'), u, delimiter=",")
             np.savetxt(os.path.join(self.matlabLS_path, 'input', 'v.txt'), v, delimiter=",")
+            """
 
             # Run matlab script
             os.system(f'matlab -sd {self.matlabLS_path} -batch "main; exit"')

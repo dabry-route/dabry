@@ -15,7 +15,9 @@ class Integration(ABC):
                  coords,
                  stop_cond=None,
                  max_iter=10000,
-                 int_step=0.0001):
+                 int_step=0.0001,
+                 t_init=0.,
+                 backward=False):
         self.wind = wind
         self.dyn = dyn
         self.feedback = feedback
@@ -23,6 +25,8 @@ class Integration(ABC):
         self.max_iter = max_iter
         self.int_step = int_step
         self.coords = coords
+        self.t_init = t_init
+        self.backward = backward
 
     @abstractmethod
     def integrate(self,
@@ -45,12 +49,12 @@ class IntEulerExpl(Integration):
         points = np.zeros((self.max_iter, 2))
         controls = np.zeros(self.max_iter)
         i = 0
-        t = 0.
+        t = self.t_init
         x = np.zeros(2)
         x[:] = x_init
         points[0] = x
         controls[0] = self.feedback.value(x)
-        dt = self.int_step
+        dt = self.int_step * (-1. if self.backward else 1.)
         while (i + 1 < self.max_iter) and (self.stop_cond is None or not self.stop_cond.value(t, x)):
             i += 1
             t += dt

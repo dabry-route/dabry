@@ -128,7 +128,9 @@ class MermozProblem:
                              x_init: ndarray,
                              stop_cond: StoppingCond,
                              max_iter=20000,
-                             int_step=0.0001):
+                             int_step=0.0001,
+                             t_init=0.,
+                             backward=False):
         """
         Use the specified discrete integration method to build a trajectory
         with the given control law. Store the integrated trajectory in
@@ -137,6 +139,7 @@ class MermozProblem:
         :param stop_cond: A stopping condition for the integration
         :param max_iter: Maximum number of iterations
         :param int_step: Integration step
+        :param t_init: Initial timestamp
         """
         if self._feedback is None:
             raise ValueError("No feedback provided for integration")
@@ -148,7 +151,9 @@ class MermozProblem:
                                   self.coords,
                                   stop_cond=sc,
                                   max_iter=max_iter,
-                                  int_step=int_step)
+                                  int_step=int_step,
+                                  t_init=t_init,
+                                  backward=backward)
         traj = integrator.integrate(x_init)
         self.trajs.append(traj)
         return traj
@@ -172,6 +177,14 @@ class MermozProblem:
                 kwargs[k] = v
 
         return MermozProblem(**kwargs)
+
+    def distance(self, x1, x2):
+        if self.coords == COORD_GCS:
+            # x1, x2 shall be vectors (lon, lat) in radians
+            return geodesic_distance(x1, x2)
+        else:
+            # x1, x2 shall be cartesian vectors in meters
+            return np.linalg.norm(x1 - x2)
 
     def eliminate_trajs(self, target, tol: float):
         """
@@ -603,7 +616,7 @@ class IndexedProblem(MermozProblem):
             obs_sdev = np.linspace(1 / 2 * 0.2, 1 / 2 * 0.2, nt)
             obs_v_max = np.linspace(v_a * 5., v_a * 5., nt)
 
-            t_end = 1.2 * distance(x_init, x_target, coords) / v_a
+            t_end = 0.8 * distance(x_init, x_target, coords) / v_a
 
             total_wind = LCWind(
                 np.ones(2),

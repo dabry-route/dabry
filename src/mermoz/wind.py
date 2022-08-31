@@ -1,4 +1,5 @@
 import sys
+import warnings
 
 import numpy as np
 import scipy.interpolate as itp
@@ -60,18 +61,23 @@ class Wind:
         :param t: The required time
         :return: Nearest lowest index for time, coefficient for the linear interpolation
         """
+        if self.t_end is None:
+            return 0, 0.
         if self.nt == 1:
             return 0, 0.
         # if t < self.t_start or t > self.t_end:
         #     print(f'Time {t} out of ({self.t_start}, {self.t_end})', file=sys.stderr)
         #     exit(1)
-        if t < self.t_start:
-            print(f'Time {t} lower than lower time bound{self.t_start}', file=sys.stderr)
-            exit(1)
-        if t > self.t_end:
+        # Bounds may not be in the right order if wind is dualized
+        t_min, t_max = min(self.t_start, self.t_end), max(self.t_start, self.t_end)
+        if t < t_min:
+            print(f'Time {t} lower than lower time bound {t_min}', file=sys.stderr)
+            warnings.warn(UserWarning('Probably considering wind as steady'))
+            return 0, 0.
+        if t > t_max:
             # Freeze wind to last frame
             return self.nt - 2, 1.
-        tau = (t - self.t_start) / (self.t_end - self.t_start)
+        tau = (t - t_min) / (t_max - t_min)
         i, alpha = int(tau * (self.nt - 1)), tau * (self.nt - 1) - int(tau * (self.nt - 1))
         if i == self.nt - 1:
             i = self.nt - 2
@@ -80,6 +86,10 @@ class Wind:
 
     def dualize(self):
         a = -1.
+        if self.t_end is not None:
+            mem = self.t_start
+            self.t_start = self.t_end
+            self.t_end = mem
         if not self.dualizable:
             a = 1.
         return a * self
@@ -133,7 +143,9 @@ class Wind:
         return Wind(value_func=value_func,
                     d_value_func=d_value_func,
                     descr=descr,
-                    is_analytical=is_analytical)
+                    is_analytical=is_analytical,
+                    t_start=self.t_start,
+                    t_end=self.t_end)
         # **d)
 
     def __rmul__(self, other):
@@ -205,12 +217,11 @@ class DiscreteWind(Wind):
 
         self.is_analytical = force_analytical
 
-    def load(self, filepath, nodiff=False, resample=1):
+    def load(self, filepath, nodiff=False, resample=1, duration_limit=None):
         """
         Loads wind data from H5 wind data
         :param filepath: The H5 file contaning wind data
         :param nodiff: Do not compute wind derivatives
-        :param unstructured: True if grid is not evenly-spaced 2D grid (fixed dx and fixed dy)
         :param resample: If unstructured, the resample rate over which to evaluate wind
         """
 
@@ -244,12 +255,27 @@ class DiscreteWind(Wind):
             # Loading
             if not self.unstructured:
                 self.nt, self.nx, self.ny, _ = wind_data['data'].shape
+                # if duration_limit is not None:
+                #     new_nt = 0
+                #     for t in wind_data['ts']:
+                #         if t - wind_data['ts'][0] > duration_limit:
+                #             break
+                #         new_nt += 1
+                # self.nt = new_nt
                 self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
-                self.uv[:, :, :, :] = wind_data['data']
+                self.uv[:, :, :, :] = wind_data['data'][:self.nt, :, :, :]
                 self.grid = np.zeros((self.nx, self.ny, 2))
                 self.grid[:] = wind_data['grid']
                 self.ts = np.zeros((self.nt,))
-                self.ts[:] = wind_data['ts']
+                self.ts[:] = wind_data['ts'][:self.nt]
+                self.t_start = self.ts[0]
+                self.t_end = self.ts[-1]
+                # Detecting millisecond-formated timestamps
+                if np.any(self.ts > 1e11):
+                    self.ts[:] = self.ts / 1000.
+                    self.t_start /= 1000.
+                    self.t_end /= 1000.
+
             else:
                 nx_wind = wind_data['data'].shape[1]
                 ny_wind = wind_data['data'].shape[2]
@@ -329,7 +355,7 @@ class DiscreteWind(Wind):
                     if wind.nt > 1:
                         self.uv[k, i, j, :] = wind.value(self.ts[k], point)
                     else:
-                        self.uv[k, i, j, :] = wind.value(0., point)
+                        self.uv[k, i, j, :] = wind.value(wind.t_start, point)
                     self.grid[i, j, :] = point
 
         # Post processing
@@ -346,7 +372,7 @@ class DiscreteWind(Wind):
                         if nt > 1:
                             diff = wind.d_value(self.ts[k], point)
                         else:
-                            diff = wind.d_value(0., point)
+                            diff = wind.d_value(wind.t_start, point)
                         self.d_u__d_x[0, i - 1, j - 1] = diff[0, 0]
                         self.d_u__d_y[0, i - 1, j - 1] = diff[0, 1]
                         self.d_v__d_x[0, i - 1, j - 1] = diff[1, 0]
@@ -577,7 +603,10 @@ class DiscreteWind(Wind):
         wind = DiscreteWind()
         bl = (self.x_min, self.y_min)
         tr = (self.x_max, self.y_max)
-        wind.load_from_wind(-1. * self, self.nx, self.ny, bl, tr, self.coords)
+        wind.load_from_wind(1. * self, self.nx, self.ny, bl, tr, self.coords)
+        if self.t_end is not None:
+            wind.t_start = self.t_end
+            wind.t_end = self.t_start
         return wind
 
 
