@@ -41,7 +41,7 @@ if __name__ == '__main__':
     mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
 
     # Setting the solver
-    solver = SolverEF(pb, max_steps=400, hard_obstacles=not seed)
+    solver = SolverEF(pb, max_steps=100, hard_obstacles=not seed)
     # solver = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
 
     t_start = time.time()

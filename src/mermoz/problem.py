@@ -1,3 +1,5 @@
+from math import atan2
+
 import h5py
 import numpy as np
 from mdisplay.geodata import GeoData
@@ -185,6 +187,17 @@ class MermozProblem:
         else:
             # x1, x2 shall be cartesian vectors in meters
             return np.linalg.norm(x1 - x2)
+
+    def middle(self, x1, x2):
+        if self.coords == COORD_CARTESIAN:
+            # x1, x2 shall be cartesian vectors in meters
+            return 0.5 * (x1 + x2)
+        else:
+            # x1, x2 shall be vectors (lon, lat) in radians
+            bx = np.cos(x2[1]) * np.cos(x2[0] - x1[0])
+            by = np.cos(x2[1]) * np.sin(x2[0] - x1[0])
+            return x1[0] + atan2(by, np.cos(x1[1])+bx), \
+                   atan2(np.sin(x1[1]) + np.sin(x2[1]), np.sqrt((np.cos(x1[1]) + bx)**2 + by**2))
 
     def eliminate_trajs(self, target, tol: float):
         """

@@ -1,5 +1,8 @@
 import json
 import os
+
+import numpy as np
+import pyproj
 import scipy.io
 
 import h5py
@@ -176,8 +179,7 @@ class RFT:
     Reachability front tracker
     """
 
-    def __init__(self, bl, tr, max_time, nx, ny, nt, mp: MermozProblem, x_init, kernel='base',
-                 method='sethian', coords=COORD_CARTESIAN):
+    def __init__(self, bl, tr, max_time, nx, ny, nt, mp: MermozProblem, kernel='matlab', method='sethian'):
         """
         :param bl: Grid bottom left point
         :param tr: Grid top right point
@@ -186,14 +188,10 @@ class RFT:
         :param ny: Number of points in the y-axis direction
         :param nt: Number of points in the time direction.
         :param mp: The mermoz problem instance containing the analytic wind
-        :param x_init: The problem starting point
         :param kernel: 'base' for Python implementation of level set methods or 'matlab'
         to use ToolboxLS (https://www.cs.ubc.ca/~mitchell/ToolboxLS)
         :param method: With 'base' kernel, select numerical scheme ('sethian' or 'lolla')
-        :param coords: Coordinate type ('cartesian' or 'gcs')
         """
-        ensure_coords(coords)
-        self.coords = coords
 
         self.bl = np.zeros(2)
         self.bl[:] = bl
@@ -205,17 +203,39 @@ class RFT:
         self.ny = ny
         self.nt = nt
 
-        self.delta_x = (self.tr[0] - self.bl[0]) / (self.nx - 1)
-        self.delta_y = (self.tr[1] - self.bl[1]) / (self.ny - 1)
         if self.nt is not None:
             self.delta_t = self.max_time / (self.nt - 1)
         else:
             self.delta_t = None
 
         self.mp = mp
-        self.speed = mp.model.v_a
+        self.proj = None
         self.x_init = np.zeros(2)
-        self.x_init[:] = x_init
+        self.x_init[:] = self.mp.x_init
+
+        if self.mp.coords == COORD_GCS:
+            # When working in spherical coordinates, we will first flatten the
+            # problem using an orthographic projection
+            mid = self.mp.middle(self.mp.x_init, self.mp.x_target)
+            self.proj = pyproj.Proj(proj='ortho', lon_0=RAD_TO_DEG * mid[0], lat_0=RAD_TO_DEG * mid[1])
+            # New boundaries are defined as an encapsulating bounding box over the region defined
+            # by (lon, lat) bottom left and top right corners
+            # Define a dense grid of points within the (lon, lat) zone
+            x, y = np.meshgrid(RAD_TO_DEG * np.linspace(self.bl[0], self.tr[0], 100),
+                               RAD_TO_DEG * np.linspace(self.bl[1], self.tr[1], 100), indexing='ij')
+            # Project it
+            x, y = self.proj(x, y)
+
+            # Find encapsulating box
+            self.bl = np.array((np.min(x), np.min(y)))
+            self.tr = np.array((np.max(x), np.max(y)))
+
+            self.x_init = np.array(self.proj(*(RAD_TO_DEG * self.x_init)))
+
+        self.delta_x = (self.tr[0] - self.bl[0]) / (self.nx - 1)
+        self.delta_y = (self.tr[1] - self.bl[1]) / (self.ny - 1)
+
+        self.speed = mp.model.v_a
         self.wind = None
         self.phi = None
 
@@ -245,24 +265,21 @@ class RFT:
             for i in range(self.nx):
                 for j in range(self.ny):
                     point = self.bl + np.array([self.delta_x * i, self.delta_y * j])
-                    self.phi[i, j, 0] = np.linalg.norm(self.x_init - point) - 5e-3
+                    self.phi[i, j, 0] = np.linalg.norm(self.mp.x_init - point) - 5e-3
             # Integrate
             for k in range(self.nt - 1):
                 self.update_phi()
+
         elif self.kernel == 'matlab':
-            # Matlab only processes 2D problem so first flatten the problem
-            # if working in GCS
-            if self.coords == COORD_GCS:
-                self.toggle_flatten()
 
             # Give all arguments to matlab in a JSON file
             args = {
                 "nx": self.nx,
                 "ny": self.ny,
                 "x_min": self.bl[0],
-                "x_max": self.bl[0] + self.delta_x * (self.nx - 1),
+                "x_max": self.tr[0],
                 "y_min": self.bl[1],
-                "y_max": self.bl[1] + self.delta_y * (self.ny - 1),
+                "y_max": self.tr[1],
                 "x_init": self.x_init[0],
                 "y_init": self.x_init[1],
                 "airspeed": self.mp.model.v_a,
@@ -276,15 +293,15 @@ class RFT:
             # Give also the wind to the matlab script
             uv = np.zeros((2, self.nx, self.ny, self.nt))
 
-            factor = 1 / EARTH_RADIUS if self.coords == COORD_GCS else 1.
-
             for k in range(self.nt - 1):
                 for i in range(self.nx - 1):
                     for j in range(self.ny - 1):
-                        point = factor * np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
+                        point = np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
+                        if self.mp.coords == COORD_GCS:
+                            point = DEG_TO_RAD * np.array(self.proj(*point, inverse=True))
                         value = self.mp.model.wind.value(k * self.delta_t, point)
                         uv[:, i, j, k] = value
-            d = {'data' : uv}
+            d = {'data': uv}
             scipy.io.savemat(os.path.join(self.matlabLS_path, 'input', 'wind.mat'), d)
             """
             np.savetxt(os.path.join(self.matlabLS_path, 'input', 'u.txt'), u, delimiter=",")
@@ -304,9 +321,6 @@ class RFT:
                 self.phi[:, :, k] = np.genfromtxt(os.path.join(self.matlabLS_path, 'output', f'rff_{k}.txt'),
                                                   delimiter=',')
 
-            # Unflatten data if needed
-            if self.coords == COORD_GCS:
-                self.toggle_flatten()
         elif self.kernel == 'cache':
             pass
 
@@ -316,7 +330,7 @@ class RFT:
             with h5py.File(filepath, 'r') as f:
                 nt, nx, ny = f['data'].shape
                 self.phi = np.zeros((nx, ny, nt))
-                self.coords = f.attrs['coords']
+                self.mp.coords = f.attrs['coords']
                 self.phi[:, :, :] = np.array(f['data']).transpose((1, 2, 0))
 
                 self.max_time = np.array(f['ts']).max()
@@ -324,32 +338,14 @@ class RFT:
                 grid = np.zeros(f['grid'].shape)
                 grid[:] = f['grid']
 
-                factor = DEG_TO_RAD if self.coords == COORD_GCS else 1.
+                factor = DEG_TO_RAD if self.mp.coords == COORD_GCS else 1.
                 self.bl = factor * np.array((grid[:, :, 0].min(), grid[:, :, 1].min()))
                 self.tr = factor * np.array((grid[:, :, 0].max(), grid[:, :, 1].max()))
 
                 self.kernel = 'cache'
         except FileNotFoundError:
-            print(f'[RFT] Could load cache, resuming with usual computation ({filepath} : Not found)', file=sys.stderr)
-
-    def toggle_flatten(self):
-        """
-        Change GCS coordinates to planar approximation considering
-        parallels are great circles
-        """
-        if not self.flatten:
-            factor = self.flatten_factor
-            self.flatten = True
-        else:
-            factor = 1 / self.flatten_factor
-            self.flatten = False
-        self.bl[:] = factor * self.bl
-        self.tr[:] = factor * self.tr
-
-        self.delta_x *= factor
-        self.delta_y *= factor
-
-        self.x_init[:] = factor * self.x_init
+            print(f'[RFT] Could not load cache, resuming with usual computation ({filepath} : Not found)',
+                  file=sys.stderr)
 
     def update_phi(self):
         if self.method == 'lolla':
@@ -390,19 +386,23 @@ class RFT:
     def dump_rff(self, filepath):
         with h5py.File(os.path.join(filepath, 'rff.h5'), 'w') as f:
             nx, ny, nt = self.phi.shape
-            f.attrs['coords'] = self.coords
+            f.attrs['coords'] = self.mp.coords
             dset = f.create_dataset('data', (nt, nx, ny), dtype='f8')
             dset[:, :, :] = self.phi.transpose((2, 0, 1))
 
             dset = f.create_dataset('ts', (nt,), dtype='f8')
-            dset[:] = np.linspace(0., self.max_time, nt)
+            dset[:] = np.linspace(self.mp.model.wind.t_start, self.mp.model.wind.t_start + self.max_time, nt)
 
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
             X, Y = np.meshgrid(self.bl[0] + self.delta_x * np.arange(self.nx),
                                self.bl[1] + self.delta_y * np.arange(self.ny), indexing='ij')
-            factor = 1 / DEG_TO_RAD if self.coords == COORD_GCS else 1.
-            dset[:, :, 0] = factor * X
-            dset[:, :, 1] = factor * Y
+            if self.mp.coords == COORD_GCS:
+                X, Y = self.proj(X, Y, inverse=True)
+                # TODO : save in radians
+                # X[:] = DEG_TO_RAD * X
+                # Y[:] = DEG_TO_RAD * Y
+            dset[:, :, 0] = X
+            dset[:, :, 1] = Y
 
     def build_front(self, point):
         k = self.get_index(point) - 1
@@ -410,6 +410,12 @@ class RFT:
         # For the moment, store it in first front
         lam = self.value(point, k + 1) / (self.value(point, k + 1) - self.value(point, k))
         self.phi[:, :, 0] = lam * self.phi[:, :, k] + (1 - lam) * self.phi[:, :, k + 1]
+
+    def project(self, x):
+        if self.mp.coords == COORD_CARTESIAN:
+            return x
+        else:
+            return np.array(self.proj(*(RAD_TO_DEG * np.array(x))))
 
     def _value(self, point, timeindex):
         """
@@ -439,11 +445,13 @@ class RFT:
                 (1 - a) * self.phi[i, j + 1, timeindex] + a * self.phi[i + 1, j + 1, timeindex])
 
     def value(self, t, x):
+        x = self.project(x)
         k, alpha = self._index(t)
         return (1 - alpha) * self._value(x, k) + alpha * self._value(x, k + 1)
 
     def control(self, x, backward=False):
         factor = 1. if backward else -1.
+        x = self.project(x)
         s = factor * self.get_normal(x)[0]
         return atan2(s[1], s[0])
 
@@ -468,11 +476,11 @@ class RFT:
         k = 0
         for k in range(1, N_disc):
             points[k, :] = f(points[k - 1, :], 0.) * dt + points[k - 1, :]
-            if distance(points[k, :], new_target, coords=self.coords) < ceil:
+            if distance(points[k, :], new_target, coords=self.mp.coords) < ceil:
                 break
         # points = np.array(odeint(f, x0, timestamps))
         controls = np.array(list(map(self.control, points)))
-        return Trajectory(timestamps, points[::-1], controls, k, optimal=True, coords=self.coords)
+        return Trajectory(timestamps, points[::-1], controls, k, optimal=True, coords=self.mp.coords)
 
     def get_index(self, point):
         """

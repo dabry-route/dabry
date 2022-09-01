@@ -71,8 +71,8 @@ class Wind:
         # Bounds may not be in the right order if wind is dualized
         t_min, t_max = min(self.t_start, self.t_end), max(self.t_start, self.t_end)
         if t < t_min:
-            print(f'Time {t} lower than lower time bound {t_min}', file=sys.stderr)
-            warnings.warn(UserWarning('Probably considering wind as steady'))
+            #print(f'Time {t} lower than lower time bound {t_min}', file=sys.stderr)
+            #warnings.warn(UserWarning('Probably considering wind as steady'))
             return 0, 0.
         if t > t_max:
             # Freeze wind to last frame
@@ -551,6 +551,7 @@ class DiscreteWind(Wind):
                 if p not in kwargs.keys():
                     print(f'Missing parameter {p} for {proj} flatten type', file=sys.stdin)
                     exit(1)
+            # Lon and lats expected in radians
             self.lon_0 = kwargs['lon_0']
             self.lat_0 = kwargs['lat_0']
             # width = kwargs['width']
@@ -559,7 +560,7 @@ class DiscreteWind(Wind):
             nx, ny, _ = self.grid.shape
 
             # Grid
-            proj = Proj(proj='ortho', lon_0=self.lon_0, lat_0=self.lat_0)
+            proj = Proj(proj='ortho', lon_0=RAD_TO_DEG * self.lon_0, lat_0=RAD_TO_DEG * self.lat_0)
             oldgrid = np.zeros(self.grid.shape)
             oldgrid[:] = self.grid
             newgrid = np.zeros((2, nx, ny))
