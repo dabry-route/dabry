@@ -5,7 +5,8 @@ from mermoz.problem import MermozProblem
 from mermoz.rft import RFT
 from mermoz.misc import *
 from mermoz.feedback import FunFB
-from mermoz.stoppingcond import TimedSC
+from mermoz.stoppingcond import TimedSC, DistanceSC
+
 
 class SolverRP:
     """
@@ -65,7 +66,7 @@ class SolverRP:
 
         T = self.rft.get_time(self.mp.x_target)
         self.mp_dual.load_feedback(FunFB(lambda x: self.rft.control(x, backward=True)))
-        sc = TimedSC(T)
+        sc = DistanceSC(lambda x: self.mp.distance(x, self.mp_dual.x_target), self.mp._geod_l / 100.)
         traj = self.mp_dual.integrate_trajectory(self.mp_dual.x_init, sc, 1000, T/999, backward=True)
         li = traj.last_index
         lt = traj.timestamps[li - 1]

@@ -18,7 +18,7 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 7, 0
+    pb_id, seed = 2, 0
     cache = False
 
     # Create a file manager to dump problem data
@@ -41,7 +41,7 @@ if __name__ == '__main__':
     mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
 
     # Setting the solver
-    solver = SolverEF(pb, max_steps=200, hard_obstacles=not seed)
+    solver = SolverEF(pb, max_steps=400, hard_obstacles=not seed)
     # solver = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
 
     t_start = time.time()
@@ -114,15 +114,12 @@ if __name__ == '__main__':
     traj.type = TRAJ_OPTIMAL
     traj.info = 'Extremals'
 
-    """
-    pb.load_feedback(ConstantFB(0.5))
-    pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit)
-    """
 
     solver = SolverRP(pb, nx_rft, ny_rft, nt_rft)
     solver.solve()
     solver.rft.dump_rff(output_dir)
     mdfm.dump_trajs(solver.mp_dual.trajs)
+
 
     mdfm.dump_trajs(trajs)
     mdfm.dump_trajs(pb.trajs)

@@ -23,5 +23,6 @@ if __name__ == '__main__':
     output_dir = get_latest_output_dir(base_dir)
     print(output_dir)
     pp = PostProcessing(output_dir)
+    pp.load(opti_only=True)
 
     pp.stats(only_opti=True)

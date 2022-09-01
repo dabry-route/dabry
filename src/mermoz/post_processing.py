@@ -54,43 +54,62 @@ class PostProcessing:
         self.wind = DiscreteWind(interp='linear')
         self.wind.load(wind_fp)
 
-    def stats(self, fancynormplot=False, only_opti=False):
+        self.trajs = []
+
+    def load(self, opti_only=False):
         traj_fp = os.path.join(self.output_dir, self.traj_fn)
-        ntr = 0
         f = h5py.File(traj_fp, "r")
-        ntr = len(f.values())
+        for k, traj in enumerate(f.values()):
+            if not opti_only or traj.attrs['type'] in ['integral', 'optimal']:
+                print(traj.attrs['type'], end=' ')
+                try:
+                    print(traj.attrs['info'])
+                except KeyError:
+                    print()
+                _traj = {}
+                _traj['data'] = np.zeros(traj['data'].shape)
+                _traj['data'][:] = traj['data']
+                _traj['controls'] = np.zeros(traj['controls'].shape)
+                _traj['controls'][:] = traj['controls']
+                _traj['ts'] = np.zeros(traj['ts'].shape)
+                _traj['ts'][:] = traj['ts']
+
+                _traj['type'] = traj.attrs['type']
+                _traj['last_index'] = traj.attrs['last_index']
+                _traj['interrupted'] = traj.attrs['interrupted']
+                _traj['coords'] = traj.attrs['coords']
+                _traj['label'] = traj.attrs['label']
+                _traj['info'] = traj.attrs['info']
+                self.trajs.append(_traj)
+        f.close()
+
+
+    def stats(self, fancynormplot=False, only_opti=False):
         fig, ax = plt.subplots(ncols=3, nrows=2)
         decorate(ax[0, 0], 'Delay per length unit', 'Point', '[s/m]', ylim=(0., 3 / self.va))
         decorate(ax[0, 1], 'Crosswind', 'Point', '[m/s]', ylim=(-1. * self.va, 1. * self.va))
         decorate(ax[0, 2], 'Tangent wind', 'Point', '[m/s]', ylim=(-1. * self.va, 1. * self.va))
         decorate(ax[1, 0], 'Ground speed', 'Point', '[m/s]', ylim=(0., 2. * self.va))
         decorate(ax[1, 1], 'Wind norm', 'Point', '[m/s]', ylim=(0, 1.1 * self.va))
-        for k, traj in enumerate(f.values()):
-            if not only_opti or traj.attrs['type'] in ['integral', 'optimal']:
-                print(traj.attrs['type'], end=' ')
-                try:
-                    print(traj.attrs['info'])
-                except KeyError:
-                    print()
-                points = np.zeros(traj['data'].shape)
-                points[:] = traj['data']
-                nt = traj.attrs['last_index']
-                color = path_colors[traj.attrs['label'] % len(path_colors)]
-                tstats = self.point_stats(points, last_index=nt)
-                ax[0, 0].plot(1 / tstats.gs, label=f'{k}' + ('_opt' if traj.attrs['type'] == 'optimal' else ''), color=color)
-                ax[0, 1].plot(tstats.cw, color=color)
-                ax[0, 2].plot(tstats.tw, color=color)
-                x = np.linspace(0, 1., nt - 1)
-                y = np.sqrt(tstats.cw ** 2 + tstats.tw ** 2)
-                if fancynormplot:
-                    xx = np.linspace(0, nt - 1, 10 * (nt - 1))
-                    yy = itp.interp1d(x, y)(xx)
-                    ax[1, 1].scatter(xx, yy, c=windy_cm(yy / windy_cm.norm_max), s=0.5, color=color)
-                else:
-                    ax[1, 1].plot(x, y, color=color)
-                ax[1, 0].plot(tstats.gs)
-                print(f'{k} : {tstats.duration / 3600:.2f}h, {tstats.length / 1000:.2f}km')
-        f.close()
+        for k, traj in enumerate(self.trajs):
+            points = np.zeros(traj['data'].shape)
+            points[:] = traj['data']
+            nt = traj['last_index']
+            color = path_colors[traj['label'] % len(path_colors)]
+            tstats = self.point_stats(points, last_index=nt)
+            x = np.linspace(0, 1., nt - 1)
+            ax[0, 0].plot(x, 1 / tstats.gs, label=f'{k}' + ('_opt' if traj['type'] == 'optimal' else ''), color=color)
+            ax[0, 1].plot(x, tstats.cw, color=color)
+            ax[0, 2].plot(x, tstats.tw, color=color)
+            y = np.sqrt(tstats.cw ** 2 + tstats.tw ** 2)
+            if fancynormplot:
+                xx = np.linspace(0, nt - 1, 10 * (nt - 1))
+                yy = itp.interp1d(x, y)(xx)
+                ax[1, 1].scatter(xx, yy, c=windy_cm(yy / windy_cm.norm_max), s=0.5, color=color)
+            else:
+                ax[1, 1].plot(x, y, color=color)
+            ax[1, 0].plot(x, tstats.gs)
+            print(f'{k} : {tstats.duration / 3600:.2f}h, {tstats.length / 1000:.2f}km')
         ax[0, 0].legend()
         plt.show()
 

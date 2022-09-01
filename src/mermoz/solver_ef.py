@@ -101,7 +101,7 @@ class SolverEF:
         if dt is not None:
             self.dt = -dt
         else:
-            self.dt = -.01 * mp._geod_l / mp.model.v_a
+            self.dt = -.005 * mp._geod_l / mp.model.v_a
 
         # This group shall be reinitialized before new resolution
         # Contains augmented state points (id, time, state, adjoint) used to expand extremal field
