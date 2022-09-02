@@ -37,6 +37,9 @@ if __name__ == '__main__':
     # d_wind.load_from_wind(pb.model.wind, nx_rft, ny_rft, pb.bl, pb.tr, pb.coords)
     # pb.model.wind = d_wind
 
+    # _, nx_uv, ny_uv, _ = pb.model.wind.uv.shape
+    # pb.model.wind.uv = 0.01 * np.ones((1, nx_uv, ny_uv, 2))
+
     # Log windfield to file
     mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
 

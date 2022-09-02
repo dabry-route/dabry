@@ -184,31 +184,58 @@ class DiscreteWind(Wind):
     Handles wind loading from H5 format and derivative computation
     """
 
-    def __init__(self, interp='pwc', force_analytical=False):
+    def __init__(self, interp='pwc', force_analytical=False, wdata=None, diff=False):
         super().__init__(value_func=self.value, d_value_func=self.d_value)
 
         self.is_dumpable = 2
 
-        self.nt = None
-        self.nx = None
-        self.ny = None
+        if wdata is None:
+            self.nt = None
+            self.nx = None
+            self.ny = None
 
-        self.uv = None
-        self.grid = None
-        self.coords = None
-        self.ts = None
+            self.uv = None
+            self.grid = None
+            self.coords = None
+            self.ts = None
 
-        self.x_min = None
-        self.x_max = None
-        self.y_min = None
-        self.y_max = None
+            self.x_min = None
+            self.x_max = None
+            self.y_min = None
+            self.y_max = None
 
-        self.units_grid = None
+            self.units_grid = None
 
-        self.d_u__d_x = None
-        self.d_u__d_y = None
-        self.d_v__d_x = None
-        self.d_v__d_y = None
+            self.d_u__d_x = None
+            self.d_u__d_y = None
+            self.d_v__d_x = None
+            self.d_v__d_y = None
+        else:
+            if len(wdata['data'].shape) == 2:
+                self.nt = None
+                self.nx, self.ny, _ = wdata['data'].shape
+            else:
+                self.nt, self.nx, self.ny, _ = wdata['data'].shape
+
+            self.uv = np.zeros(wdata['data'].shape)
+            self.uv[:] = wdata['data']
+            self.grid = np.zeros(wdata['grid'].shape)
+            self.grid[:] = wdata['grid']
+            self.ts = np.zeros(wdata['ts'].shape)
+            self.ts[:] = wdata['ts']
+            self.coords = wdata['coords']
+
+            self.x_min = np.min(self.grid[:, :, 0])
+            self.x_max = np.max(self.grid[:, :, 0])
+            self.y_min = np.min(self.grid[:, :, 1])
+            self.y_max = np.max(self.grid[:, :, 1])
+
+            self.units_grid = U_RAD if self.coords == COORD_GCS else COORD_CARTESIAN
+
+            self.d_u__d_x = None
+            self.d_u__d_y = None
+            self.d_v__d_x = None
+            self.d_v__d_y = None
 
         # Either 'pwc' for piecewise constant wind or 'linear' for linear interpolation
         self.interp = interp
@@ -216,6 +243,11 @@ class DiscreteWind(Wind):
         self.clipping_tol = 1e-2
 
         self.is_analytical = force_analytical
+
+        self.bm = None
+
+        if wdata is not None and diff:
+            self.compute_derivatives()
 
     def load(self, filepath, nodiff=False, resample=1, duration_limit=None):
         """
@@ -553,7 +585,7 @@ class DiscreteWind(Wind):
         elif proj == 'ortho':
             for p in ['lon_0', 'lat_0']:
                 if p not in kwargs.keys():
-                    print(f'Missing parameter {p} for {proj} flatten type', file=sys.stdin)
+                    print(f'Missing parameter {p} for {proj} flatten type', file=sys.stderr)
                     exit(1)
             # Lon and lats expected in radians
             self.lon_0 = kwargs['lon_0']
@@ -599,8 +631,9 @@ class DiscreteWind(Wind):
         self.is_analytical = False
 
     def _rotate_wind(self, u, v, x, y):
-        bm = Basemap(projection='ortho', lon_0=self.lon_0, lat_0=self.lat_0)
-        return np.array(bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
+        if self.bm is None:
+            self.bm = Basemap(projection='ortho', lon_0=RAD_TO_DEG * self.lon_0, lat_0=RAD_TO_DEG * self.lat_0)
+        return np.array(self.bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
 
     def dualize(self):
         # Override method so that the dual of a DiscreteWind stays a DiscreteWind and

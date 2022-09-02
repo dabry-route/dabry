@@ -12,6 +12,7 @@ from math import atan2
 from mermoz.misc import *
 from mermoz.problem import MermozProblem
 from mermoz.trajectory import Trajectory
+from mermoz.wind import DiscreteWind
 
 
 def upwind_diff(field, axis, delta):
@@ -291,16 +292,32 @@ class RFT:
                 json.dump(args, f)
 
             # Give also the wind to the matlab script
-            uv = np.zeros((2, self.nx, self.ny, self.nt))
+            uv = np.zeros((self.nt, self.nx, self.ny, 2))
 
-            for k in range(self.nt - 1):
-                for i in range(self.nx - 1):
-                    for j in range(self.ny - 1):
-                        point = np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
-                        if self.mp.coords == COORD_GCS:
-                            point = DEG_TO_RAD * np.array(self.proj(*point, inverse=True))
+            grid = np.zeros((self.nx, self.ny, 2))
+            for i in range(self.nx):
+                for j in range(self.ny):
+                    point = np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
+                    if self.mp.coords == COORD_GCS:
+                        point = DEG_TO_RAD * np.array(self.proj(*point, inverse=True))
+                    grid[i, j, :] = point
+
+            ts = np.linspace(self.mp.model.wind.t_start, self.mp.model.wind.t_start + self.max_time, self.nt)
+
+            for k in range(self.nt):
+                for i in range(self.nx):
+                    for j in range(self.ny):
+                        point = np.zeros(2)
+                        point[:] = grid[i, j]
                         value = self.mp.model.wind.value(k * self.delta_t, point)
-                        uv[:, i, j, k] = value
+                        uv[k, i, j, :] = value
+
+            if self.mp.coords == COORD_GCS:
+                dwind = DiscreteWind(wdata={'data': uv, 'grid': grid, 'ts': ts, 'coords': self.mp.coords})
+                m = self.mp.middle(self.mp.x_init, self.mp.x_target)
+                dwind.flatten(proj='ortho', lon_0=m[0], lat_0=m[1])
+                uv = dwind.uv
+            uv = uv.transpose((3, 1, 2, 0))
             d = {'data': uv}
             scipy.io.savemat(os.path.join(self.matlabLS_path, 'input', 'wind.mat'), d)
             """
@@ -398,9 +415,8 @@ class RFT:
                                self.bl[1] + self.delta_y * np.arange(self.ny), indexing='ij')
             if self.mp.coords == COORD_GCS:
                 X, Y = self.proj(X, Y, inverse=True)
-                # TODO : save in radians
-                # X[:] = DEG_TO_RAD * X
-                # Y[:] = DEG_TO_RAD * Y
+                X[:] = DEG_TO_RAD * X
+                Y[:] = DEG_TO_RAD * Y
             dset[:, :, 0] = X
             dset[:, :, 1] = Y
 

@@ -45,10 +45,8 @@ class MDFmanager:
                 trajgroup.attrs['label'] = traj.label
                 trajgroup.attrs['info'] = traj.info
 
-                factor = (180 / np.pi if traj.coords == COORD_GCS else 1.)
-
                 dset = trajgroup.create_dataset('data', (nt, 2), dtype='f8')
-                dset[:, :] = traj.points * factor
+                dset[:, :] = traj.points
 
                 dset = trajgroup.create_dataset('ts', (nt,), dtype='f8')
                 dset[:] = traj.timestamps
@@ -96,7 +94,7 @@ class MDFmanager:
             dwind = wind
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = dwind.coords
-            f.attrs['units_grid'] = U_METERS if dwind.coords == COORD_CARTESIAN else U_DEG
+            f.attrs['units_grid'] = U_METERS if dwind.coords == COORD_CARTESIAN else U_RAD
             f.attrs['analytical'] = dwind.is_analytical
             if dwind.lon_0 is not None:
                 f.attrs['lon_0'] = dwind.lon_0
@@ -107,9 +105,8 @@ class MDFmanager:
             dset[:] = dwind.uv
             dset = f.create_dataset('ts', (dwind.nt,), dtype='f8')
             dset[:] = dwind.ts
-            factor = (RAD_TO_DEG if dwind.coords == COORD_GCS else 1.)
             dset = f.create_dataset('grid', (dwind.nx, dwind.ny, 2), dtype='f8')
-            dset[:] = factor * dwind.grid
+            dset[:] = dwind.grid
 
     def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=COORD_GCS):
         if coords == COORD_CARTESIAN:

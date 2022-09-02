@@ -68,7 +68,7 @@ class SolverRP:
         time_rft = t_end - t_start
 
         tu = self.rft.get_time(self.mp.x_target)
-        tl = self.rft.get_time(self.mp.x_init)
+        tl = self.mp.model.wind.t_start
         self.mp_dual.load_feedback(FunFB(lambda x: self.rft.control(x, backward=True)))
         sc = DistanceSC(lambda x: self.mp.distance(x, self.mp_dual.x_target), self.mp._geod_l / 100.)
         traj = self.mp_dual.integrate_trajectory(self.mp_dual.x_init, sc, 1000, (tu - tl)/999, backward=True, t_init=tu)

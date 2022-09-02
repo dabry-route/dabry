@@ -257,7 +257,7 @@ class FrontendHandler:
             self.display.import_params()
             self.display.load_all()
             self.display.setup()
-            self.display.draw_all(traj_integr=True)
+            self.display.draw_all()
         elif 'wf' in self.case_name:
             Display._info(f'Using default wind field setup script for unknown case "{self.case_name}"')
             self.display.set_title(os.path.basename(self.output_path))

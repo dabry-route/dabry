@@ -42,13 +42,21 @@ class PostProcessing:
         with open(os.path.join(self.output_dir, self.param_fn), 'r') as f:
             pd = json.load(f)
             try:
-                self.va = pd['va']
+                self.coords = pd['coords']
             except KeyError:
+                print('[postproc] Missing coordinates type', file=sys.stderr)
+                exit(1)
+
+            success = False
+            for name in ['va', 'airspeed']:
                 try:
-                    self.va = pd['airspeed']
+                    self.va = pd[name]
+                    success = True
                 except KeyError:
-                    print('[postproc] Airspeed not found in parameters, switching to default value')
-                    self.va = AIRSPEED_DEFAULT
+                    pass
+            if not success:
+                print('[postproc] Airspeed not found in parameters, switching to default value')
+                self.va = AIRSPEED_DEFAULT
 
         wind_fp = os.path.join(self.output_dir, self.wind_fn)
         self.wind = DiscreteWind(interp='linear')
@@ -82,7 +90,6 @@ class PostProcessing:
                 _traj['info'] = traj.attrs['info']
                 self.trajs.append(_traj)
         f.close()
-
 
     def stats(self, fancynormplot=False, only_opti=False):
         fig, ax = plt.subplots(ncols=3, nrows=2)
@@ -129,7 +136,7 @@ class PostProcessing:
         tw = np.zeros(n - 1)
         controls = np.zeros(n - 1)
         duration = 0.
-        length = float(np.sum(np.linalg.norm(points[:n - 1] - points[1:n], axis=1)))
+        length = float(np.sum([distance(points[i], points[i+1], self.coords) for i in range(n-1)]))
         for i in range(n - 1):
             p = np.zeros(2)
             p2 = np.zeros(2)

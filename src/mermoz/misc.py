@@ -1,6 +1,6 @@
 import sys
 import numpy as np
-from math import pi, acos, cos, sin, floor
+from math import pi, acos, cos, sin, floor, atan2
 
 from numpy import ndarray
 
@@ -113,11 +113,37 @@ def geodesic_distance(*args, mode='rad'):
     return res
 
 
-def distance(x1, x2, coords=COORD_CARTESIAN):
+def proj_ortho(lon, lat, lon0, lat0):
+    """
+    :param lon: Longitude in radians
+    :param lat: Latitude in radians
+    :param lon0: Longitude of center in radians
+    :param lat0: Latitude of center in radians
+    :return: Projection in meters
+    """
+    return EARTH_RADIUS * np.cos(lat) * np.sin(lon - lon0), \
+           EARTH_RADIUS * (np.cos(lat0) * np.sin(lat) - np.sin(lat0) * np.cos(lat) * np.cos(lon - lon0))
+
+
+def middle(x1, x2, coords):
+    if coords == COORD_CARTESIAN:
+        # x1, x2 shall be cartesian vectors in meters
+        return 0.5 * (x1 + x2)
+    else:
+        # Assuming coords == COORD_GCS
+        # x1, x2 shall be vectors (lon, lat) in radians
+        bx = np.cos(x2[1]) * np.cos(x2[0] - x1[0])
+        by = np.cos(x2[1]) * np.sin(x2[0] - x1[0])
+        return x1[0] + atan2(by, np.cos(x1[1]) + bx), \
+               atan2(np.sin(x1[1]) + np.sin(x2[1]), np.sqrt((np.cos(x1[1]) + bx) ** 2 + by ** 2))
+
+
+def distance(x1, x2, coords):
     if coords == COORD_GCS:
         # x1, x2 shall be vectors (lon, lat) in radians
         return geodesic_distance(x1, x2)
     else:
+        # Assuming coords == COORD_CARTESIAN
         # x1, x2 shall be cartesian vectors in meters
         return np.linalg.norm(x1 - x2)
 

@@ -76,7 +76,6 @@ class ParamsSummary:
         return f'{comptime:.3f}'
 
     def load_from_solver(self, sv: Solver):
-        total_wind = sv.mp.model.wind
         T = sv.T
         factor = RAD_TO_DEG if sv.mp.coords == COORD_GCS else 1.
         self.params = {
@@ -88,21 +87,6 @@ class ParamsSummary:
             'target_radius': sv.opti_ceil,
             'nt_pmp': sv.nt_pmp,
         }
-        try:
-            self.params['bl_wind'] = (factor * total_wind.grid[0, 0, 0], factor * total_wind.grid[0, 0, 1])
-            self.params['tr_wind'] = (factor * total_wind.grid[-1, -1, 0], factor * total_wind.grid[-1, -1, 1])
-            self.params['nx_wind'] = total_wind.grid.shape[0]
-            self.params['ny_wind'] = total_wind.grid.shape[1]
-            self.params['date_wind'] = total_wind.ts[0]
-        except AttributeError:
-            pass
-        try:
-            self.params['nt_rft_eff'] = sv.nt_rft_eff
-        except AttributeError:
-            pass
-        w = distance(sv.x_init, sv.x_target, coords=sv.mp.coords)
-        self.params['geodesic_time'] = w / sv.mp.model.v_a
-        self.params['geodesic_length'] = w
 
     def load_from_solver_rp(self, sv: SolverRP):
         self.load_from_problem(sv.mp)
@@ -114,34 +98,15 @@ class ParamsSummary:
         self.add_param('nx_rft', sv.nx_rft)
         self.add_param('ny_rft', sv.ny_rft)
         self.add_param('nt_rft_eff', sv.nt_rft_eff)
-        w = distance(sv.x_init, sv.x_target, coords=sv.mp.coords)
-        self.add_param('geodesic_time', w / sv.mp.model.v_a)
-        self.add_param('geodesic_length', w)
 
     def load_from_problem(self, pb: MermozProblem):
-        total_wind = pb.model.wind
-        try:
-            nx_wind = total_wind.grid.shape[0]
-            ny_wind = total_wind.grid.shape[1]
-        except AttributeError:
-            nx_wind, ny_wind = 0, 0
-        try:
-            date_wind = total_wind.ts[0]
-        except AttributeError:
-            date_wind = 0.
-        factor = RAD_TO_DEG if pb.coords == COORD_GCS else 1.
         self.add_param('coords', pb.coords)
-        self.add_param('bl_wind', tuple(factor * pb.bl))
-        self.add_param('tr_wind', tuple(factor * pb.tr))
-        self.add_param('nx_wind', nx_wind)
-        self.add_param('ny_wind', ny_wind)
-        if total_wind.nt > 1:
-            self.add_param('nt_wind', total_wind.nt)
-        self.add_param('date_wind', date_wind)
-        self.add_param('x_init', tuple(factor * pb.x_init))
-        self.add_param('x_target', tuple(factor * pb.x_target))
+        self.add_param('x_init', tuple(pb.x_init))
+        self.add_param('x_target', tuple(pb.x_target))
         self.add_param('airspeed', pb.model.v_a)
         self.add_param('target_radius', 0.05 * pb._geod_l)
+        self.add_param('geodesic_time', pb._geod_l / pb.model.v_a)
+        self.add_param('geodesic_length', pb._geod_l)
 
     def process_params(self):
         params = self.params

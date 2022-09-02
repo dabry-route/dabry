@@ -378,18 +378,19 @@ class SolverEF:
         else:
             print(f'Stopped empty active list')
         print(f'Steps : {i}, Extremals : {len(self.trajs)}, Points : {self.n_points}')
-        k0 = None
-        m = None
-        iit_opt = 0
-        for k, traj in self.trajs.items():
-            for iit in traj.keys():
-                candidate = self.mp.distance(traj[iit][1], self.mp.x_target)
-                if m is None or m > candidate:
-                    m = candidate
-                    k0 = k
-                    iit_opt = iit
-        self.reach_time = self.mp_primal.model.wind.t_start + self.max_time - self.trajs[k0][iit_opt][0]
-        return self.reach_time, iit_opt, self.p_inits[k0]
+        if not self.mode_primal:
+            k0 = None
+            m = None
+            iit_opt = 0
+            for k, traj in self.trajs.items():
+                for iit in traj.keys():
+                    candidate = self.mp.distance(traj[iit][1], self.mp.x_target)
+                    if m is None or m > candidate:
+                        m = candidate
+                        k0 = k
+                        iit_opt = iit
+            self.reach_time = self.mp_primal.model.wind.t_start + self.max_time - self.trajs[k0][iit_opt][0]
+            return self.reach_time, iit_opt, self.p_inits[k0]
 
     def control(self, x):
         m = None
@@ -409,27 +410,28 @@ class SolverEF:
 
     def get_trajs(self, primal_only=False, dual_only=False):
         res = []
-        if primal_only:
-            trajs = self.trajs_primal
-        elif dual_only:
-            trajs = self.trajs_dual
-        else:
-            trajs = {**self.trajs_primal, **self.trajs_dual}
-        for it, t in trajs.items():
-            n = len(t)
-            timestamps = np.zeros(n)
-            points = np.zeros((n, 2))
-            adjoints = np.zeros((n, 2))
-            controls = np.zeros(n)
-            # If wind is steady, offset timestamps to have a <self.reach_time>-long window
-            offset = 0.
-            if self.mp_primal.model.wind.t_end is None:
-                offset = self.reach_time - self.max_time
-            for k, e in enumerate(list(t.values())):
-                timestamps[k] = e[0] + offset
-                points[k, :] = e[1]
-                adjoints[k, :] = e[2]
-            res.append(
-                AugmentedTraj(timestamps, points, adjoints, controls, last_index=n, coords=self.mp.coords, label=it, type=TRAJ_PMP))
+        trajgroups = []
+        if not primal_only:
+            trajgroups.append(self.trajs_dual)
+        if not dual_only:
+            trajgroups.append(self.trajs_primal)
+        for i, trajs in enumerate(trajgroups):
+            for it, t in trajs.items():
+                n = len(t)
+                timestamps = np.zeros(n)
+                points = np.zeros((n, 2))
+                adjoints = np.zeros((n, 2))
+                controls = np.zeros(n)
+                # If wind is steady, offset timestamps to have a <self.reach_time>-long window
+                offset = 0.
+                if self.mp_primal.model.wind.t_end is None:
+                    offset = self.reach_time - self.max_time
+                for k, e in enumerate(list(t.values())):
+                    timestamps[k] = e[0] + offset
+                    points[k, :] = e[1]
+                    adjoints[k, :] = e[2]
+                res.append(
+                    AugmentedTraj(timestamps, points, adjoints, controls, last_index=n-1, coords=self.mp.coords, label=it,
+                                  type=TRAJ_PMP, info=f'ef_{i}'))
 
         return res
