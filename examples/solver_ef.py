@@ -1,7 +1,7 @@
 import time
 from math import atan2
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import numpy as np
 import scipy.optimize
 
@@ -41,7 +41,7 @@ if __name__ == '__main__':
     mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
 
     # Setting the solver
-    solver = SolverEF(pb, max_steps=100, hard_obstacles=not seed)
+    solver = SolverEF(pb, 1.2 * pb._geod_l / pb.model.v_a, max_steps=400, hard_obstacles=not seed)
     # solver = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
 
     t_start = time.time()
@@ -102,24 +102,23 @@ if __name__ == '__main__':
     """
 
     pb.load_feedback(FunFB(solver.control))
-    if pb.model.wind.t_end is not None:
-        sc = TimedSC(pb.model.wind.t_end)
-        t_init = pb.model.wind.t_end - reach_time
-    else:
-        sc = TimedSC(reach_time)
+    args = (pb.model.wind.t_start + solver.max_time,) + \
+           (() if pb.model.wind.t_end is None else (pb.model.wind.t_end,))
+    sc = TimedSC(*args)
+    if pb.model.wind.t_end is None:
         t_init = pb.model.wind.t_start
-    print(datetime.fromtimestamp(reach_time))
+    else:
+        t_init = pb.model.wind.t_start + solver.max_time - reach_time
+    print(timedelta(seconds=reach_time))
 
     traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=t_init)
     traj.type = TRAJ_OPTIMAL
     traj.info = 'Extremals'
 
-
-    solver = SolverRP(pb, nx_rft, ny_rft, nt_rft)
+    solver = SolverRP(pb, nx_rft, ny_rft, nt_rft, max_time=1.3 * pb._geod_l / pb.model.v_a)
     solver.solve()
     solver.rft.dump_rff(output_dir)
     mdfm.dump_trajs(solver.mp_dual.trajs)
-
 
     mdfm.dump_trajs(trajs)
     mdfm.dump_trajs(pb.trajs)

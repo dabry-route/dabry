@@ -47,14 +47,19 @@ class TimedSC(StoppingCond):
         Stopping condition on maximal time
     """
 
-    def __init__(self, max_time: float):
+    def __init__(self, *max_times):
         """
-        :param max_time: The maximum time allowed
+        :param max_times: Collection of time bounds
         """
-        self.max_time = max_time
+        self.max_times = []
+        for t in max_times:
+            self.max_times.append(t)
 
     def value(self, t, x):
-        return t >= self.max_time
+        for tt in self.max_times:
+            if t >= tt:
+                return True
+        return False
 
 
 class PrecisionSC(StoppingCond):

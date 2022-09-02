@@ -50,9 +50,10 @@ class IntEulerExpl(Integration):
         controls = np.zeros(self.max_iter)
         i = 0
         t = self.t_init
+        timestamps[0] = self.t_init
         x = np.zeros(2)
         x[:] = x_init
-        points[0] = x
+        points[0, :] = x
         controls[0] = self.feedback.value(x)
         dt = self.int_step * (-1. if self.backward else 1.)
         while (i + 1 < self.max_iter) and (self.stop_cond is None or not self.stop_cond.value(t, x)):

@@ -269,12 +269,13 @@ class DiscreteWind(Wind):
                 self.ts = np.zeros((self.nt,))
                 self.ts[:] = wind_data['ts'][:self.nt]
                 self.t_start = self.ts[0]
-                self.t_end = self.ts[-1]
+                self.t_end = None if self.nt == 1 else self.ts[-1]
                 # Detecting millisecond-formated timestamps
                 if np.any(self.ts > 1e11):
                     self.ts[:] = self.ts / 1000.
                     self.t_start /= 1000.
-                    self.t_end /= 1000.
+                    if self.t_end is not None:
+                        self.t_end /= 1000.
 
             else:
                 nx_wind = wind_data['data'].shape[1]
@@ -339,6 +340,9 @@ class DiscreteWind(Wind):
         self.x_max = tr[0]
         self.y_min = bl[1]
         self.y_max = tr[1]
+
+        self.t_start = wind.t_start
+        self.t_end = wind.t_end
 
         self.nt, self.nx, self.ny = nt, nx, ny
         self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
@@ -608,6 +612,8 @@ class DiscreteWind(Wind):
         if self.t_end is not None:
             wind.t_start = self.t_end
             wind.t_end = self.t_start
+        else:
+            wind.t_start = self.t_start
         return wind
 
 

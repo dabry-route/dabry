@@ -337,7 +337,7 @@ class IndexedProblem(MermozProblem):
             coords = COORD_GCS
 
             total_wind = DiscreteWind(interp='linear')
-            total_wind.load('/home/bastien/Documents/data/wind/windy/Vancouver-Honolulu-0.5.mz/data.h5')
+            total_wind.load('/home/bastien/Documents/data/wind/windy/Vancouver-Honolulu-0.5.mz/data2.h5')
 
             # Creates the cinematic model
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)

@@ -23,7 +23,8 @@ class SolverRP:
                  ny_rft,
                  nt_rft,
                  nt_pmp=1000,
-                 only_opti_extremals=False):
+                 only_opti_extremals=False,
+                 max_time=None):
         self.mp = mp
         self.x_init = np.zeros(2)
         self.x_init[:] = mp.x_init
@@ -41,7 +42,10 @@ class SolverRP:
 
         self.geod_l = distance(self.x_init, self.x_target, coords=self.mp.coords)
 
-        self.T = 1.2 * self.geod_l / mp.model.v_a
+        if max_time is None:
+            self.T = 1.2 * self.geod_l / mp.model.v_a
+        else:
+            self.T = max_time
 
         self.opti_ceil = self.geod_l / 50
         self.neighb_ceil = self.opti_ceil / 2.
@@ -63,14 +67,14 @@ class SolverRP:
         t_end = time.time()
         time_rft = t_end - t_start
 
-        T = self.rft.get_time(self.mp.x_target)
+        tu = self.rft.get_time(self.mp.x_target)
+        tl = self.rft.get_time(self.mp.x_init)
         self.mp_dual.load_feedback(FunFB(lambda x: self.rft.control(x, backward=True)))
         sc = DistanceSC(lambda x: self.mp.distance(x, self.mp_dual.x_target), self.mp._geod_l / 100.)
-        traj = self.mp_dual.integrate_trajectory(self.mp_dual.x_init, sc, 1000, T/999, backward=True)
+        traj = self.mp_dual.integrate_trajectory(self.mp_dual.x_init, sc, 1000, (tu - tl)/999, backward=True, t_init=tu)
         li = traj.last_index
-        lt = traj.timestamps[li - 1]
-        traj.timestamps[:li] = traj.timestamps[:li][::-1] - lt
-        traj.points[:li] = traj.points[:li][::-1]
+        traj.timestamps[:li + 1] = traj.timestamps[:li + 1][::-1]
+        traj.points[:li + 1] = traj.points[:li + 1][::-1]
         traj.type = TRAJ_OPTIMAL
         traj.info = 'RFT'
         #self.mp.trajs.append(self.rft.backward_traj(self.mp.x_target, self.mp.x_init, self.opti_ceil,

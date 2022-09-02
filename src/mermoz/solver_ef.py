@@ -91,7 +91,7 @@ class SolverEF:
     Solver for the navigation problem using progressive extremal field computation
     """
 
-    def __init__(self, mp: MermozProblem, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30, hard_obstacles=True):
+    def __init__(self, mp: MermozProblem, max_time, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30, hard_obstacles=True):
         self.mp_primal = mp
         self.mp_dual = mp.dualize()
 
@@ -119,8 +119,11 @@ class SolverEF:
         self.mp = self.mp_dual
         self.trajs = self.trajs_dual
         self.max_extremals = 1000
+        self.max_time = max_time
 
         self.it = 0
+
+        self.reach_time = None
 
         self._index_p = 0
         self._index_d = 0
@@ -167,13 +170,17 @@ class SolverEF:
         self.rel = None
         self.it = 0
         self.n_points = 0
+        if self.mode_primal:
+            t_start = self.mp_primal.model.wind.t_start
+        else:
+            t_start = self.mp_primal.model.wind.t_start + self.max_time
         for k in range(self.N_disc_init):
             theta = 2 * np.pi * k / self.N_disc_init
             p = np.array((np.cos(theta), np.sin(theta)))
             i = self.new_index()
             self.p_inits[i] = np.zeros(2)
             self.p_inits[i][:] = p
-            a = FrontPoint(i, (0, self.mp.model.wind.t_start, self.mp.x_init, p))
+            a = FrontPoint(i, (0, t_start, self.mp.x_init, p))
             heappush(self.active, (1., a))
             self.trajs[k] = {}
             self.trajs[k][a.tsa[0]] = a.tsa[1:]
@@ -381,7 +388,8 @@ class SolverEF:
                     m = candidate
                     k0 = k
                     iit_opt = iit
-        return self.mp.model.wind.t_start - self.trajs[k0][iit_opt][0], iit_opt, self.p_inits[k0]
+        self.reach_time = self.mp_primal.model.wind.t_start + self.max_time - self.trajs[k0][iit_opt][0]
+        return self.reach_time, iit_opt, self.p_inits[k0]
 
     def control(self, x):
         m = None
@@ -413,8 +421,12 @@ class SolverEF:
             points = np.zeros((n, 2))
             adjoints = np.zeros((n, 2))
             controls = np.zeros(n)
+            # If wind is steady, offset timestamps to have a <self.reach_time>-long window
+            offset = 0.
+            if self.mp_primal.model.wind.t_end is None:
+                offset = self.reach_time - self.max_time
             for k, e in enumerate(list(t.values())):
-                timestamps[k] = e[0]
+                timestamps[k] = e[0] + offset
                 points[k, :] = e[1]
                 adjoints[k, :] = e[2]
             res.append(

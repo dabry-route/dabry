@@ -283,8 +283,8 @@ class RFT:
                 "x_init": self.x_init[0],
                 "y_init": self.x_init[1],
                 "airspeed": self.mp.model.v_a,
-                "t_start": 0.,
-                "t_end": self.max_time,
+                "t_start": self.mp.model.wind.t_start,
+                "t_end": self.mp.model.wind.t_start + self.max_time,
                 "nt_rft": self.nt
             }
             with open(os.path.join(self.matlabLS_path, 'args.json'), 'w') as f:
@@ -453,7 +453,10 @@ class RFT:
         factor = 1. if backward else -1.
         x = self.project(x)
         s = factor * self.get_normal(x)[0]
-        return atan2(s[1], s[0])
+        if self.mp.coords == COORD_CARTESIAN:
+            return atan2(s[1], s[0])
+        else:
+            return np.pi / 2. - atan2(s[1], s[0])
 
     def backward_traj(self, point, new_target, ceil, T, model, N_disc=100):
         """
