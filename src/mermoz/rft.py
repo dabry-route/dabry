@@ -218,7 +218,8 @@ class RFT:
             # When working in spherical coordinates, we will first flatten the
             # problem using an orthographic projection
             mid = self.mp.middle(self.mp.x_init, self.mp.x_target)
-            self.proj = pyproj.Proj(proj='ortho', lon_0=RAD_TO_DEG * mid[0], lat_0=RAD_TO_DEG * mid[1])
+            self.lon_0, self.lat_0 = RAD_TO_DEG * mid[0], RAD_TO_DEG * mid[1]
+            self.proj = pyproj.Proj(proj='ortho', lon_0=self.lon_0, lat_0=self.lat_0)
             # New boundaries are defined as an encapsulating bounding box over the region defined
             # by (lon, lat) bottom left and top right corners
             # Define a dense grid of points within the (lon, lat) zone
@@ -314,7 +315,7 @@ class RFT:
 
             if self.mp.coords == COORD_GCS:
                 dwind = DiscreteWind(wdata={'data': uv, 'grid': grid, 'ts': ts, 'coords': self.mp.coords})
-                m = self.mp.middle(self.mp.x_init, self.mp.x_target)
+                m = 0.5 * (self.mp.x_init + self.mp.x_target)
                 dwind.flatten(proj='ortho', lon_0=m[0], lat_0=m[1])
                 uv = dwind.uv
             uv = uv.transpose((3, 1, 2, 0))
@@ -467,12 +468,16 @@ class RFT:
 
     def control(self, x, backward=False):
         factor = 1. if backward else -1.
-        x = self.project(x)
-        s = factor * self.get_normal(x)[0]
+        xp = self.project(x)
+        s = factor * self.get_normal(xp)[0]
         if self.mp.coords == COORD_CARTESIAN:
             return atan2(s[1], s[0])
         else:
-            return np.pi / 2. - atan2(s[1], s[0])
+            # Control vector is in projected space
+            # It has to be rotated to fit to spherical space
+            tmp = d_proj_ortho_inv(xp[0], xp[1], self.lon_0, self.lat_0) @ s
+            s_new = s #/ np.linalg.norm(tmp)
+            return np.pi / 2. - atan2(s_new[1], s_new[0])
 
     def backward_traj(self, point, new_target, ceil, T, model, N_disc=100):
         """

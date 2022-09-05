@@ -213,7 +213,6 @@ class DatabaseProblem(MermozProblem):
 
         with h5py.File(wind_fpath, 'r') as f:
             coords = f.attrs['coords']
-            print(coords)
             if x_init is None:
                 print('Automatic parameters')
                 bl = np.array((f['grid'][0, 0, 0], f['grid'][0, 0, 1]))

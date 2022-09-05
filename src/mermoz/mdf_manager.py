@@ -135,7 +135,6 @@ class MDFmanager:
                 lats[:] = newlats
 
                 ny, nx = U.shape
-                print(f'nx : {nx}, ny : {ny}')
                 grid = np.zeros((nx, ny, 2))
                 grid[:] = np.transpose(np.stack((lons, lats)), (2, 1, 0))
                 return nx, ny, grid
@@ -159,15 +158,14 @@ class MDFmanager:
 
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = coords
-            f.attrs['units_grid'] = U_DEG
+            f.attrs['units_grid'] = U_RAD
             f.attrs['analytical'] = False
             dset = f.create_dataset('data', (nt, nx, ny, 2), dtype='f8')
             dset[:] = UVs
             dset = f.create_dataset('ts', (nt,), dtype='f8')
             dset[:] = dates
-            factor = 1.  # (RAD_TO_DEG if coords == COORD_GCS else 1.)
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
-            dset[:] = factor * grid
+            dset[:] = DEG_TO_RAD * grid
 
         return nt, nx, ny
 

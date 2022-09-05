@@ -1,3 +1,4 @@
+import os
 import time
 from math import atan2
 
@@ -5,15 +6,15 @@ from datetime import datetime, timedelta
 import numpy as np
 import scipy.optimize
 
-from mermoz.feedback import FunFB, ConstantFB
+from mermoz.feedback import FunFB, ConstantFB, TargetFB
 from mermoz.mdf_manager import MDFmanager
 from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *
-from mermoz.problem import IndexedProblem
+from mermoz.problem import IndexedProblem, DatabaseProblem
 from mermoz.shooting import Shooting
 from mermoz.solver_ef import SolverEF
 from mermoz.solver_rp import SolverRP
-from mermoz.stoppingcond import TimedSC
+from mermoz.stoppingcond import TimedSC, DistanceSC
 from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
@@ -32,7 +33,8 @@ if __name__ == '__main__':
     nt_rft = 20
 
     # Create problem
-    pb = IndexedProblem(pb_id, seed=seed)
+    # mdfm.dump_wind_from_grib2(grib_fps, bl, tr)
+    pb = DatabaseProblem('/home/bastien/Documents/data/wind/ncdc/tmp.mz/wind.h5')
     # d_wind = DiscreteWind(interp='pwc')
     # d_wind.load_from_wind(pb.model.wind, nx_rft, ny_rft, pb.bl, pb.tr, pb.coords)
     # pb.model.wind = d_wind
@@ -56,7 +58,7 @@ if __name__ == '__main__':
     solver.set_primal(True)
     solver.solve()
 
-    trajs = solver.get_trajs(dual_only=True)
+    trajs = solver.get_trajs()
     # m = None
     # k0 = -1
     # for k, traj in enumerate(trajs):
@@ -112,7 +114,7 @@ if __name__ == '__main__':
         t_init = pb.model.wind.t_start
     else:
         t_init = pb.model.wind.t_start + solver.max_time - reach_time
-    print(timedelta(seconds=reach_time))
+    print(f'{reach_time/ 3600:.2f}')
 
     traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=t_init)
     traj.type = TRAJ_OPTIMAL
@@ -122,6 +124,10 @@ if __name__ == '__main__':
     solver.solve()
     solver.rft.dump_rff(output_dir)
     mdfm.dump_trajs(solver.mp_dual.trajs)
+
+    pb.load_feedback(TargetFB(pb.model.wind, pb.model.v_a, pb.x_target, pb.coords))
+    sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb._geod_l / 100.)
+    pb.integrate_trajectory(pb.x_init, sc, max_iter=2*iit, int_step=reach_time / iit, t_init=t_init)
 
     mdfm.dump_trajs(trajs)
     mdfm.dump_trajs(pb.trajs)

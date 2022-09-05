@@ -424,7 +424,7 @@ class SolverEF:
                 controls = np.zeros(n)
                 # If wind is steady, offset timestamps to have a <self.reach_time>-long window
                 offset = 0.
-                if self.mp_primal.model.wind.t_end is None:
+                if self.mp_primal.model.wind.t_end is None and i == 0:
                     offset = self.reach_time - self.max_time
                 for k, e in enumerate(list(t.values())):
                     timestamps[k] = e[0] + offset

@@ -121,8 +121,31 @@ def proj_ortho(lon, lat, lon0, lat0):
     :param lat0: Latitude of center in radians
     :return: Projection in meters
     """
-    return EARTH_RADIUS * np.cos(lat) * np.sin(lon - lon0), \
-           EARTH_RADIUS * (np.cos(lat0) * np.sin(lat) - np.sin(lat0) * np.cos(lat) * np.cos(lon - lon0))
+    return EARTH_RADIUS * np.array((np.cos(lat) * np.sin(lon - lon0),
+                                    np.cos(lat0) * np.sin(lat) - np.sin(lat0) * np.cos(lat) * np.cos(lon - lon0)))
+
+
+def proj_ortho_inv(x, y, lon0, lat0):
+    rho = np.sqrt(x ** 2 + y ** 2)
+    c = np.arcsin(rho / EARTH_RADIUS)
+    return np.array((lon0 + np.arctan(
+        x * np.sin(c) / (rho * np.cos(c) * np.cos(lat0) - y * np.sin(c) * np.sin(lat0))),
+                     np.arcsin(np.cos(c) * np.sin(lat0) + y * np.sin(c) * np.cos(lat0) / rho)))
+
+
+def d_proj_ortho(lon, lat, lon0, lat0):
+    return EARTH_RADIUS * np.array(
+        ((np.cos(lat) * np.cos(lon - lon0), -np.sin(lat) * np.sin(lon - lon0)),
+         (np.sin(lat0) * np.cos(lat) * sin(lon - lon0),
+          np.cos(lat0) * np.cos(lat) + np.sin(lat0) * np.sin(lat) * np.cos(lon - lon0))))
+
+
+def d_proj_ortho_inv(x, y, lon0, lat0):
+    lon, lat = tuple(proj_ortho_inv(x, y, lon0, lat0))
+    det = EARTH_RADIUS ** 2 * (np.cos(lat0) * np.cos(lat) ** 2 * np.cos(lon - lon0) +
+                               np.sin(lat0) * np.sin(lat) * np.cos(lat))
+    dp = d_proj_ortho(lon, lat, lon0, lat0)
+    return 1/det * np.array(((dp[1, 1], -dp[0, 1]), (-dp[1, 0], dp[0, 0])))
 
 
 def middle(x1, x2, coords):

@@ -116,7 +116,7 @@ class PostProcessing:
             else:
                 ax[1, 1].plot(x, y, color=color)
             ax[1, 0].plot(x, tstats.gs)
-            print(f'{k} : {tstats.duration / 3600:.2f}h, {tstats.length / 1000:.2f}km')
+            print(f'{k} : {tstats.duration / 3600:.2f}h, {tstats.length / 1000:.2f}km, mean gs {np.mean(tstats.gs):.2f} m/s')
         ax[0, 0].legend()
         plt.show()
 
@@ -160,7 +160,8 @@ class PostProcessing:
             cw[i] = np.cross(e_dx, w)
             tw[i] = e_dx @ w
             controls[i] = u
-            duration += dx_norm / gs_v
+            factor = EARTH_RADIUS if self.coords == 'gcs' else 1.
+            duration += factor * dx_norm / gs_v
 
         tstats = TrajStats(length, duration, gs, cw, tw, controls)
         return tstats

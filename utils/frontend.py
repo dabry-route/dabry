@@ -265,6 +265,7 @@ class FrontendHandler:
             self.display.load_all()
             self.display.setup()
             self.display.draw_wind()
+            #self.display.draw_calibration()
         else:
             Display._info(f'Using default setup script for unknown case "{self.case_name}"')
             self.display.nocontrols = True
