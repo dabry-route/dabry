@@ -70,9 +70,9 @@ class Wind:
         #     exit(1)
         # Bounds may not be in the right order if wind is dualized
         t_min, t_max = min(self.t_start, self.t_end), max(self.t_start, self.t_end)
-        if t < t_min:
-            #print(f'Time {t} lower than lower time bound {t_min}', file=sys.stderr)
-            #warnings.warn(UserWarning('Probably considering wind as steady'))
+        if t <= t_min:
+            # print(f'Time {t} lower than lower time bound {t_min}', file=sys.stderr)
+            # warnings.warn(UserWarning('Probably considering wind as steady'))
             return 0, 0.
         if t > t_max:
             # Freeze wind to last frame
@@ -383,12 +383,12 @@ class DiscreteWind(Wind):
         delta_y = (self.y_max - self.y_min) / (self.ny - 1)
         self.ts = np.zeros((self.nt,))
         for k in range(nt):
-            if wind.nt > 1:
+            if wind.t_end is not None:
                 self.ts[k] = wind.t_start + (k / (self.nt - 1)) * (wind.t_end - wind.t_start)
             for i in range(self.nx):
                 for j in range(self.ny):
                     point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
-                    if wind.nt > 1:
+                    if wind.t_end is not None:
                         self.uv[k, i, j, :] = wind.value(self.ts[k], point)
                     else:
                         self.uv[k, i, j, :] = wind.value(wind.t_start, point)
@@ -641,7 +641,7 @@ class DiscreteWind(Wind):
         wind = DiscreteWind()
         bl = (self.x_min, self.y_min)
         tr = (self.x_max, self.y_max)
-        wind.load_from_wind(1. * self, self.nx, self.ny, bl, tr, self.coords)
+        wind.load_from_wind(-1. * self, self.nx, self.ny, bl, tr, self.coords)
         if self.t_end is not None:
             wind.t_start = self.t_end
             wind.t_end = self.t_start
@@ -747,62 +747,80 @@ class VortexWind(Wind):
 
 class RankineVortexWind(Wind):
 
-    def __init__(self,
-                 x_omega: float,
-                 y_omega: float,
-                 gamma: float,
-                 radius: float):
+    def __init__(self, center, gamma, radius, t_start=0., t_end=None):
         """
         A vortex from potential theory
 
-        :param x_omega: x_coordinate of vortex center in m
-        :param y_omega: y_coordinate of vortex center in m
-        :param gamma: Circulation of the vortex in m^2/s. Positive is ccw vortex.
-        :param radius: Radius of the vortex core in meters.
+        :param center: Coordinates of the vortex center in m. Shape (2,) if steady else shape (nt, 2)
+        :param gamma: Circulation of the vortex in m^2/s. Positive is ccw vortex. Scalar for steady vortex
+        else shape (nt,)
+        :param radius: Radius of the vortex core in meters. Scalar for steady vortex else shape (nt,)
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
-        self.x_omega = x_omega
-        self.y_omega = y_omega
-        self.omega = np.array([x_omega, y_omega])
-        self.gamma = gamma
-        self.radius = radius
+        time_varying = False
+        nt = 1
+        if len(center.shape) > 1:
+            time_varying = True
+            nt = center.shape[0]
+        if time_varying and t_end is None:
+            print('Missing t_end', file=sys.stderr)
+            exit(1)
+        super().__init__(value_func=self.value, d_value_func=self.d_value, t_start=t_start, t_end=t_end, nt=nt)
+
+        self.omega = np.array(center)
+        self.gamma = np.array(gamma)
+        self.radius = np.array(radius)
+        if time_varying and not (self.omega.shape[0] == self.gamma.shape[0] == self.radius.shape[0]):
+            print('Incoherent sizes', file=sys.stderr)
+            exit(1)
         self.zero_ceil = 1e-3
         self.descr = f'Rankine vortex'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
         self.is_analytical = True
 
-    def max_speed(self):
-        return self.gamma / (self.radius * 2 * np.pi)
+    def max_speed(self, t=0.):
+        _, gamma, radius = self.params(t)
+        return gamma / (radius * 2 * np.pi)
+
+    def params(self, t):
+        if self.t_end is None:
+            return self.omega, self.gamma, self.radius
+        i, alpha = self._index(t)
+        omega = (1 - alpha) * self.omega[i] + alpha * self.omega[i + 1]
+        gamma = (1 - alpha) * self.gamma[i] + alpha * self.gamma[i + 1]
+        radius = (1 - alpha) * self.radius[i] + alpha * self.radius[i + 1]
+        return omega, gamma, radius
 
     def value(self, t, x):
-        r = np.linalg.norm(x - self.omega)
-        if r < self.zero_ceil * self.radius:
+        omega, gamma, radius = self.params(t)
+        r = np.linalg.norm(x - omega)
+        if r < self.zero_ceil * radius:
             return np.zeros(2)
-        e_theta = np.array([-(x - self.omega)[1] / r,
-                            (x - self.omega)[0] / r])
-        f = self.gamma / (2 * np.pi)
-        if r <= self.radius:
-            return f * r / (self.radius ** 2) * e_theta
+        e_theta = np.array([-(x - omega)[1] / r,
+                            (x - omega)[0] / r])
+        f = gamma / (2 * np.pi)
+        if r <= radius:
+            return f * r / (radius ** 2) * e_theta
         else:
             return f * 1 / r * e_theta
 
     def d_value(self, t, x):
-        r = np.linalg.norm(x - self.omega)
-        if r < self.zero_ceil * self.radius:
+        omega, gamma, radius = self.params(t)
+        r = np.linalg.norm(x - omega)
+        if r < self.zero_ceil * radius:
             return np.zeros((2, 2))
-        x_omega = self.x_omega
-        y_omega = self.y_omega
-        e_r = np.array([(x - self.omega)[0] / r,
-                        (x - self.omega)[1] / r])
-        e_theta = np.array([-(x - self.omega)[1] / r,
-                            (x - self.omega)[0] / r])
-        f = self.gamma / (2 * np.pi)
-        if r <= self.radius:
-            a = (x - self.omega)[0]
-            b = (x - self.omega)[1]
+        x_omega = omega[0]
+        y_omega = omega[1]
+        e_r = np.array([(x - omega)[0] / r,
+                        (x - omega)[1] / r])
+        e_theta = np.array([-(x - omega)[1] / r,
+                            (x - omega)[0] / r])
+        f = gamma / (2 * np.pi)
+        if r <= radius:
+            a = (x - omega)[0]
+            b = (x - omega)[1]
             d_e_theta__d_x = np.array([a * b / r ** 3, b ** 2 / r ** 3])
             d_e_theta__d_y = np.array([- a ** 2 / r ** 3, - a * b / r ** 3])
-            return f / self.radius ** 2 * np.stack((a / r * e_theta + r * d_e_theta__d_x,
-                                                    b / r * e_theta + r * d_e_theta__d_y), axis=1)
+            return f / radius ** 2 * np.stack((a / r * e_theta + r * d_e_theta__d_x,
+                                               b / r * e_theta + r * d_e_theta__d_y), axis=1)
         else:
             return f / r ** 4 * \
                    np.array([[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
@@ -945,10 +963,10 @@ class PointSymWind(Wind):
         self.mat = np.array([[gamma, -omega], [omega, gamma]])
         self.is_analytical = True
 
-    def value(self, x):
+    def value(self, t, x):
         return self.mat @ (x - self.center)
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         return self.mat
 
 
@@ -1149,8 +1167,10 @@ class LCWind(Wind):
                     nt = wind.nt
                     t_end = wind.t_end
                 else:
-                    print('Cannot handle combination of multiple time-varying winds for the moment', file=sys.stderr)
-                    exit(1)
+                    if wind.nt != nt or wind.t_end != t_end:
+                        print('Cannot handle combination of multiple time-varying winds with'
+                              ' different parameters for the moment', file=sys.stderr)
+                        exit(1)
         self.nt = nt if nt is not None else 1
         self.t_end = t_end
 

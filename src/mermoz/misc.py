@@ -1,4 +1,6 @@
 import sys
+import time
+
 import numpy as np
 from math import pi, acos, cos, sin, floor, atan2
 
@@ -38,6 +40,49 @@ def rectify(a, b):
     if aa > bb:
         bb += 360.
     return aa, bb
+
+
+def ang_principal(a):
+    """
+    Bring angle to ]-pi,pi]
+    :param a: Angle in radians
+    :return: Equivalent angle in the target interval
+    """
+    return np.angle(np.cos(a) + 1j * np.sin(a))
+
+
+def angular_diff(a1, a2):
+    """
+    The measure of real angular difference between a1 and a2
+    :param a1: First angle in radians
+    :param a2: Second angle in radians
+    :return: Angular difference
+    """
+    b1 = ang_principal(a1)
+    b2 = ang_principal(a2)
+    if abs(b2 - b1) <= np.pi:
+        return abs(b2 - b1)
+    else:
+        return 2 * np.pi - abs(b2 - b1)
+
+
+def linspace_sph(a1, a2, N):
+    """
+    Return a ndarray consisting of a linspace of angles between the two angles
+    but distributed on the geodesic between angles on the circle (shortest arc)
+    :param a1: First angle in radians
+    :param a2: Second angle in radians
+    :param N: Number of discretization points
+    :return: ndarray of angles in radians
+    """
+    b1 = ang_principal(a1)
+    b2 = ang_principal(a2)
+    b_min = min(b1, b2)
+    delta_b = angular_diff(b1, b2)
+    if abs(b2 - b1) <= np.pi:
+        return np.linspace(b_min, b_min + delta_b, N)
+    else:
+        return np.linspace(b_min - delta_b, b_min, N)
 
 
 TRAJ_PMP = 'pmp'
@@ -145,7 +190,7 @@ def d_proj_ortho_inv(x, y, lon0, lat0):
     det = EARTH_RADIUS ** 2 * (np.cos(lat0) * np.cos(lat) ** 2 * np.cos(lon - lon0) +
                                np.sin(lat0) * np.sin(lat) * np.cos(lat))
     dp = d_proj_ortho(lon, lat, lon0, lat0)
-    return 1/det * np.array(((dp[1, 1], -dp[0, 1]), (-dp[1, 0], dp[0, 0])))
+    return 1 / det * np.array(((dp[1, 1], -dp[0, 1]), (-dp[1, 0], dp[0, 0])))
 
 
 def middle(x1, x2, coords):
@@ -264,3 +309,22 @@ def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
                       points.shape[0] - 1,
                       coords=COORD_CARTESIAN,
                       type='optimal')
+
+
+class Chrono:
+    def __init__(self, no_verbose=False):
+        self.t_start = 0.
+        self.t_end = 0.
+        self.verbose = not no_verbose
+
+    def start(self, msg=''):
+        if self.verbose:
+            print(f'[*] {msg}')
+        self.t_start = time.time()
+
+    def stop(self):
+        self.t_end = time.time()
+        diff = self.t_end - self.t_start
+        if self.verbose:
+            print(f'[*] Done ({diff:.3f}s)')
+        return diff

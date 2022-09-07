@@ -186,6 +186,16 @@ class MermozProblem:
     def middle(self, x1, x2):
         return middle(x1, x2, self.coords)
 
+    def control_angle(self, adjoint, state=None):
+        if self.coords == COORD_CARTESIAN:
+            # angle to x-axis in trigonometric angle
+            return np.arctan2(*(-adjoint)[::-1])
+        else:
+            # gcs, angle from north in cw order
+            mat = np.diag((1 / np.cos(state[1]), 1.))
+            pl = mat @ adjoint
+            return np.pi / 2. - np.arctan2(*-pl[::-1])
+
     def eliminate_trajs(self, target, tol: float):
         """
         Delete trajectories that are too far from the objective point
@@ -238,9 +248,11 @@ class IndexedProblem(MermozProblem):
         7: ['San-Juan Dublin Ortho', 'sanjuan-dublin-ortho'],
         8: ['Big Rankine vortex', 'big_rankine'],
         9: ['Four vortices', '4vor'],
-        10: ['One obstacle', '1obs'],
-        11: ['Moving obstacle', 'movobs'],
-        12: ['Time-varying linear wind', 'tvlinear']
+        10: ['Moving_vortex', 'movor'],
+        11: ['One obstacle', '1obs'],
+        12: ['Moving obstacle', 'movobs'],
+        13: ['Time-varying linear wind', 'tvlinear'],
+        14: ['Moving vortices', 'movors']
     }
 
     def __init__(self, i, seed=0):
@@ -277,9 +289,9 @@ class IndexedProblem(MermozProblem):
                         omega3 = factor * np.array(list(map(float, row)))
                         break
 
-            vortex1 = RankineVortexWind(omega1[0], omega1[1], factor * factor_speed * -1., factor * 1e-1)
-            vortex2 = RankineVortexWind(omega2[0], omega2[1], factor * factor_speed * -0.8, factor * 1e-1)
-            vortex3 = RankineVortexWind(omega3[0], omega3[1], factor * factor_speed * 0.8, factor * 1e-1)
+            vortex1 = RankineVortexWind(omega1, factor * factor_speed * -1., factor * 1e-1)
+            vortex2 = RankineVortexWind(omega2, factor * factor_speed * -0.8, factor * 1e-1)
+            vortex3 = RankineVortexWind(omega3, factor * factor_speed * 0.8, factor * 1e-1)
             const_wind = UniformWind(np.array([0., 0.]))
 
             alty_wind = 3. * const_wind + vortex1 + vortex2 + vortex3
@@ -430,11 +442,11 @@ class IndexedProblem(MermozProblem):
             obs_center = [c1, c2, c3]
             obs_radius = sf * np.array((0.13, 0.13, 0.13))
             phi_obs = {}
-            for i in range(obs_radius.shape[0]):
-                def f(t, x, c=obs_center[i], r=obs_radius[i]):
+            for j in range(obs_radius.shape[0]):
+                def f(t, x, c=obs_center[j], r=obs_radius[j]):
                     return (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
 
-                phi_obs[i] = f
+                phi_obs[j] = f
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, phi_obs=phi_obs, bl=bl, tr=tr)
 
@@ -477,8 +489,8 @@ class IndexedProblem(MermozProblem):
             omega = factor * np.array(((0.2, -0.2), (0.8, 0.2)))
 
             vortex = [
-                RankineVortexWind(omega[0][0], omega[0][1], factor * factor_speed * -7., factor * 1.),
-                RankineVortexWind(omega[1][0], omega[1][1], factor * factor_speed * -7., factor * 1.)
+                RankineVortexWind(omega[0], factor * factor_speed * -7., factor * 1.),
+                RankineVortexWind(omega[1], factor * factor_speed * -7., factor * 1.)
             ]
             const_wind = UniformWind(np.array([0., 0.]))
 
@@ -510,7 +522,7 @@ class IndexedProblem(MermozProblem):
                                        (0.5, -0.5)))
             strength = factor * factor_speed * np.array([1., -1., 1.5, -1.5])
             radius = factor * np.array([1e-1, 1e-1, 1e-1, 1e-1])
-            vortices = [RankineVortexWind(omega[i, 0], omega[i, 1], strength[i], radius[i]) for i in range(len(omega))]
+            vortices = [RankineVortexWind(omega[i], strength[i], radius[i]) for i in range(len(omega))]
             const_wind = UniformWind(np.array([0., 0.]))
 
             alty_wind = sum(vortices, const_wind)
@@ -523,6 +535,33 @@ class IndexedProblem(MermozProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
 
         elif i == 10:
+            v_a = 23.
+            coords = COORD_CARTESIAN
+
+            factor = 1e6
+            factor_speed = v_a
+
+            x_init = factor * np.array([0., 0.])
+            x_target = factor * np.array([1., 0.])
+            nt = 10
+            xs = np.linspace(0.5, 0.5, nt)
+            ys = np.linspace(-0.4, 0.4, nt)
+
+            omega = factor * np.stack((xs, ys), axis=1)
+            gamma = factor * factor_speed * -1. * np.ones(nt)
+            radius = factor * 1e-1 * np.ones(nt)
+
+            vortex = RankineVortexWind(omega, gamma, radius, t_end=1.*factor/v_a)
+            const_wind = UniformWind(np.array([0., 5.]))
+
+            total_wind = vortex
+
+            zermelo_model = ZermeloGeneralModel(v_a)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
+
+        elif i == 11:
 
             v_a = 23.
 
@@ -594,7 +633,7 @@ class IndexedProblem(MermozProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  phi_obs=phi_obs)
-        elif i == 11:
+        elif i == 12:
 
             v_a = 23.
 
@@ -658,7 +697,7 @@ class IndexedProblem(MermozProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, phi_obs=phi_obs)
             # phi_obs=phi_obs)
 
-        elif i == 12:
+        elif i == 13:
             v_a = 23.
             coords = COORD_CARTESIAN
 
@@ -686,7 +725,44 @@ class IndexedProblem(MermozProblem):
             zermelo_model.update_wind(linear_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+        elif i == 14:
+            v_a = 23.
+            coords = COORD_CARTESIAN
 
+            factor = 1e6
+            factor_speed = v_a
+
+            x_init = factor * np.array([0., 0.])
+            x_target = factor * np.array([1., 0.])
+            nt = 10
+            g = factor * factor_speed * -1.
+            r = factor * 1e-3
+            vortices = []
+            xvors = np.array((0.2, 0.4, 0.6, 0.8))
+            for k, xvor in enumerate(xvors):
+                xs = np.linspace(xvor, xvor, nt)
+                if k == 0:
+                    ys = np.linspace(-0.3, 0.1, nt)
+                elif k == 1:
+                    ys = np.linspace(-0.1, 0.5, nt)
+                elif k == 2:
+                    ys = np.linspace(-0.2, 0.4, nt)[::-1]
+                else:
+                    ys = np.linspace(-0.4, 0.2, nt)[::-1]
+
+                omega = factor * np.stack((xs, ys), axis=1)
+                gamma = g * np.ones(nt)
+                radius = r * np.ones(nt)
+
+                vortices.append(RankineVortexWind(omega, gamma, radius, t_end=1.*factor/v_a))
+            # const_wind = UniformWind(np.array([0., 5.]))
+
+            total_wind = LCWind(np.ones(xvors.shape[0]) / xvors.shape[0], tuple(vortices))
+
+            zermelo_model = ZermeloGeneralModel(v_a)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
         else:
             raise IndexError(f'No problem with index {i}')
 

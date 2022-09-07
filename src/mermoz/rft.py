@@ -223,8 +223,10 @@ class RFT:
             # New boundaries are defined as an encapsulating bounding box over the region defined
             # by (lon, lat) bottom left and top right corners
             # Define a dense grid of points within the (lon, lat) zone
-            x, y = np.meshgrid(RAD_TO_DEG * np.linspace(self.bl[0], self.tr[0], 100),
-                               RAD_TO_DEG * np.linspace(self.bl[1], self.tr[1], 100), indexing='ij')
+            x = RAD_TO_DEG * self.mp.model.wind.grid[:, :, 0]
+            y = RAD_TO_DEG * self.mp.model.wind.grid[:, :, 1]
+            # x, y = np.meshgrid(RAD_TO_DEG * np.linspace(self.bl[0], self.tr[0], 100),
+            #                    RAD_TO_DEG * np.linspace(self.bl[1], self.tr[1], 100), indexing='ij')
             # Project it
             x, y = self.proj(x, y)
 
@@ -355,6 +357,8 @@ class RFT:
 
                 grid = np.zeros(f['grid'].shape)
                 grid[:] = f['grid']
+
+
 
                 factor = DEG_TO_RAD if self.mp.coords == COORD_GCS else 1.
                 self.bl = factor * np.array((grid[:, :, 0].min(), grid[:, :, 1].min()))

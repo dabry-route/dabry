@@ -26,254 +26,12 @@ class FrontendHandler:
         self.mode = mode
         self.pp_params = {}
 
-    def configure(self, opti_only=False):
-        if self.case_name == 'example_geodesic':
-            self.display.set_title('Geodesic approximation with extremals')
-            bl = np.array([-76., 30.])
-            tr = np.array([5., 60.])
-            self.display.import_params()
-            self.display.set_coords('gcs')
-            self.display.setup(bl=bl, tr=tr)
-            self.display.draw_trajs(nolabels=True)
-            lon_ny, lat_ny = self.display.geodata.get_coords('New York')
-            lon_par, lat_par = self.display.geodata.get_coords('Paris')
-            self.display.map.drawgreatcircle(lon_ny, lat_ny, lon_par, lat_par, linewidth=1, color='b', alpha=0.4,
-                                             linestyle='--',
-                                             label='Great circle', zorder=4)
-            self.display.draw_point_by_name('New York')
-            self.display.draw_point_by_name('Paris')
-
-        elif self.case_name == 'example_solver_linearwind' or self.case_name == 'example_ft_linearwind':
-            self.display.set_coords('cartesian')
-            self.display.set_title('Analytic solution comparison')
-            self.display.setup()
-            self.display.import_params()
-            self.display.draw_wind()
-            self.display.draw_trajs()
-            self.display.draw_point(1e6, 0., label='Target')
-            if self.case_name == 'example_ft_linearwind':
-                self.display.draw_rff()
-
-        elif self.case_name == 'XXXexample_front_tracking':
-            self.display.set_coords('gcs')
-            self.display.set_title('Front tracking example')
-
-            self.display.setup(projection='lcc')
-
-            self.display.import_params()
-            self.display.draw_wind()
-            self.display.draw_rff(debug=False)
-            self.display.draw_trajs(nolabels=True)
-            self.display.draw_point_by_name('Natal')
-
-        elif self.case_name == 'XXXexample_front_tracking2' or self.case_name == 'example_front_tracking_linearinterp':
-            self.display.set_coords('gcs')
-            self.display.set_title('Front tracking example')
-
-            self.display.setup(projection='lcc')
-
-            self.display.import_params()
-            self.display.draw_wind()
-            self.display.draw_rff()
-            self.display.draw_trajs(nolabels=True)
-
-            self.display.draw_point_by_name('Tripoli')
-            self.display.draw_point_by_name('Athenes')
-
-        elif self.case_name == 'example_front_tracking3':
-            self.display.set_coords('gcs')
-            self.display.set_title('Front tracking example')
-
-            self.display.setup(projection='lcc')
-
-            self.display.import_params()
-            self.display.draw_wind()
-            self.display.draw_rff()
-            self.display.draw_trajs(nolabels=True)
-
-            self.display.draw_point_by_name('New York')
-            self.display.draw_point_by_name('Paris')
-
-        elif self.case_name == 'example_front_tracking4':
-            self.display.set_coords('gcs')
-            self.display.set_title('Front tracking example')
-
-            self.display.setup()
-
-            self.display.import_params()
-            self.display.draw_wind()
-            self.display.draw_rff()
-            self.display.draw_trajs(nolabels=True)
-
-        elif self.case_name == 'example_solver':
-            self.display.nocontrols = True
-            self.display.set_title('Solver test')
-            self.display.import_params()
-            self.display.setup()
-            self.display.draw_wind()
-            self.display.draw_trajs(nolabels=True)
-            self.display.draw_solver()
-            # self.display.legend()
-
-        elif self.case_name == 'example_ft_vor3':
-            self.display.nocontrols = True
-            self.display.set_coords('cartesian')
-            self.display.set_title('Front tracking on Rankine vortices')
-            self.display.setup()
-            self.display.import_params()
-            self.display.draw_wind()
-            self.display.draw_trajs(nolabels=True, filename='../example_solver/trajectories.h5')
-            self.display.draw_rff()
-
-        elif self.case_name == 'example_solver_dn':
-            self.display.nocontrols = True
-            self.display.set_title('Solver')
-            self.display.import_params()
-            self.display.setup(projection='lcc')
-            self.display.draw_wind()
-            self.display.draw_trajs(nolabels=False, opti_only=True)
-            self.display.draw_solver(labeling=False)
-            # lon_ny, lat_ny = self.display.geodata.get_coords('New York')
-            # lon_par, lat_par = self.display.geodata.get_coords('Paris')
-            # self.display.map.drawgreatcircle(lon_ny, lat_ny, lon_par, lat_par, linewidth=1, color='b', alpha=0.4,
-            #                                  linestyle='--',
-            #                                  label='Great circle', zorder=4)
-        elif self.case_name == 'example_solver_test':
-            self.display.nocontrols = True
-            self.display.set_title('Solver')
-            self.display.import_params()
-            self.display.setup(projection='ortho')
-            self.display.draw_wind()
-            self.display.draw_trajs(nolabels=False)
-            self.display.draw_solver()
-            lon_ny, lat_ny = self.display.geodata.get_coords('New York')
-            lon_par, lat_par = self.display.geodata.get_coords('Paris')
-            self.display.map.drawgreatcircle(lon_ny, lat_ny, lon_par, lat_par, linewidth=1, color='b', alpha=0.4,
-                                             linestyle='--',
-                                             label='Great circle', zorder=4)
-        elif 'XXXdouble-gyre-ku2016' in self.case_name or 'XXXdouble-gyre-li2020' in self.case_name:
-            self.display.nocontrols = True
-            self.display.set_title(f'{self.case_name.split("-")[-1]}')
-            self.display.import_params()
-            self.display.setup()
-            self.display.draw_wind(autoscale=True, wind_nointerp=True)
-            self.display.draw_trajs(nolabels=True, opti_only=opti_only)
-            self.display.draw_rff()
-            self.display.draw_solver()
-
-            # def on_plot_hover(event):
-            #     # Iterating over each data member plotted
-            #     for curve in self.display.mainax.get_lines():
-            #         # Searching which data member corresponds to current mouse position
-            #         if curve.contains(event)[0]:
-            #             with h5py.File(self.display.trajs_fpath, 'r') as f:
-            #                 value = RAD_TO_DEG * f[str(curve.get_gid())]["controls"][0]
-            #                 self.display.ax_info.set_text(str(value))
-            #                 print(f'{value}')
-            #             break
-            #
-            # self.display.mainfig.canvas.mpl_connect('motion_notify_event', on_plot_hover)
-
-        elif '3obs' in self.case_name:
-            self.display.nocontrols = True
-            self.display.set_title('3obs')
-            self.display.import_params()
-            self.display.setup()
-            self.display.draw_wind()
-            self.display.draw_trajs(nolabels=False, opti_only=False)
-            self.display.draw_solver()
-            self.display.draw_rff()
-        elif 'XXXbig_rankine' in self.case_name:
-            self.display.nocontrols = True
-            self.display.set_title('big-rankine')
-            self.display.import_params()
-            self.display.setup()
-            self.display.draw_wind(wind_nointerp=True)
-            self.display.draw_trajs(nolabels=False, opti_only=False)
-            self.display.draw_solver()
-            self.display.draw_rff(slice=(0, 5))
-
-        elif self.case_name in ['example_test_grib']:
-            self.display.nocontrols = True
-            self.display.set_title('Test grib')
-            self.display.import_params()
-            self.display.setup(projection='ortho')
-            self.display.draw_wind()
-            self.display.draw_trajs(nolabels=False, opti_only=False)
-            # self.display.draw_solver()
-            # self.display.draw_rff()
-
-        elif self.case_name in ['example_test_flatten']:
-            self.display.nocontrols = True
-            self.display.set_title('Test flatten')
-            self.display.import_params()
-            self.display.setup()
-            self.display.draw_wind(wind_nointerp=True)
-            # self.display.draw_trajs(nolabels=False, opti_only=False)
-            # self.display.draw_solver()
-            self.display.draw_rff()
-
-        elif self.case_name in ['example_solver_dakar-natal']:
-            self.display.nocontrols = True
-            self.display.set_title('Optimal trajectory between Dakar and Natal')
-            self.display.import_params()
-            self.display.setup()
-            self.display.draw_wind()
-            self.display.draw_trajs(nolabels=False, opti_only=False)
-            self.display.draw_solver(labeling=False)
-            # self.display.draw_rff()
-
-        elif self.case_name in ['example_test_flatten_ref']:
-            self.display.nocontrols = True
-            self.display.set_title('Test flatten')
-            self.display.import_params()
-            self.display.setup(projection='ortho')
-            self.display.draw_wind(wind_nointerp=True)
-            self.display.draw_trajs(nolabels=False, opti_only=False)
-            # self.display.draw_solver()
-            self.display.draw_rff()
-
-        elif self.case_name in ['XXXexample_solver_san-juan_dublin_ortho', 'XXXexample_solver-rp_sanjuan-dublin-ortho']:
-            self.display.nocontrols = True
-            self.display.set_title('Test flatten')
-            self.display.import_params()
-            self.display.setup()
-            self.display.draw_wind(wind_nointerp=True)
-            self.display.draw_trajs(nolabels=False, opti_only=False)
-            # self.display.draw_solver()
-            self.display.draw_rff(slice=(1, 10))
-        elif self.case_name in ['example_solver-rp_1obs']:
-            self.display.nocontrols = True
-            self.display.set_title('Test obstacle')
-            self.display.import_params()
-            self.display.setup()
-            self.display.draw_wind()
-            self.display.draw_trajs()
-
-        elif 'solver' in self.case_name:
-            Display._info(f'Using default solver setup script for unknown case "{self.case_name}"')
-            self.display.nocontrols = True
-            self.display.set_title(os.path.basename(self.output_path))
-            self.display.import_params()
-            self.display.load_all()
-            self.display.setup()
-            self.display.draw_all()
-        elif 'wf' in self.case_name:
-            Display._info(f'Using default wind field setup script for unknown case "{self.case_name}"')
-            self.display.set_title(os.path.basename(self.output_path))
-            self.display.import_params()
-            self.display.load_all()
-            self.display.setup()
-            self.display.draw_wind()
-            #self.display.draw_calibration()
-        else:
-            Display._info(f'Using default setup script for unknown case "{self.case_name}"')
-            self.display.nocontrols = True
-            self.display.set_title(os.path.basename(self.output_path))
-            self.display.import_params()
-            self.display.load_all()
-            self.display.setup()
-            self.display.draw_all()
+    def configure(self):
+        self.display.set_title(os.path.basename(self.output_path))
+        self.display.import_params()
+        self.display.load_all()
+        self.display.setup()
+        self.display.draw_all()
 
     def select_example(self, *args, latest=False):
         if self.mode == 'user':
@@ -351,7 +109,7 @@ class FrontendHandler:
                 with open(cache_fp, 'w') as f:
                     f.writelines(sel_dir)
 
-    def run_frontend(self, ex_name=None, noparams=True, opti_only=False, noshow=False):
+    def run_frontend(self, ex_name=None, noparams=True, noshow=False):
         # if self.mode == 'default':
         #     if ex_name is None:
         #         self.output_path = easygui.diropenbox(default=os.path.join('..', 'output'))
@@ -371,7 +129,7 @@ class FrontendHandler:
 
         self.display = Display()
         self.display.set_output_path(self.output_path)
-        self.configure(opti_only=opti_only)
+        self.configure()
         self.display.update_title()
         if not noshow:
             self.display.show(noparams=noparams)

@@ -23,9 +23,10 @@ class MDFmanager:
             os.mkdir(output_dir)
         self.output_dir = output_dir
 
-    def clean_output_dir(self, keep_rff=False):
+    def clean_output_dir(self, keep_rff=False, keep_wind=False):
         for filename in os.listdir(self.output_dir):
-            if not keep_rff or not filename.endswith('rff.h5'):
+            if (not (keep_rff and filename.endswith('rff.h5'))) and\
+                    (not (keep_wind and filename.endswith('wind.h5'))):
                 os.remove(os.path.join(self.output_dir, filename))
 
     def dump_trajs(self, traj_list, filename=None):
@@ -36,7 +37,6 @@ class MDFmanager:
             if len(f.keys()) != 0:
                 index = int(max(f.keys(), key=int)) + 1
             for i, traj in enumerate(traj_list):
-                nt = traj.timestamps.shape[0]
                 trajgroup = f.create_group(str(index + i))
                 trajgroup.attrs['type'] = traj.type
                 trajgroup.attrs['coords'] = traj.coords
@@ -44,19 +44,19 @@ class MDFmanager:
                 trajgroup.attrs['last_index'] = traj.last_index
                 trajgroup.attrs['label'] = traj.label
                 trajgroup.attrs['info'] = traj.info
+                n = traj.last_index + 1
+                dset = trajgroup.create_dataset('data', (n, 2), dtype='f8')
+                dset[:, :] = traj.points[:n]
 
-                dset = trajgroup.create_dataset('data', (nt, 2), dtype='f8')
-                dset[:, :] = traj.points
+                dset = trajgroup.create_dataset('ts', (n,), dtype='f8')
+                dset[:] = traj.timestamps[:n]
 
-                dset = trajgroup.create_dataset('ts', (nt,), dtype='f8')
-                dset[:] = traj.timestamps
-
-                dset = trajgroup.create_dataset('controls', (nt,), dtype='f8')
-                dset[:] = traj.controls
+                dset = trajgroup.create_dataset('controls', (n,), dtype='f8')
+                dset[:] = traj.controls[:n]
 
                 if hasattr(traj, 'adjoints'):
-                    dset = trajgroup.create_dataset('adjoints', (nt, 2), dtype='f8')
-                    dset[:, :] = traj.adjoints
+                    dset = trajgroup.create_dataset('adjoints', (n, 2), dtype='f8', fillvalue=0.)
+                    dset[:, :] = traj.adjoints[:n]
 
     def _grib_date_to_unix(self, grib_filename):
         date, hm = grib_filename.split('_')[2:4]

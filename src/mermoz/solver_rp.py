@@ -43,7 +43,7 @@ class SolverRP:
         self.geod_l = distance(self.x_init, self.x_target, coords=self.mp.coords)
 
         if max_time is None:
-            self.T = 1.2 * self.geod_l / mp.model.v_a
+            self.T = 1.5 * self.geod_l / mp.model.v_a
         else:
             self.T = max_time
 
@@ -58,25 +58,19 @@ class SolverRP:
 
         self.rft = RFT(bl_rft, tr_rft, self.T, nx_rft, ny_rft, nt_rft, mp, kernel='matlab')
 
-        self.mp_dual = mp.dualize()
+    def control(self, x, backward=False):
+        return self.rft.control(x, backward)
 
     def solve(self):
-        print(f"Tracking reachability front ({self.nx_rft}x{self.ny_rft}x{self.nt_rft})... ")
-        t_start = time.time()
         self.rft.compute()
-        t_end = time.time()
-        time_rft = t_end - t_start
 
-        tu = self.rft.get_time(self.mp.x_target)
-        tl = self.mp.model.wind.t_start
-        self.mp_dual.load_feedback(FunFB(lambda x: self.rft.control(x, backward=True)))
-        sc = DistanceSC(lambda x: self.mp.distance(x, self.mp_dual.x_target), self.mp._geod_l / 100.)
-        traj = self.mp_dual.integrate_trajectory(self.mp_dual.x_init, sc, 1000, (tu - tl)/999, backward=True, t_init=tu)
-        li = traj.last_index
-        traj.timestamps[:li + 1] = traj.timestamps[:li + 1][::-1]
-        traj.points[:li + 1] = traj.points[:li + 1][::-1]
-        traj.type = TRAJ_OPTIMAL
-        traj.info = 'RFT'
-        #self.mp.trajs.append(self.rft.backward_traj(self.mp.x_target, self.mp.x_init, self.opti_ceil,
-        #                                            self.T, self.mp.model, N_disc=1000))
-        print(f"Done ({time_rft:.3f} s)")
+        # tu = self.rft.get_time(self.mp.x_target)
+        # tl = self.mp.model.wind.t_start
+        # self.mp.load_feedback(FunFB(lambda x: self.rft.control(x, backward=True)))
+        # sc = DistanceSC(lambda x: self.mp.distance(x, self.mp.x_init), self.mp._geod_l / 100.)
+        # traj = self.mp.integrate_trajectory(self.mp.x_target, sc, 1000, (tu - tl)/999, backward=True, t_init=tu)
+        # li = traj.last_index
+        # traj.timestamps[:li + 1] = traj.timestamps[:li + 1][::-1]
+        # traj.points[:li + 1] = traj.points[:li + 1][::-1]
+        # traj.type = TRAJ_OPTIMAL
+        # traj.info = 'RFT'

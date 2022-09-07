@@ -1,4 +1,6 @@
 # from heapq import heappush, heappop
+import sys
+
 import numpy as np
 from math import atan2
 from shapely.geometry import Polygon, Point
@@ -8,7 +10,6 @@ from mermoz.model import ZermeloGeneralModel
 from mermoz.problem import MermozProblem
 from mermoz.shooting import Shooting
 from mermoz.trajectory import AugmentedTraj
-
 
 
 def heappush(a, b):
@@ -91,9 +92,13 @@ class SolverEF:
     Solver for the navigation problem using progressive extremal field computation
     """
 
-    def __init__(self, mp: MermozProblem, max_time, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30, hard_obstacles=True):
+    def __init__(self, mp: MermozProblem, max_time, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30,
+                 hard_obstacles=True):
         self.mp_primal = mp
-        self.mp_dual = mp.dualize()
+        self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
+        mem = np.array(self.mp_dual.x_init)
+        self.mp_dual.x_init = np.array(self.mp_dual.x_target)
+        self.mp_dual.x_target = np.array(mem)
 
         self.N_disc_init = N_disc_init
         # Neighbouring distance ceil
@@ -111,14 +116,18 @@ class SolverEF:
         self.lsets = []
         self.rel = None
         self.n_points = 0
+        self.parents_primal = {}
+        self.parents_dual = {}
 
         self.trajs_primal = {}
         self.trajs_dual = {}
+        self.trajs_control = {}
+        self.trajs_add_info = {}
         # Default mode is dual problem
         self.mode_primal = False
         self.mp = self.mp_dual
         self.trajs = self.trajs_dual
-        self.max_extremals = 1000
+        self.max_extremals = 10000
         self.max_time = max_time
 
         self.it = 0
@@ -135,15 +144,28 @@ class SolverEF:
 
         self.debug = False
 
-
-    def new_index(self):
+    def new_traj_index(self, par1=None, par2=None):
+        if sum((par1 is None, par2 is None)) == 1:
+            print('Error in new index creation : one of the two parents is None', file=sys.stderr)
+            exit(1)
         if self.mode_primal:
             i = self._index_p
+            self.parents_primal[i] = (par1, par2)
             self._index_p += 1
         else:
             i = self._index_d
+            self.parents_dual[i] = (par1, par2)
             self._index_d += 1
         return i
+
+    def ancestors(self, i):
+        if self.mode_primal:
+            p1, p2 = self.parents_primal[i]
+        else:
+            p1, p2 = self.parents_dual[i]
+        if p1 is None:
+            return set()
+        return {p1, p2}.union(self.ancestors(p1)).union(self.ancestors(p2))
 
     def set_primal(self, b):
         self.mode_primal = b
@@ -158,7 +180,7 @@ class SolverEF:
             if self.dt > 0:
                 self.dt *= -1
 
-    def setup(self):
+    def setup(self, time_offset=0.):
         """
         Push all possible angles to active list from init point
         :return: None
@@ -170,14 +192,11 @@ class SolverEF:
         self.rel = None
         self.it = 0
         self.n_points = 0
-        if self.mode_primal:
-            t_start = self.mp_primal.model.wind.t_start
-        else:
-            t_start = self.mp_primal.model.wind.t_start + self.max_time
+        t_start = self.mp_primal.model.wind.t_start + time_offset
         for k in range(self.N_disc_init):
             theta = 2 * np.pi * k / self.N_disc_init
             p = np.array((np.cos(theta), np.sin(theta)))
-            i = self.new_index()
+            i = self.new_traj_index()
             self.p_inits[i] = np.zeros(2)
             self.p_inits[i][:] = p
             a = FrontPoint(i, (0, t_start, self.mp.x_init, p))
@@ -186,16 +205,19 @@ class SolverEF:
             self.trajs[k][a.tsa[0]] = a.tsa[1:]
         self.rel = Relations(list(np.arange(self.N_disc_init)))
 
-    def step_global(self):
-
-        # Build current front to test if next points fall into the latter
+    def build_cfront(self):
+        # Build current front
         i = self.rel.get_index()
         front = [list(self.trajs[i].values())[-1][1]]
         _, j = self.rel.get(i)
         while j != i:
             front.append(list(self.trajs[j].values())[-1][1])
             _, j = self.rel.get(j)
-        polyfront = Polygon(front)
+        return Polygon(front)
+
+    def step_global(self):
+        # Build current front to test if next points fall into the latter
+        polyfront = self.build_cfront()
 
         # Step the entire active list, look for domain violation and front collapse
         active_list = []
@@ -231,7 +253,7 @@ class SolverEF:
             _, iu = self.rel.get(na.i)
             if self.rel.is_active(iu):
                 # Case 1, both points are active and at least one lies out of an obstacle
-                if self.mp.distance(na.tsa[2], self.new_points[iu].tsa[2]) > self.abs_nb_ceil\
+                if self.mp.distance(na.tsa[2], self.new_points[iu].tsa[2]) > self.abs_nb_ceil \
                         and (na.i_obs < 0 or self.new_points[iu].i_obs < 0):
                     if self.debug:
                         print(f'Stepping between {na.i}, {iu}')
@@ -256,14 +278,18 @@ class SolverEF:
         pl = self.trajs[ill][it]
         pu = self.trajs[iuu][it]
 
-        thetal = atan2(*pl[2][::-1])
-        thetau = atan2(*pu[2][::-1])
-        thetal, thetau = DEG_TO_RAD * np.array(rectify(RAD_TO_DEG * thetal, RAD_TO_DEG * thetau))
+        thetal = np.arctan2(*pl[2][::-1])
+        thetau = np.arctan2(*pu[2][::-1])
+        #thetal, thetau = DEG_TO_RAD * np.array(rectify(RAD_TO_DEG * thetal, RAD_TO_DEG * thetau))
         rhol = np.linalg.norm(pl[2])
         rhou = np.linalg.norm(pu[2])
-        angles = np.linspace(thetal, thetau, self.N_filling_steps + 2)[1:-1]
+        angles = linspace_sph(thetal, thetau, self.N_filling_steps + 2)[1:-1]
+        f = 1.
+        if angles.shape[0] > 1:
+            if angles[1] < angles[0]:
+                f = -1.
         hdgs = np.array(list(map(lambda theta: np.array((np.cos(theta), np.sin(theta))), angles)))
-        rhos = np.linspace(rhol, rhou, self.N_filling_steps + 2)[1:-1]
+        rhos = f * np.linspace(rhol, rhou, self.N_filling_steps + 2)[1:-1]
         adjoints = np.einsum('i,ij->ij', rhos, hdgs)
         # TODO : write this scheme
         # Get samples for states as circle passing through borders
@@ -275,8 +301,8 @@ class SolverEF:
         points[:] = np.einsum('i,j->ij', 1 - alpha, pl[1]) \
                     + np.einsum('i,j->ij', alpha, pu[1])
         new_p_inits = np.einsum('i,j->ij', 1 - alpha, self.p_inits[ill]) \
-                    + np.einsum('i,j->ij', alpha, self.p_inits[iuu])
-        new_indexes = [self.new_index() for _ in range(self.N_filling_steps)]
+                      + np.einsum('i,j->ij', alpha, self.p_inits[iuu])
+        new_indexes = [self.new_traj_index(ill, iuu) for _ in range(self.N_filling_steps)]
         for k in range(self.N_filling_steps):
             if not self.mp.domain(points[k]):
                 continue
@@ -332,9 +358,10 @@ class SolverEF:
                 dx = self.mp._geod_l / 1e6
                 phi = self.mp.phi_obs[i_obs]
                 grad = np.array((1 / dx * (phi(t, x + np.array((dx, 0.))) - phi(t, x)),
-                                        1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
+                                 1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
                 n = grad / np.linalg.norm(grad)
                 # n = self.mp.grad_phi_obs[i_obs](x) / np.linalg.norm(self.mp.grad_phi_obs[i_obs](x))
+                # TODO : clarify angle definition for cartesian AND gcs
                 theta = atan2(*n[::-1])
                 u = theta + (-1. if not ccw else 1.) * acos(-self.mp.model.wind.value(t, x) @ n / self.mp.model.v_a)
                 dyn_x = self.mp.model.dyn.value(x, u, t)
@@ -356,57 +383,106 @@ class SolverEF:
                 ccw = np.cross(grad, dyn_x) > 0.
         return t, x, p, status, i_obs, ccw
 
-    def solve(self, exhaustive=False, verbose=False):
-        """
-        :param exhaustive: For complete coverage of state space by extremals
-        :param verbose: To print steps
-        :return: Minimum time to reach destination, corresponding global time index,
-        corresponding initial adjoint state
-        """
-        if verbose: self.debug = True
-        self.setup()
+    def propagate(self, time_offset=0., verbose=False):
+        self.setup(time_offset=time_offset)
         i = 0
         while len(self.active) != 0 and i < self.max_steps and len(self.trajs) < self.max_extremals:
             i += 1
             if verbose:
                 print(i)
             self.step_global()
+        msg = ''
         if i == self.max_steps:
-            print(f'Stopped on iteration limit {self.max_steps}')
+            msg = f'Stopped on iteration limit {self.max_steps}'
         elif len(self.trajs) == self.max_extremals:
-            print(f'Stopped on extremals limit {self.max_extremals}')
+            msg = f'Stopped on extremals limit {self.max_extremals}'
         else:
-            print(f'Stopped empty active list')
-        print(f'Steps : {i}, Extremals : {len(self.trajs)}, Points : {self.n_points}')
-        if not self.mode_primal:
-            k0 = None
-            m = None
-            iit_opt = 0
-            for k, traj in self.trajs.items():
-                for iit in traj.keys():
-                    candidate = self.mp.distance(traj[iit][1], self.mp.x_target)
-                    if m is None or m > candidate:
-                        m = candidate
-                        k0 = k
-                        iit_opt = iit
-            self.reach_time = self.mp_primal.model.wind.t_start + self.max_time - self.trajs[k0][iit_opt][0]
-            return self.reach_time, iit_opt, self.p_inits[k0]
-
-    def control(self, x):
+            msg = f'Stopped empty active list'
+        print(f'Steps : {i}, Extremals : {len(self.trajs)}, Points : {self.n_points}, {msg}')
+        k0 = None
         m = None
-        p = np.zeros(2)
+        iit_opt = 0
+        for k, traj in self.trajs.items():
+            for iit in traj.keys():
+                candidate = self.mp.distance(traj[iit][1], self.mp.x_target)
+                if m is None or m > candidate:
+                    m = candidate
+                    k0 = k
+                    iit_opt = iit
+        if self.mode_primal:
+            self.reach_time = self.trajs[k0][iit_opt][0] - self.mp_primal.model.wind.t_start
+        else:
+            self.reach_time = self.mp_primal.model.wind.t_start + time_offset - self.trajs[k0][iit_opt][0]
+        return self.reach_time, iit_opt, self.p_inits[k0]
+
+    def prepare_control_law(self):
+        # For the control law, keep only trajectories close to the goal
         for k, v in self.trajs_dual.items():
+            m = None
             for vv in v.values():
-                candidate = self.mp.distance(vv[1], x)
+                candidate = self.mp.distance(vv[1], self.mp_primal.x_init)
                 if m is None or candidate < m:
                     m = candidate
-                    p[:] = vv[2]
-        if self.mp.coords == COORD_CARTESIAN:
-            return atan2(*-p[::-1])
+            if m < self.mp._geod_l * 0.1:
+                self.trajs_control[k] = v
+                self.trajs_add_info[k] = 'control'
+        # Add parent trajectories
+        parents_set = set()
+        for k in self.trajs_control.keys():
+            parents_set = parents_set.union(self.ancestors(k))
+        for kp in parents_set:
+            self.trajs_control[kp] = self.trajs_dual[kp]
+            self.trajs_add_info[kp] = 'control'
+
+    def solve(self, exhaustive=False, verbose=False, no_fast=False, no_prepare_control=False):
+        """
+        :param exhaustive: For complete coverage of state space by extremals
+        :param verbose: To print steps
+        :param no_fast: When problem is not time-varying, do not skip forward extremals
+        :param no_prepare_control: After computation, a trajectory selection is performed unless this option
+        is set to True
+        :return: Minimum time to reach destination, corresponding global time index,
+        corresponding initial adjoint state
+        """
+        if verbose: self.debug = True
+
+        if not no_fast and self.mp.model.wind.t_end is None:
+            # Problem is steady
+            # Compute only backward extremals and return
+            self.set_primal(False)
+            res = self.propagate(verbose)
+            if not no_prepare_control:
+                self.prepare_control_law()
+            return res
         else:
-            mat = np.diag((1/np.cos(x[1]), 1.))
-            pl = mat @ p
-            return np.pi / 2. - atan2(*-pl[::-1])
+            # Problem is time-varying
+            # First propagate forward extremals
+            # Then compute backward extremals initialized at correct time
+            # to get a closed-loop control law
+            self.set_primal(True)
+            self.propagate(verbose)
+            polyfront = self.build_cfront()
+            if not polyfront.contains(Point(*self.mp.x_target)):
+                print('Warning : EF not containing target', file=sys.stderr)
+            # Now than forward pass is completed, run the backward pass with correct start time
+            self.set_primal(False)
+            res = self.propagate(time_offset=self.reach_time, verbose=verbose)
+            if not no_prepare_control:
+                self.prepare_control_law()
+            return res
+
+    def control(self, t, x):
+        m = None
+        p = np.zeros(2)
+        for k, v in self.trajs_control.items():
+            for vv in v.values():
+                tt = vv[0]
+                if tt - t <= 10*abs(self.dt):
+                    candidate = self.mp.distance(vv[1], x)
+                    if m is None or candidate < m:
+                        m = candidate
+                        p[:] = vv[2]
+        return self.mp.control_angle(p, x)
 
     def get_trajs(self, primal_only=False, dual_only=False):
         res = []
@@ -422,16 +498,25 @@ class SolverEF:
                 points = np.zeros((n, 2))
                 adjoints = np.zeros((n, 2))
                 controls = np.zeros(n)
-                # If wind is steady, offset timestamps to have a <self.reach_time>-long window
                 offset = 0.
                 if self.mp_primal.model.wind.t_end is None and i == 0:
-                    offset = self.reach_time - self.max_time
+                    # If wind is steady, offset timestamps to have a <self.reach_time>-long window
+                    # For dual trajectories
+                    offset = 0.  # self.reach_time  # - self.max_time
                 for k, e in enumerate(list(t.values())):
                     timestamps[k] = e[0] + offset
                     points[k, :] = e[1]
                     adjoints[k, :] = e[2]
+                    controls[k] = self.mp.control_angle(e[2], e[1])
+                add_info = ''
+                if i == 0:
+                    try:
+                        add_info = '_' + self.trajs_add_info[it]
+                    except KeyError:
+                        pass
                 res.append(
-                    AugmentedTraj(timestamps, points, adjoints, controls, last_index=n-1, coords=self.mp.coords, label=it,
-                                  type=TRAJ_PMP, info=f'ef_{i}'))
+                    AugmentedTraj(timestamps, points, adjoints, controls, last_index=n - 1, coords=self.mp.coords,
+                                  label=it,
+                                  type=TRAJ_PMP, info=f'ef_{i}{add_info}'))
 
         return res

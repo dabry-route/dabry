@@ -54,12 +54,12 @@ class IntEulerExpl(Integration):
         x = np.zeros(2)
         x[:] = x_init
         points[0, :] = x
-        controls[0] = self.feedback.value(x)
+        controls[0] = self.feedback.value(t, x)
         dt = self.int_step * (-1. if self.backward else 1.)
         while (i + 1 < self.max_iter) and (self.stop_cond is None or not self.stop_cond.value(t, x)):
             i += 1
             t += dt
-            u = self.feedback.value(x)
+            u = self.feedback.value(t, x)
             d_val = self.dyn.value(x, u, t)
             x += dt * d_val
             timestamps[i] = t

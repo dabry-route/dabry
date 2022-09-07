@@ -1,6 +1,8 @@
 import sys
 from abc import ABC, abstractmethod
 
+import numpy as np
+
 from mermoz.misc import *
 from mermoz.wind import Wind, LinearWind
 
@@ -88,7 +90,7 @@ class PCZermeloDyn(Dynamics):
         """
         super().__init__(wind)
         self.v_a = v_a
-        self.factor = 1/EARTH_RADIUS
+        self.factor = 1 / EARTH_RADIUS
 
     def value(self, x, psi, t):
         return self.factor * (
@@ -97,10 +99,10 @@ class PCZermeloDyn(Dynamics):
     def d_value__d_state(self, x, psi, t):
         wind_gradient = np.zeros((x.size, x.size))
         wind_gradient[:] = self.wind.d_value(t, x)
-        res = self.factor * np.vstack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
-                                       np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
-                                       (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)) +
-                                       np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1])).transpose()
+        res = self.factor * np.column_stack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
+                                             np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
+                                             (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)) +
+                                             np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1]))
         return res
 
     def __str__(self):

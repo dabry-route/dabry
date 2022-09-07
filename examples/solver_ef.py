@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import scipy.optimize
 
-from mermoz.feedback import FunFB, ConstantFB, TargetFB
+from mermoz.feedback import FunFB, ConstantFB, TargetFB, GreatCircleFB
 from mermoz.mdf_manager import MDFmanager
 from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *
@@ -19,14 +19,17 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 2, 0
-    cache = False
+    pb_id, seed = 0, 0
+    cache_rff = False
+    cache_wind = False
+
+    chrono = Chrono()
 
     # Create a file manager to dump problem data
     mdfm = MDFmanager()
     output_dir = f'/home/bastien/Documents/work/mermoz/output/example_solver-ef_{IndexedProblem.problems[pb_id][1]}'
     mdfm.set_output_dir(output_dir)
-    mdfm.clean_output_dir(keep_rff=cache)
+    mdfm.clean_output_dir(keep_rff=cache_rff, keep_wind=cache_wind)
 
     nx_rft = 101
     ny_rft = 101
@@ -34,29 +37,21 @@ if __name__ == '__main__':
 
     # Create problem
     # mdfm.dump_wind_from_grib2(grib_fps, bl, tr)
-    pb = DatabaseProblem('/home/bastien/Documents/data/wind/ncdc/tmp.mz/wind.h5')
-    # d_wind = DiscreteWind(interp='pwc')
-    # d_wind.load_from_wind(pb.model.wind, nx_rft, ny_rft, pb.bl, pb.tr, pb.coords)
-    # pb.model.wind = d_wind
+    # pb = DatabaseProblem('/home/bastien/Documents/data/wind/ncdc/tmp.mz/wind.h5')
+    pb = IndexedProblem(pb_id, seed=seed)
 
-    # _, nx_uv, ny_uv, _ = pb.model.wind.uv.shape
-    # pb.model.wind.uv = 0.01 * np.ones((1, nx_uv, ny_uv, 2))
-
-    # Log windfield to file
-    mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
+    if not cache_wind:
+        chrono.start('Dumping windfield to file')
+        mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
+        chrono.stop()
 
     # Setting the solver
-    solver = SolverEF(pb, 1.2 * pb._geod_l / pb.model.v_a, max_steps=400, hard_obstacles=not seed)
-    # solver = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
+    solver_ef = solver = SolverEF(pb, 1.2 * pb._geod_l / pb.model.v_a, max_steps=500, rel_nb_ceil=0.025)
 
-    t_start = time.time()
-    reach_time, iit, p_init = solver.solve()
-    print(f'iit : {iit}')
-    t_end = time.time()
-    time_ef = t_end - t_start
-    print(f'Dual EF solved in {time_ef:.3f}s')
-    solver.set_primal(True)
-    solver.solve()
+    chrono.start('Computing EF')
+    reach_time, iit, p_init = solver.solve(no_fast=True)
+    chrono.stop()
+    print(f'Reach time : {reach_time / 3600:.2f}')
 
     trajs = solver.get_trajs()
     # m = None
@@ -68,10 +63,10 @@ if __name__ == '__main__':
     #         k0 = k
 
     # solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
-    # if cache:
+    # if cache_rff:
     #     solver_rp.rft.load_cache(os.path.join(output_dir, 'rff.h5'))
     # solver_rp.solve()
-    # if not cache:
+    # if not cache_rff:
     # solver.rft.dump_rff(output_dir)
 
     """
@@ -106,31 +101,65 @@ if __name__ == '__main__':
         pb.trajs.append(traj)
     """
 
+    chrono.start('Optimal trajectory Extremals')
     pb.load_feedback(FunFB(solver.control))
-    args = (pb.model.wind.t_start + solver.max_time,) + \
-           (() if pb.model.wind.t_end is None else (pb.model.wind.t_end,))
-    sc = TimedSC(*args)
-    if pb.model.wind.t_end is None:
-        t_init = pb.model.wind.t_start
-    else:
-        t_init = pb.model.wind.t_start + solver.max_time - reach_time
-    print(f'{reach_time/ 3600:.2f}')
-
-    traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=t_init)
+    sc = TimedSC(pb.model.wind.t_start + solver.reach_time)
+    traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=pb.model.wind.t_start)
     traj.type = TRAJ_OPTIMAL
     traj.info = 'Extremals'
+    # traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit / 10, t_init=pb.model.wind.t_start)
+    # traj.type = TRAJ_OPTIMAL
+    # traj.info = 'Extremals10'
+    chrono.stop()
 
-    solver = SolverRP(pb, nx_rft, ny_rft, nt_rft, max_time=1.3 * pb._geod_l / pb.model.v_a)
-    solver.solve()
-    solver.rft.dump_rff(output_dir)
-    mdfm.dump_trajs(solver.mp_dual.trajs)
+    if not cache_rff:
+        chrono.start('Computing RFFs')
+        solver_rp = solver = SolverRP(pb, nx_rft, ny_rft, nt_rft)
+        solver.solve()
+        chrono.stop()
+        solver_rp.rft.dump_rff(output_dir)
 
+        chrono.start('Optimal trajectory RFF')
+        tu = solver.rft.get_time(pb.x_target)
+        pb.load_feedback(FunFB(lambda x: solver.control(x, backward=True), no_time=True))
+        sc = DistanceSC(lambda x: pb.distance(x, pb.x_init), pb._geod_l * 0.01)
+        #sc = TimedSC(pb.model.wind.t_start)
+        traj = pb.integrate_trajectory(pb.x_target, sc, int_step=reach_time / iit,
+                                       t_init=tu,
+                                       backward=True)
+        li = traj.last_index
+        traj.timestamps[:li + 1] = traj.timestamps[:li + 1][::-1]
+        traj.points[:li + 1] = traj.points[:li + 1][::-1]
+        traj.type = TRAJ_OPTIMAL
+        traj.info = 'RFT'
+        # traj = pb.integrate_trajectory(pb.x_target, sc, int_step=reach_time / iit,
+        #                                t_init=tu,
+        #                                backward=True)
+        # li = traj.last_index
+        # traj.timestamps[:li + 1] = traj.timestamps[:li + 1][::-1]
+        # traj.points[:li + 1] = traj.points[:li + 1][::-1]
+        # traj.type = TRAJ_OPTIMAL
+        # traj.info = 'RFT10'
+
+        chrono.stop()
+
+    chrono.start('Target FB')
     pb.load_feedback(TargetFB(pb.model.wind, pb.model.v_a, pb.x_target, pb.coords))
     sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb._geod_l / 100.)
-    pb.integrate_trajectory(pb.x_init, sc, max_iter=2*iit, int_step=reach_time / iit, t_init=t_init)
+    traj = pb.integrate_trajectory(pb.x_init, sc, max_iter=2 * iit, int_step=reach_time / iit,
+                                   t_init=pb.model.wind.t_start)
+    traj.info = 'Target FB'
+    chrono.stop()
 
+    # pb.load_feedback(GreatCircleFB(pb.model.wind, pb.model.v_a, pb.x_target))
+    # sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb._geod_l / 100.)
+    # traj = pb.integrate_trajectory(pb.x_init, sc, max_iter=2 * iit, int_step=reach_time / iit, t_init=t_init)
+    # traj.info = 'Great circle'
+
+    chrono.start('Dumping data')
     mdfm.dump_trajs(trajs)
     mdfm.dump_trajs(pb.trajs)
+    chrono.stop()
 
     ps = ParamsSummary()
     ps.set_output_dir(output_dir)

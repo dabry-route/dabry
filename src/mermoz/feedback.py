@@ -22,8 +22,9 @@ class Feedback(ABC):
         self.wind = wind
 
     @abstractmethod
-    def value(self, x: ndarray) -> ndarray:
+    def value(self, t: float, x: ndarray) -> ndarray:
         """
+        :param t: The time at which to compute the control
         :param x: The state
         :return: The feedback
         """
@@ -44,7 +45,7 @@ class ZermeloPMPFB(Feedback):
         self.v_a = v_a
         self.p_y = p_y
 
-    def value(self, x):
+    def value(self, t, x):
         wv = self.wind.value(x)[1]
         sin_value = -self.p_y * self.v_a / (1 + self.p_y * wv)
         if sin_value > 1.:
@@ -60,7 +61,7 @@ class ConstantFB(Feedback):
         super().__init__(1, Wind())
         self._value = value
 
-    def value(self, x):
+    def value(self, t, x):
         return self._value
 
 
@@ -72,7 +73,7 @@ class RandomFB(Feedback):
         random.seed(seed)
         super().__init__(1, Wind())
 
-    def value(self, x):
+    def value(self, t, x):
         return random.uniform(self.lower, self.upper)
 
 
@@ -94,12 +95,13 @@ class FixedHeadingFB(Feedback):
         self.theta_0 = initial_steering
         self.coords = coords
 
-    def value(self, x):
+    def value(self, t, x):
         if self.coords == COORD_CARTESIAN:
             e_theta_0 = np.array([np.cos(self.theta_0), np.sin(self.theta_0)])
-        elif self.coords == COORD_GCS:
+        else:
+            # coords gcs
             e_theta_0 = np.array([np.sin(self.theta_0), np.cos(self.theta_0)])
-        wind = self.wind.value(0., x)
+        wind = self.wind.value(t, x)
         wind_ortho = np.cross(e_theta_0, wind)
         r = -wind_ortho / self.v_a
         if r > 1.:
@@ -119,7 +121,31 @@ class GreatCircleFB(Feedback):
     Control law for GCS problems only.
     Tries to stay on a great circle when wind allows it.
     """
-    pass
+
+    def __init__(self, wind, v_a, target):
+        super().__init__(1, wind)
+        self.v_a = v_a
+        self.lon_t, self.lat_t = target
+
+    def value(self, t, x: ndarray) -> ndarray:
+        # First get the desired heading to follow great circle
+        lon, lat = x
+        lon_t, lat_t = self.lon_t, self.lat_t
+        u0 = np.arctan(1./(np.cos(lat)*np.tan(lat_t)/np.sin(lon_t - lon) - np.sin(lat)/np.tan(lon_t - lon)))
+
+        e_0 = np.array([np.sin(u0), np.cos(u0)])
+        wind = self.wind.value(t, x)
+        wind_ortho = np.cross(e_0, wind)
+        r = -wind_ortho / self.v_a
+        if r > 1.:
+            res = np.pi / 2.
+        elif r < -1.:
+            res = -np.pi / 2.
+        else:
+            res = -np.arcsin(r)
+        res += u0
+        return res
+
 
 
 class TargetFB(Feedback):
@@ -135,7 +161,7 @@ class TargetFB(Feedback):
         self.coords = coords
         self.zero_ceil = 1e-3
 
-    def value(self, x: ndarray):
+    def value(self, t, x: ndarray):
         # Assuming GCS
         if self.coords == COORD_GCS:
             # Got to 3D cartesian assuming spherical earth
@@ -181,7 +207,7 @@ class WindAlignedFB(Feedback):
     def __init__(self, wind):
         super().__init__(1, wind)
 
-    def value(self, x):
+    def value(self, t, x):
         wind = self.wind.value(x)
         theta = np.arctan2(wind[1], wind[0])
         return theta
@@ -189,9 +215,13 @@ class WindAlignedFB(Feedback):
 
 class FunFB(Feedback):
 
-    def __init__(self, value_func):
+    def __init__(self, value_func, no_time=False):
         super().__init__(1, Wind())
         self._value_func = value_func
+        self.no_time = no_time
 
-    def value(self, x):
-        return self._value_func(x)
+    def value(self, t, x):
+        if self.no_time:
+            return self._value_func(x)
+        else:
+            return self._value_func(t, x)
