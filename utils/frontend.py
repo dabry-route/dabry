@@ -33,7 +33,7 @@ class FrontendHandler:
         self.display.setup()
         self.display.draw_all()
 
-    def select_example(self, *args, latest=False):
+    def select_example(self, *args, select_latest=False):
         if self.mode == 'user':
             self.output_path = args[0]
             self.case_name = os.path.basename(self.output_path)
@@ -78,19 +78,16 @@ class FrontendHandler:
             latest = '{LATEST}'
             nlist = [dd for dd in os.listdir(self.output_dir) if
                      os.path.isdir(os.path.join(self.output_dir, dd)) and not dd.startswith('.')]
-            name = easygui.choicebox('Choose example', 'Example1', [latest, last] + list(sorted(nlist)))
+            if select_latest:
+                name = latest
+            else:
+                name = easygui.choicebox('Choose example', 'Example1', [latest, last] + list(sorted(nlist)))
             if name is None:
                 print('No example selected, quitting', file=sys.stderr)
                 exit(1)
             sel_dir = os.path.join(self.output_dir, name)
             # sel_dir = easygui.diropenbox(default=os.path.join('..', 'output'))
-            if name == last:
-                print('Opening last file')
-                with open(cache_fp, 'r') as f:
-                    sel_dir = f.readline()
-                    print(sel_dir)
-                self.dd = ns(os.path.basename(sel_dir))
-            elif name == latest:
+            if name == latest:
                 print('Opening latest file')
                 all_subdirs = list(map(lambda n: os.path.join(self.output_dir, n), nlist))
                 all_params = []
@@ -102,7 +99,12 @@ class FrontendHandler:
                 latest_subdir = os.path.dirname(max(all_params, key=os.path.getmtime))
                 print(latest_subdir)
                 self.dd = ns(os.path.basename(latest_subdir))
-
+            elif name == last:
+                print('Opening last file')
+                with open(cache_fp, 'r') as f:
+                    sel_dir = f.readline()
+                    print(sel_dir)
+                self.dd = ns(os.path.basename(sel_dir))
             else:
                 # self.dd = ns(os.path.basename(sel_dir).split('example_')[1])
                 self.dd = ns(os.path.basename(sel_dir))
@@ -281,7 +283,10 @@ class FrontendHandler:
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Mermoz data display')
+    parser.add_argument('-l', '--latest', help='Run latest results', required=False, nargs='?', const=True)
+    args = parser.parse_args(sys.argv[1:])
     fh = FrontendHandler(mode='default')
-    fh.select_example(latest=False)
+    fh.select_example(select_latest=args.latest)
     fh.run_frontend()
     # fh.post_processing()

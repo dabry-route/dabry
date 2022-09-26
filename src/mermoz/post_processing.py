@@ -41,6 +41,8 @@ class TrajStats:
         self.controls = np.zeros(controls.shape)
         self.controls[:] = controls
 
+        self.power = np.array(list(map(lambda v: 0.05 * v**3 + 1000 / v, self.vas)))
+
 
 class PostProcessing:
 
@@ -130,7 +132,10 @@ class PostProcessing:
         for a in ax:
             for b in a:
                 b.set_xlim(tl, tu)
+        entries = []
         for k, traj in enumerate(self.trajs):
+            if 'rft' in traj['info'].lower():
+                continue
             points = np.zeros(traj['data'].shape)
             points[:] = traj['data']
             ts = np.array(traj['ts'])
@@ -149,16 +154,22 @@ class PostProcessing:
             else:
                 ax[1, 1].plot(ts[:nt-1], y, color=color)
             ax[1, 0].plot(ts[:nt-1], tstats.gs)
+            ax[1, 2].plot(ts[:nt-1], tstats.power)
             hours = int(tstats.duration / 3600)
             minutes = int((tstats.duration - 3600*hours) / 60.)
-            print(
-                f'{k} : ' +
-                f'{traj["type"] + " " + traj["info"]:<25} ' +
-                f'{hours}h{minutes}m, ' +
-                f'{tstats.length / 1000:.2f}km, ' +
-                f'mean gs {np.mean(tstats.gs):.2f} m/s, ' +
-                f'mean airspeed {np.mean(tstats.vas):.2f} m/s'
-            )
+            line = f'{k} : ' + \
+                f'{traj["type"] + " " + traj["info"]:<25} ' + \
+                f'{hours}h{minutes}m, ' + \
+                f'{tstats.length / 1000:.2f}km, ' + \
+                f'mean gs {np.mean(tstats.gs):>5.2f} m/s, ' + \
+                f'mean airspeed {np.mean(tstats.vas):.2f} m/s, ' + \
+                f'mean power {np.mean(tstats.power):.1f} W, ' + \
+                f'energy {np.mean(tstats.power) * tstats.duration/ 3600000:.1f} kWh, ' + \
+                f'H2 (200 bar) {np.mean(tstats.power) * tstats.duration / 3600000 / 0.5:.1f} L, ' + \
+                f'H2 (liquid) {np.mean(tstats.power) * tstats.duration / 3600000 / 2.3:.1f} L'
+            entries.append((tstats.duration, line))
+        for _, line in sorted(entries, key=lambda x: x[0]):
+            print(line)
         ax[0, 0].legend(loc='center left', bbox_to_anchor=(-1., 0.5))
         plt.show()
 

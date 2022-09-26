@@ -277,13 +277,15 @@ class RFT:
         elif self.kernel == 'matlab':
 
             # Give all arguments to matlab in a JSON file
+            epsx = (self.tr[0] - self.bl[0]) * 0.005
+            epsy = (self.tr[1] - self.bl[1]) * 0.005
             args = {
                 "nx": self.nx,
                 "ny": self.ny,
-                "x_min": self.bl[0],
-                "x_max": self.tr[0],
-                "y_min": self.bl[1],
-                "y_max": self.tr[1],
+                "x_min": self.bl[0] + epsx,
+                "x_max": self.tr[0] - epsx,
+                "y_min": self.bl[1] + epsy,
+                "y_max": self.tr[1] - epsy,
                 "x_init": self.x_init[0],
                 "y_init": self.x_init[1],
                 "airspeed": self.mp.model.v_a,
@@ -307,12 +309,18 @@ class RFT:
 
             ts = np.linspace(self.mp.model.wind.t_start, self.mp.model.wind.t_start + self.max_time, self.nt)
 
+            t0 = self.mp.model.wind.t_start
+            if self.mp.model.wind.t_end is None:
+                delta_t = 0.
+            else:
+                delta_t = (self.mp.model.wind.t_end - self.mp.model.wind.t_start) / (self.nt - 1)
             for k in range(self.nt):
+                t = t0 + k * delta_t
                 for i in range(self.nx):
                     for j in range(self.ny):
                         point = np.zeros(2)
                         point[:] = grid[i, j]
-                        value = self.mp.model.wind.value(k * self.delta_t, point)
+                        value = self.mp.model.wind.value(t, point)
                         uv[k, i, j, :] = value
 
             if self.mp.coords == COORD_GCS:

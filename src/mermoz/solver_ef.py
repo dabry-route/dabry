@@ -139,7 +139,7 @@ class SolverEF:
 
         self.max_steps = max_steps
 
-        self.N_filling_steps = 4
+        self.N_filling_steps = 2
         self.hard_obstacles = hard_obstacles
 
         self.debug = False
@@ -237,7 +237,7 @@ class SolverEF:
                 self.rel.deactivate(a.i)
                 obstacle_list.append(a.i)
             else:
-                if not polyfront.contains(Point(*x)):
+                if it == 0 or not polyfront.contains(Point(*x)):
                     na = FrontPoint(a.i, (it + 1,) + self.trajs[a.i][it + 1], i_obs, ccw)
                     self.new_points[a.i] = na
                 else:
@@ -352,6 +352,7 @@ class SolverEF:
             x += self.dt * dyn_x
             p += self.dt * dyn_p
             t += self.dt
+            a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
         else:
             if obs_fllw_strategy:
                 # Obstacle mode. Follow the obstacle boundary as fast as possible
@@ -498,6 +499,7 @@ class SolverEF:
                 points = np.zeros((n, 2))
                 adjoints = np.zeros((n, 2))
                 controls = np.zeros(n)
+                transver = np.zeros(n)
                 offset = 0.
                 if self.mp_primal.model.wind.t_end is None and i == 0:
                     # If wind is steady, offset timestamps to have a <self.reach_time>-long window
@@ -508,6 +510,7 @@ class SolverEF:
                     points[k, :] = e[1]
                     adjoints[k, :] = e[2]
                     controls[k] = self.mp.control_angle(e[2], e[1])
+                    transver[k] = 1 - self.mp.model.v_a * np.linalg.norm(e[2]) + e[2] @ self.mp.model.wind.value(e[0], e[1])
                 add_info = ''
                 if i == 0:
                     try:
@@ -517,6 +520,6 @@ class SolverEF:
                 res.append(
                     AugmentedTraj(timestamps, points, adjoints, controls, last_index=n - 1, coords=self.mp.coords,
                                   label=it,
-                                  type=TRAJ_PMP, info=f'ef_{i}{add_info}'))
+                                  type=TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver))
 
         return res

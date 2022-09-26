@@ -3,7 +3,7 @@ import os
 
 import numpy as np
 
-from mermoz.feedback import ConstantFB, TargetFB, FixedHeadingFB
+from mermoz.feedback import ConstantFB, GSTargetFB, FixedHeadingFB
 from mermoz.mdf_manager import MDFmanager
 from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *

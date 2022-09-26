@@ -1141,9 +1141,10 @@ class BandGaussWind(Wind):
         return self.vect * intensity
 
     def d_value(self, t, x):
+        # TODO : write analytical formula
         dx = 1e-6
-        return np.column_stack((1 / dx * (self.value(x + np.array((dx, 0.))) - self.value(x)),
-                                1 / dx * (self.value(x + np.array((0., dx))) - self.value(x))))
+        return np.column_stack((1 / dx * (self.value(t, x + np.array((dx, 0.))) - self.value(t, x)),
+                                1 / dx * (self.value(t, x + np.array((0., dx))) - self.value(t, x))))
 
 
 class LCWind(Wind):

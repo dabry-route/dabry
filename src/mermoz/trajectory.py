@@ -71,7 +71,8 @@ class AugmentedTraj(Trajectory):
                  interrupted=False,
                  type=TRAJ_INT,
                  label=0,
-                 info=''):
+                 info='',
+                 transver=None):
         """
         :param adjoints: A list of adjoint states ((p_x0, p_y0), ..., (p_xN, p_yN))
         """
@@ -79,3 +80,6 @@ class AugmentedTraj(Trajectory):
                          type=type, label=label, info=info)
         self.adjoints = np.zeros(adjoints.shape)
         self.adjoints[:] = adjoints
+        if transver is not None:
+            self.transver = np.zeros(transver.shape)
+            self.transver[:] = transver

@@ -58,6 +58,10 @@ class MDFmanager:
                     dset = trajgroup.create_dataset('adjoints', (n, 2), dtype='f8', fillvalue=0.)
                     dset[:, :] = traj.adjoints[:n]
 
+                if hasattr(traj, 'transver'):
+                    dset = trajgroup.create_dataset('transver', n, dtype='f8', fillvalue=0.)
+                    dset[:] = traj.transver[:n]
+
     def _grib_date_to_unix(self, grib_filename):
         date, hm = grib_filename.split('_')[2:4]
         hours = int(hm[:2])
@@ -144,6 +148,7 @@ class MDFmanager:
                     exit(1)
                 UV = np.zeros((nx, ny, 2))
                 UV[:] = np.transpose(np.stack((U, V)), (2, 1, 0))
+                UV[:] = UV[:, ::-1, :]
                 return UV
 
         # First fetch grid parameters

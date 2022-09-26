@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import random
 from math import atan2
 
-from mermoz.wind import Wind
+from mermoz.wind import Wind, UniformWind
 from mermoz.misc import *
 
 
@@ -131,7 +131,7 @@ class GreatCircleFB(Feedback):
         # First get the desired heading to follow great circle
         lon, lat = x
         lon_t, lat_t = self.lon_t, self.lat_t
-        u0 = np.arctan(1./(np.cos(lat)*np.tan(lat_t)/np.sin(lon_t - lon) - np.sin(lat)/np.tan(lon_t - lon)))
+        u0 = np.arctan(1. / (np.cos(lat) * np.tan(lat_t) / np.sin(lon_t - lon) - np.sin(lat) / np.tan(lon_t - lon)))
 
         e_0 = np.array([np.sin(u0), np.cos(u0)])
         wind = self.wind.value(t, x)
@@ -147,8 +147,7 @@ class GreatCircleFB(Feedback):
         return res
 
 
-
-class TargetFB(Feedback):
+class GSTargetFB(Feedback):
     """
     Control law trying to put ground speed vector towards a fixed target
     """
@@ -184,7 +183,7 @@ class TargetFB(Feedback):
             return 0.
 
         e_target = e_target / np.linalg.norm(e_target)
-        wind = self.wind.value(0., x)
+        wind = self.wind.value(t, x)
         wind_ortho = np.cross(e_target, wind)
         r = -wind_ortho / self.v_a
         if r > 1.:
@@ -194,6 +193,47 @@ class TargetFB(Feedback):
         else:
             res = np.arcsin(r)
         res += atan2(e_target[1], e_target[0])
+        if self.coords == COORD_GCS:
+            res = pi / 2 - res
+        return res
+
+
+class HTargetFB(Feedback):
+    """
+    Control law heading towards target
+    """
+
+    def __init__(self, target: ndarray, coords: str):
+        super().__init__(1, UniformWind(np.array((0., 0.))))
+        self.target = np.zeros(2)
+        self.target[:] = target
+        self.coords = coords
+        self.zero_ceil = 1e-3
+
+    def value(self, t, x: ndarray):
+        # Assuming GCS
+        if self.coords == COORD_GCS:
+            # Got to 3D cartesian assuming spherical earth
+            lon, lat = x[0], x[1]
+            # Vector normal to earth at position
+            X3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            e_phi = np.array((-sin(lon), cos(lon), 0.))
+            e_lambda = np.array((-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat)))
+            lon, lat = self.target[0], self.target[1]
+            X_target3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            e_target = np.zeros(2)
+            e_target[0] = (X_target3 - X3) @ e_phi
+            e_target[1] = (X_target3 - X3) @ e_lambda
+        else:
+            #  self.coords == COORD_CARTESIAN
+            e_target = np.zeros(2)
+            e_target[:] = self.target - x
+
+        if np.linalg.norm(e_target) < self.zero_ceil:
+            return 0.
+
+        e_target = e_target / np.linalg.norm(e_target)
+        res = atan2(e_target[1], e_target[0])
         if self.coords == COORD_GCS:
             res = pi / 2 - res
         return res
