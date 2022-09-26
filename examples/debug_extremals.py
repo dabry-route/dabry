@@ -7,7 +7,7 @@ import numpy as np
 from math import atan, cos, sin, atan2
 from pyproj import Proj
 
-from mermoz.feedback import FixedHeadingFB, TargetFB, ConstantFB
+from mermoz.feedback import FixedHeadingFB, GSTargetFB, ConstantFB
 from mermoz.mdf_manager import MDFmanager
 from mermoz.params_summary import ParamsSummary
 from mermoz.problem import MermozProblem
@@ -121,7 +121,7 @@ def run():
     #
     # rft.dump_rff(output_dir)
 
-    mp.load_feedback(TargetFB(mp.model.wind, v_a, x_target, mp.coords))
+    mp.load_feedback(GSTargetFB(mp.model.wind, v_a, x_target, mp.coords))
     mp.integrate_trajectory(x_init, DistanceSC(lambda x: distance(x, x_target, coords=coords), opti_ceil), int_step=0.2*mp._geod_l / mp.model.v_a / (nt_pmp - 1))
 
     mdfm.dump_trajs(mp.trajs)

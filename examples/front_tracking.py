@@ -58,7 +58,7 @@ if __name__ == '__main__':
 
         rft.dump_rff(output_dir)
 
-        nt_rft_eff = rft.get_first_index(pb.x_target)
+        nt_rft_eff = rft.get_index(pb.x_target)
         if nt_rft_eff == -1:
             nt_rft_eff = nt_rft - 1
 

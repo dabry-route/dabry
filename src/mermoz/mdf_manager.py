@@ -23,9 +23,10 @@ class MDFmanager:
             os.mkdir(output_dir)
         self.output_dir = output_dir
 
-    def clean_output_dir(self, keep_rff=False):
+    def clean_output_dir(self, keep_rff=False, keep_wind=False):
         for filename in os.listdir(self.output_dir):
-            if not keep_rff or not filename.endswith('rff.h5'):
+            if (not (keep_rff and filename.endswith('rff.h5'))) and\
+                    (not (keep_wind and filename.endswith('wind.h5'))):
                 os.remove(os.path.join(self.output_dir, filename))
 
     def dump_trajs(self, traj_list, filename=None):
@@ -36,28 +37,30 @@ class MDFmanager:
             if len(f.keys()) != 0:
                 index = int(max(f.keys(), key=int)) + 1
             for i, traj in enumerate(traj_list):
-                nt = traj.timestamps.shape[0]
                 trajgroup = f.create_group(str(index + i))
                 trajgroup.attrs['type'] = traj.type
                 trajgroup.attrs['coords'] = traj.coords
                 trajgroup.attrs['interrupted'] = traj.interrupted
                 trajgroup.attrs['last_index'] = traj.last_index
                 trajgroup.attrs['label'] = traj.label
+                trajgroup.attrs['info'] = traj.info
+                n = traj.last_index + 1
+                dset = trajgroup.create_dataset('data', (n, 2), dtype='f8')
+                dset[:, :] = traj.points[:n]
 
-                factor = (180 / np.pi if traj.coords == COORD_GCS else 1.)
+                dset = trajgroup.create_dataset('ts', (n,), dtype='f8')
+                dset[:] = traj.timestamps[:n]
 
-                dset = trajgroup.create_dataset('data', (nt, 2), dtype='f8')
-                dset[:, :] = traj.points * factor
-
-                dset = trajgroup.create_dataset('ts', (nt,), dtype='f8')
-                dset[:] = traj.timestamps
-
-                dset = trajgroup.create_dataset('controls', (nt,), dtype='f8')
-                dset[:] = traj.controls
+                dset = trajgroup.create_dataset('controls', (n,), dtype='f8')
+                dset[:] = traj.controls[:n]
 
                 if hasattr(traj, 'adjoints'):
-                    dset = trajgroup.create_dataset('adjoints', (nt, 2), dtype='f8')
-                    dset[:, :] = traj.adjoints
+                    dset = trajgroup.create_dataset('adjoints', (n, 2), dtype='f8', fillvalue=0.)
+                    dset[:, :] = traj.adjoints[:n]
+
+                if hasattr(traj, 'transver'):
+                    dset = trajgroup.create_dataset('transver', n, dtype='f8', fillvalue=0.)
+                    dset[:] = traj.transver[:n]
 
     def _grib_date_to_unix(self, grib_filename):
         date, hm = grib_filename.split('_')[2:4]
@@ -76,7 +79,7 @@ class MDFmanager:
                 for attr, val in traj.attrs.items():
                     print(f'{attr} : {val}')
 
-    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, bl=None, tr=None, coords=COORD_CARTESIAN):
+    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None, coords=COORD_CARTESIAN, force_analytical=False):
         if wind.is_dumpable == 0:
             print('Error : Wind is not dumpable to file', file=sys.stderr)
             exit(1)
@@ -86,13 +89,16 @@ class MDFmanager:
             if nx is None or ny is None:
                 print(f'Please provide grid shape "nx=..., ny=..." to sample analytical wind "{wind}"')
                 exit(1)
-            dwind = DiscreteWind(force_analytical=False)
-            dwind.load_from_wind(wind, nx, ny, bl, tr, coords, nodiff=True)
+            dwind = DiscreteWind(force_analytical=force_analytical)
+            kwargs = {}
+            if nt is not None:
+                kwargs['nt'] = nt
+            dwind.load_from_wind(wind, nx, ny, bl, tr, coords, nodiff=True, **kwargs)
         else:
             dwind = wind
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = dwind.coords
-            f.attrs['units_grid'] = U_METERS if dwind.coords == COORD_CARTESIAN else U_DEG
+            f.attrs['units_grid'] = U_METERS if dwind.coords == COORD_CARTESIAN else U_RAD
             f.attrs['analytical'] = dwind.is_analytical
             if dwind.lon_0 is not None:
                 f.attrs['lon_0'] = dwind.lon_0
@@ -103,9 +109,8 @@ class MDFmanager:
             dset[:] = dwind.uv
             dset = f.create_dataset('ts', (dwind.nt,), dtype='f8')
             dset[:] = dwind.ts
-            factor = (RAD_TO_DEG if dwind.coords == COORD_GCS else 1.)
             dset = f.create_dataset('grid', (dwind.nx, dwind.ny, 2), dtype='f8')
-            dset[:] = factor * dwind.grid
+            dset[:] = dwind.grid
 
     def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=COORD_GCS):
         if coords == COORD_CARTESIAN:
@@ -134,7 +139,6 @@ class MDFmanager:
                 lats[:] = newlats
 
                 ny, nx = U.shape
-                print(f'nx : {nx}, ny : {ny}')
                 grid = np.zeros((nx, ny, 2))
                 grid[:] = np.transpose(np.stack((lons, lats)), (2, 1, 0))
                 return nx, ny, grid
@@ -144,6 +148,7 @@ class MDFmanager:
                     exit(1)
                 UV = np.zeros((nx, ny, 2))
                 UV[:] = np.transpose(np.stack((U, V)), (2, 1, 0))
+                UV[:] = UV[:, ::-1, :]
                 return UV
 
         # First fetch grid parameters
@@ -158,15 +163,14 @@ class MDFmanager:
 
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = coords
-            f.attrs['units_grid'] = U_DEG
+            f.attrs['units_grid'] = U_RAD
             f.attrs['analytical'] = False
             dset = f.create_dataset('data', (nt, nx, ny, 2), dtype='f8')
             dset[:] = UVs
             dset = f.create_dataset('ts', (nt,), dtype='f8')
             dset[:] = dates
-            factor = 1.  # (RAD_TO_DEG if coords == COORD_GCS else 1.)
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
-            dset[:] = factor * grid
+            dset[:] = DEG_TO_RAD * grid
 
         return nt, nx, ny
 

@@ -1,6 +1,8 @@
 import sys
+import time
+
 import numpy as np
-from math import pi, acos, cos, sin, floor
+from math import pi, acos, cos, sin, floor, atan2
 
 from numpy import ndarray
 
@@ -40,9 +42,53 @@ def rectify(a, b):
     return aa, bb
 
 
+def ang_principal(a):
+    """
+    Bring angle to ]-pi,pi]
+    :param a: Angle in radians
+    :return: Equivalent angle in the target interval
+    """
+    return np.angle(np.cos(a) + 1j * np.sin(a))
+
+
+def angular_diff(a1, a2):
+    """
+    The measure of real angular difference between a1 and a2
+    :param a1: First angle in radians
+    :param a2: Second angle in radians
+    :return: Angular difference
+    """
+    b1 = ang_principal(a1)
+    b2 = ang_principal(a2)
+    if abs(b2 - b1) <= np.pi:
+        return abs(b2 - b1)
+    else:
+        return 2 * np.pi - abs(b2 - b1)
+
+
+def linspace_sph(a1, a2, N):
+    """
+    Return a ndarray consisting of a linspace of angles between the two angles
+    but distributed on the geodesic between angles on the circle (shortest arc)
+    :param a1: First angle in radians
+    :param a2: Second angle in radians
+    :param N: Number of discretization points
+    :return: ndarray of angles in radians
+    """
+    b1 = ang_principal(a1)
+    b2 = ang_principal(a2)
+    b_min = min(b1, b2)
+    delta_b = angular_diff(b1, b2)
+    if abs(b2 - b1) <= np.pi:
+        return np.linspace(b_min, b_min + delta_b, N)
+    else:
+        return np.linspace(b_min - delta_b, b_min, N)
+
+
 TRAJ_PMP = 'pmp'
 TRAJ_INT = 'integral'
 TRAJ_PATH = 'path'
+TRAJ_OPTIMAL = 'optimal'
 
 EARTH_RADIUS = 6378.137e3  # [m] Earth equatorial radius
 
@@ -112,11 +158,60 @@ def geodesic_distance(*args, mode='rad'):
     return res
 
 
-def distance(x1, x2, coords=COORD_CARTESIAN):
+def proj_ortho(lon, lat, lon0, lat0):
+    """
+    :param lon: Longitude in radians
+    :param lat: Latitude in radians
+    :param lon0: Longitude of center in radians
+    :param lat0: Latitude of center in radians
+    :return: Projection in meters
+    """
+    return EARTH_RADIUS * np.array((np.cos(lat) * np.sin(lon - lon0),
+                                    np.cos(lat0) * np.sin(lat) - np.sin(lat0) * np.cos(lat) * np.cos(lon - lon0)))
+
+
+def proj_ortho_inv(x, y, lon0, lat0):
+    rho = np.sqrt(x ** 2 + y ** 2)
+    c = np.arcsin(rho / EARTH_RADIUS)
+    return np.array((lon0 + np.arctan(
+        x * np.sin(c) / (rho * np.cos(c) * np.cos(lat0) - y * np.sin(c) * np.sin(lat0))),
+                     np.arcsin(np.cos(c) * np.sin(lat0) + y * np.sin(c) * np.cos(lat0) / rho)))
+
+
+def d_proj_ortho(lon, lat, lon0, lat0):
+    return EARTH_RADIUS * np.array(
+        ((np.cos(lat) * np.cos(lon - lon0), -np.sin(lat) * np.sin(lon - lon0)),
+         (np.sin(lat0) * np.cos(lat) * sin(lon - lon0),
+          np.cos(lat0) * np.cos(lat) + np.sin(lat0) * np.sin(lat) * np.cos(lon - lon0))))
+
+
+def d_proj_ortho_inv(x, y, lon0, lat0):
+    lon, lat = tuple(proj_ortho_inv(x, y, lon0, lat0))
+    det = EARTH_RADIUS ** 2 * (np.cos(lat0) * np.cos(lat) ** 2 * np.cos(lon - lon0) +
+                               np.sin(lat0) * np.sin(lat) * np.cos(lat))
+    dp = d_proj_ortho(lon, lat, lon0, lat0)
+    return 1 / det * np.array(((dp[1, 1], -dp[0, 1]), (-dp[1, 0], dp[0, 0])))
+
+
+def middle(x1, x2, coords):
+    if coords == COORD_CARTESIAN:
+        # x1, x2 shall be cartesian vectors in meters
+        return 0.5 * (x1 + x2)
+    else:
+        # Assuming coords == COORD_GCS
+        # x1, x2 shall be vectors (lon, lat) in radians
+        bx = np.cos(x2[1]) * np.cos(x2[0] - x1[0])
+        by = np.cos(x2[1]) * np.sin(x2[0] - x1[0])
+        return x1[0] + atan2(by, np.cos(x1[1]) + bx), \
+               atan2(np.sin(x1[1]) + np.sin(x2[1]), np.sqrt((np.cos(x1[1]) + bx) ** 2 + by ** 2))
+
+
+def distance(x1, x2, coords):
     if coords == COORD_GCS:
         # x1, x2 shall be vectors (lon, lat) in radians
         return geodesic_distance(x1, x2)
     else:
+        # Assuming coords == COORD_CARTESIAN
         # x1, x2 shall be cartesian vectors in meters
         return np.linalg.norm(x1 - x2)
 
@@ -214,3 +309,22 @@ def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
                       points.shape[0] - 1,
                       coords=COORD_CARTESIAN,
                       type='optimal')
+
+
+class Chrono:
+    def __init__(self, no_verbose=False):
+        self.t_start = 0.
+        self.t_end = 0.
+        self.verbose = not no_verbose
+
+    def start(self, msg=''):
+        if self.verbose:
+            print(f'[*] {msg}')
+        self.t_start = time.time()
+
+    def stop(self):
+        self.t_end = time.time()
+        diff = self.t_end - self.t_start
+        if self.verbose:
+            print(f'[*] Done ({diff:.3f}s)')
+        return diff
