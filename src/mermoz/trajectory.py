@@ -72,7 +72,8 @@ class AugmentedTraj(Trajectory):
                  type=TRAJ_INT,
                  label=0,
                  info='',
-                 transver=None):
+                 transver=None,
+                 airspeed=None):
         """
         :param adjoints: A list of adjoint states ((p_x0, p_y0), ..., (p_xN, p_yN))
         """
@@ -83,3 +84,6 @@ class AugmentedTraj(Trajectory):
         if transver is not None:
             self.transver = np.zeros(transver.shape)
             self.transver[:] = transver
+        if airspeed is not None:
+            self.airspeed = np.zeros(airspeed.shape)
+            self.airspeed[:] = airspeed

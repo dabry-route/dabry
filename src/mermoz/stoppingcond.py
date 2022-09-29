@@ -23,6 +23,18 @@ class StoppingCond(ABC):
         pass
 
 
+class DisjunctionSC(StoppingCond):
+
+    def __init__(self, sc1, sc2):
+        self.sc1 = sc1
+        self.sc2 = sc2
+
+    def value(self,
+              t: float,
+              x: ndarray) -> bool:
+        return self.sc1.value(t, x) or self.sc2.value(t, x)
+
+
 class MaxOneDimSC(StoppingCond):
     """
         Stopping condition on maximum value for a coordinate

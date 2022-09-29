@@ -270,6 +270,24 @@ def control_time_opti(x, p, t, coords):
     return res
 
 
+def airspeed_opti(p, cost='dobrokhodov'):
+    if cost == 'dobrokhodov':
+        pn = np.linalg.norm(p)
+        return airspeed_opti_(pn)
+
+
+def airspeed_opti_(pn):
+    kp1 = 0.05
+    kp2 = 1000
+    return np.sqrt(pn / (6 * kp1) + np.sqrt(kp2 / (3 * kp1) + pn ** 2 / (36 * kp1 ** 2)))
+
+
+def power(airspeed, cost='dobrokhodov'):
+    kp1 = 0.05
+    kp2 = 1000
+    return kp1 * airspeed ** 3 + kp2 / airspeed
+
+
 def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
     """
     Return the analytical solution to minimum time of travel between

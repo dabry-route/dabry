@@ -31,6 +31,21 @@ class Feedback(ABC):
         pass
 
 
+class AirspeedLaw(ABC):
+    """
+    Defines an airspeed law
+    """
+
+    @abstractmethod
+    def value(self, t: float, x: ndarray) -> float:
+        """
+        :param t: The time at which to compute the airspeed
+        :param x: The state
+        :return: The corresponding airspeed
+        """
+        pass
+
+
 class ZermeloPMPFB(Feedback):
 
     def __init__(self,
@@ -265,3 +280,44 @@ class FunFB(Feedback):
             return self._value_func(x)
         else:
             return self._value_func(t, x)
+
+
+class ConstantAS(AirspeedLaw):
+
+    def __init__(self, airspeed):
+        self.airspeed = airspeed
+
+    def value(self, t, _):
+        return self.airspeed
+
+
+class ParamAS(AirspeedLaw):
+
+    def __init__(self, aspd, t_end, t_start=0., interp='linear'):
+        """
+        Airspeed law interpreted as sampled functional data points
+        at evenly spaced timestamps between t_start and t_end
+        :param aspd: List of airspeed values in meters per second
+        :param t_end: Duration of time window
+        :param t_start: Start date if needed
+        :param interp: Interpolation mode (only 'linear')
+        """
+        self.airspeed = np.zeros(aspd.shape)
+        self.airspeed[:] = aspd
+        self.t_end = t_end
+        self.t_start = t_start
+        self.interp = interp
+
+    def _index(self, t):
+        nt = self.airspeed.shape[0]
+        if t <= self.t_start:
+            return 0, 0.
+        elif t >= self.t_end:
+            return nt - 2, 1.
+        tau = (t - self.t_start) / (self.t_end - self.t_start)
+        k = int(tau * (nt - 1))
+        return k, tau * (nt - 1) - k
+
+    def value(self, t, _):
+        k, alpha = self._index(t)
+        return (1 - alpha) * self.airspeed[k] + alpha * self.airspeed[k+1]

@@ -9,6 +9,7 @@
 	ts : (nt, )
 	(OPT) controls : (nt, )
 	(OPT) adjoints : (nt, 2)
+	(OPT) airspeed : (nt, )
 	
 	
 	

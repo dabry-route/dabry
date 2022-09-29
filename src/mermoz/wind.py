@@ -358,7 +358,7 @@ class DiscreteWind(Wind):
 
         print('Done')
 
-    def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, nt=1, skip_coord_check=False):
+    def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, nt=1, fd=False):
         self.coords = coords
         self.units_grid = 'meters' if coords == COORD_CARTESIAN else 'degrees'
         self.unstructured = wind.unstructured
@@ -397,22 +397,25 @@ class DiscreteWind(Wind):
         # Post processing
         # Loading derivatives
         if not nodiff:
-            self.d_u__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-            self.d_u__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-            self.d_v__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-            self.d_v__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-            for k in range(self.nt):
-                for i in range(1, self.nx - 1):
-                    for j in range(1, self.ny - 1):
-                        point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
-                        if nt > 1:
-                            diff = wind.d_value(self.ts[k], point)
-                        else:
-                            diff = wind.d_value(wind.t_start, point)
-                        self.d_u__d_x[0, i - 1, j - 1] = diff[0, 0]
-                        self.d_u__d_y[0, i - 1, j - 1] = diff[0, 1]
-                        self.d_v__d_x[0, i - 1, j - 1] = diff[1, 0]
-                        self.d_v__d_y[0, i - 1, j - 1] = diff[1, 1]
+            if not fd:
+                self.d_u__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+                self.d_u__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+                self.d_v__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+                self.d_v__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+                for k in range(self.nt):
+                    for i in range(1, self.nx - 1):
+                        for j in range(1, self.ny - 1):
+                            point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
+                            if nt > 1:
+                                diff = wind.d_value(self.ts[k], point)
+                            else:
+                                diff = wind.d_value(wind.t_start, point)
+                            self.d_u__d_x[0, i - 1, j - 1] = diff[0, 0]
+                            self.d_u__d_y[0, i - 1, j - 1] = diff[0, 1]
+                            self.d_v__d_x[0, i - 1, j - 1] = diff[1, 0]
+                            self.d_v__d_y[0, i - 1, j - 1] = diff[1, 1]
+            else:
+                self.compute_derivatives()
 
     def value(self, t, x, units=U_METERS):
         """
@@ -1145,6 +1148,32 @@ class BandGaussWind(Wind):
         dx = 1e-6
         return np.column_stack((1 / dx * (self.value(t, x + np.array((dx, 0.))) - self.value(t, x)),
                                 1 / dx * (self.value(t, x + np.array((0., dx))) - self.value(t, x))))
+
+
+class BandWind(Wind):
+    """
+    Band of wind. NON DIFFERENTIABLE (should be instanciated as discrete wind)
+    """
+
+    def __init__(self, origin, vect, w_value, width):
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        self.origin = np.zeros(2)
+        self.origin[:] = origin
+        self.vect = np.zeros(2)
+        self.vect = vect / np.linalg.norm(vect)
+        self.w_value = w_value
+        self.width = width
+
+    def value(self, t, x):
+        dist = np.abs(np.cross(self.vect, x - self.origin))
+        if dist >= self.width / 2.:
+            return np.zeros(2)
+        else:
+            return self.w_value
+
+    def d_value(self, t, x):
+        print('Undefined', file=sys.stderr)
+        exit(1)
 
 
 class LCWind(Wind):

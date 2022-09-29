@@ -23,6 +23,8 @@ class Model(ABC):
         self.dyn = None
         self.wind = None
 
+    def update_airspeed(self, v_a):
+        self.v_a = v_a
 
 class ZermeloGeneralModel(Model):
 
@@ -40,6 +42,13 @@ class ZermeloGeneralModel(Model):
 
     def update_wind(self, wind: Wind):
         self.wind = wind
+        if self.coords == COORD_CARTESIAN:
+            self.dyn = ZermeloDyn(self.wind, self.v_a)
+        elif self.coords == COORD_GCS:
+            self.dyn = PCZermeloDyn(self.wind, self.v_a)
+
+    def update_airspeed(self, v_a):
+        super(ZermeloGeneralModel, self).update_airspeed(v_a)
         if self.coords == COORD_CARTESIAN:
             self.dyn = ZermeloDyn(self.wind, self.v_a)
         elif self.coords == COORD_GCS:

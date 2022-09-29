@@ -9,7 +9,7 @@ from pyproj import Proj
 from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
 from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
-    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT
+    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind
 from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
@@ -119,6 +119,9 @@ class MermozProblem:
 
         self._feedback = None
         self.trajs = []
+
+    def update_airspeed(self, v_a):
+        self.model.update_airspeed(v_a)
 
     def __str__(self):
         return str(self.descr)
@@ -260,15 +263,16 @@ class IndexedProblem(MermozProblem):
         14: ['Moving vortices', 'movors'],
         15: ['Gyre Rhoads2010', 'gyre-rhoads2010'],
         16: ['Gyre Transversality', 'gyre-transver'],
+        17: ['Band wind', 'band']
     }
 
     def __init__(self, i, seed=0):
         if i == 0:
-            v_a = 23.
+            v_a = 13.17
             coords = COORD_CARTESIAN
 
             f = 1e6
-            fs = v_a
+            fs = 15.46
 
             x_init = f * np.array([0., 0.])
             x_target = f * np.array([1., 0.])
@@ -332,6 +336,7 @@ class IndexedProblem(MermozProblem):
             # total_wind.load_from_wind(linear_wind, 51, 51, bl, tr, coords)
 
             # Creates the cinematic model
+            v_a = 11.41
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(linear_wind)
 
@@ -412,6 +417,7 @@ class IndexedProblem(MermozProblem):
             omega = 0.
             total_wind = PointSymWind(sf * 0.5, sf * 0.3, gamma, omega)
 
+            v_a = 14.66
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
@@ -812,6 +818,27 @@ class IndexedProblem(MermozProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
             self.time_scale = 3. * self._geod_l / v_a
+        elif i == 17:
+            v_a = 11.58
+
+            sf = 1.
+
+            x_init = sf * np.array((20., 20.))
+            x_target = sf * np.array((80., 80.))
+            bl = sf * np.array((15, 15))
+            tr = sf * np.array((85, 85))
+            coords = COORD_CARTESIAN
+
+            band_wind = BandWind(np.array((0., 50.)), np.array((1., 0.)), np.array((20., 0.)), 20)
+            total_wind = DiscreteWind()
+            total_wind.load_from_wind(band_wind, 101, 101, bl, tr, coords, fd=True)
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
+                                                 autodomain=False)
+            self.time_scale = 1. * self._geod_l / v_a
         else:
             raise IndexError(f'No problem with index {i}')
 

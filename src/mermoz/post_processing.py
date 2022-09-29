@@ -1,5 +1,9 @@
+import csv
+import datetime
 import os
 import sys
+
+import asciitable
 import h5py
 import json
 
@@ -27,7 +31,8 @@ class TrajStats:
                  crosswind: ndarray,
                  tgwind: ndarray,
                  vas: ndarray,
-                 controls: ndarray):
+                 controls: ndarray,
+                 dt: float):
         self.length = length
         self.duration = duration
         self.gs = np.zeros(gs.shape)
@@ -41,7 +46,8 @@ class TrajStats:
         self.controls = np.zeros(controls.shape)
         self.controls[:] = controls
 
-        self.power = np.array(list(map(lambda v: 0.05 * v**3 + 1000 / v, self.vas)))
+        self.power = np.array(list(map(lambda v: 0.05 * v ** 3 + 1000 / v, self.vas)))
+        self.energy = np.array(list(np.sum(self.power[:i]) for i in range(self.power.shape[0]))) * dt
 
 
 class PostProcessing:
@@ -51,6 +57,7 @@ class PostProcessing:
         self.traj_fn = traj_fn if traj_fn is not None else 'trajectories.h5'
         self.wind_fn = wind_fn if wind_fn is not None else 'wind.h5'
         self.param_fn = param_fn if param_fn is not None else 'params.json'
+        self.analysis_fn = 'postproc.csv'
         with open(os.path.join(self.output_dir, self.param_fn), 'r') as f:
             pd = json.load(f)
             try:
@@ -76,41 +83,45 @@ class PostProcessing:
 
         self.trajs = []
 
-    def load(self, opti_only=False):
+    def load(self):
         traj_fp = os.path.join(self.output_dir, self.traj_fn)
         f = h5py.File(traj_fp, "r")
         for k, traj in enumerate(f.values()):
-            if not opti_only or traj.attrs['type'] in ['integral', 'optimal']:
-                _traj = {}
-                _traj['data'] = np.zeros(traj['data'].shape)
-                _traj['data'][:] = traj['data']
-                _traj['controls'] = np.zeros(traj['controls'].shape)
-                _traj['controls'][:] = traj['controls']
-                _traj['ts'] = np.zeros(traj['ts'].shape)
-                _traj['ts'][:] = traj['ts']
+            # Filter extremal fields
+            if 'info' in traj.attrs.keys() and 'ef_' in traj.attrs['info']:
+                continue
+            _traj = {}
+            _traj['data'] = np.zeros(traj['data'].shape)
+            _traj['data'][:] = traj['data']
+            _traj['controls'] = np.zeros(traj['controls'].shape)
+            _traj['controls'][:] = traj['controls']
+            _traj['ts'] = np.zeros(traj['ts'].shape)
+            _traj['ts'][:] = traj['ts']
 
-                _traj['type'] = traj.attrs['type']
-                _traj['last_index'] = traj.attrs['last_index']
-                _traj['interrupted'] = traj.attrs['interrupted']
-                _traj['coords'] = traj.attrs['coords']
-                _traj['label'] = traj.attrs['label']
-                try:
-                    _traj['info'] = traj.attrs['info']
-                except KeyError:
-                    # Backward compatibility
-                    _traj['info'] = ""
-                self.trajs.append(_traj)
+            _traj['type'] = traj.attrs['type']
+            _traj['last_index'] = traj.attrs['last_index']
+            _traj['interrupted'] = traj.attrs['interrupted']
+            _traj['coords'] = traj.attrs['coords']
+            _traj['label'] = traj.attrs['label']
+            try:
+                _traj['info'] = traj.attrs['info']
+            except KeyError:
+                # Backward compatibility
+                _traj['info'] = ""
+            if 'airspeed' in traj.keys():
+                _traj['airspeed'] = np.zeros(traj['airspeed'].shape)
+                _traj['airspeed'][:] = traj['airspeed']
+            self.trajs.append(_traj)
         f.close()
 
-    def stats(self, fancynormplot=False, only_opti=False):
+    def stats(self, fancynormplot=False):
         fig, ax = plt.subplots(ncols=3, nrows=2, figsize=(12, 8))
         decorate(ax[0, 0], 'Delay per length unit', 'Time (scaled)', '[s/m]', ylim=(0., 3 / self.va))
-        decorate(ax[0, 1], 'Crosswind', 'Time (scaled)', '[m/s]', ylim=(-1. * self.va, 1. * self.va))
-        decorate(ax[0, 2], 'Tangent wind', 'Time (scaled)', '[m/s]', ylim=(-1. * self.va, 1. * self.va))
+        decorate(ax[0, 1], 'Power', 'Time (scaled)', '[W]')
+        decorate(ax[0, 2], 'Energy spent', 'Time (scaled)', '[kWh]')
         decorate(ax[1, 0], 'Ground speed', 'Time (scaled)', '[m/s]', ylim=(0., 2. * self.va))
         decorate(ax[1, 1], 'Wind norm', 'Time (scaled)', '[m/s]', ylim=(0, 1.1 * self.va))
-        ax[0, 2].axhline(0., color='black')
-        ax[0, 1].axhline(0., color='black')
+        decorate(ax[1, 2], 'Airspeed', 'Time (scaled)', '[m/s]')
         tl, tu = None, None
         got_tu = False
         for k, traj in enumerate(self.trajs):
@@ -143,34 +154,49 @@ class PostProcessing:
             color = path_colors[k % len(path_colors)]
             tstats = self.point_stats(ts, points, last_index=nt)
             x = np.linspace(0, 1., nt - 1)
-            ax[0, 0].plot(ts[:nt-1], 1 / tstats.gs, label=f'{traj["info"]}')
-            ax[0, 1].plot(ts[:nt-1], tstats.cw, color=color)
-            ax[0, 2].plot(ts[:nt-1], tstats.tw, color=color)
+            ax[0, 0].plot(ts[:nt - 1], 1 / tstats.gs, label=f'{traj["info"]}', color=color)
+            ax[0, 1].plot(ts[:nt - 1], tstats.power, color=color)
+            ax[0, 2].plot(ts[:nt - 1], tstats.energy / 3.6e6, color=color)
             y = np.sqrt(tstats.cw ** 2 + tstats.tw ** 2)
             if fancynormplot:
                 xx = np.linspace(0, nt - 1, 10 * (nt - 1))
                 yy = itp.interp1d(x, y)(xx)
                 ax[1, 1].scatter(xx, yy, c=windy_cm(yy / windy_cm.norm_max), s=0.5, color=color)
             else:
-                ax[1, 1].plot(ts[:nt-1], y, color=color)
-            ax[1, 0].plot(ts[:nt-1], tstats.gs)
-            ax[1, 2].plot(ts[:nt-1], tstats.power)
+                ax[1, 1].plot(ts[:nt - 1], y, color=color)
+            ax[1, 0].plot(ts[:nt - 1], tstats.gs, color=color)
+            ax[1, 2].plot(ts[:nt - 1], tstats.vas, color=color)
             hours = int(tstats.duration / 3600)
-            minutes = int((tstats.duration - 3600*hours) / 60.)
-            line = f'{k} : ' + \
-                f'{traj["type"] + " " + traj["info"]:<25} ' + \
-                f'{hours}h{minutes}m, ' + \
-                f'{tstats.length / 1000:.2f}km, ' + \
-                f'mean gs {np.mean(tstats.gs):>5.2f} m/s, ' + \
-                f'mean airspeed {np.mean(tstats.vas):.2f} m/s, ' + \
-                f'mean power {np.mean(tstats.power):.1f} W, ' + \
-                f'energy {np.mean(tstats.power) * tstats.duration/ 3600000:.1f} kWh, ' + \
-                f'H2 (200 bar) {np.mean(tstats.power) * tstats.duration / 3600000 / 0.5:.1f} L, ' + \
-                f'H2 (liquid) {np.mean(tstats.power) * tstats.duration / 3600000 / 2.3:.1f} L'
+            minutes = int((tstats.duration - 3600 * hours) / 60.)
+            if int(hours) >= 1:
+                timestamp = hours + minutes / 60
+            else:
+                timestamp = tstats.duration
+            energy = np.mean(tstats.power) * tstats.duration
+            e_kwh = energy / 3600000
+            if int(e_kwh) >=1:
+                energy = e_kwh
+
+            line = ['',
+                    f'{traj["label"]}',
+                    f'{traj["type"] + " " + traj["info"]}',
+                    f'{timestamp:.2f}',
+                    f'{tstats.length / 1000:.2f}',
+                    f'{np.mean(tstats.gs):>5.2f}',
+                    f'{np.mean(tstats.vas):.2f}',
+                    f'{np.mean(tstats.power):.1f}',
+                    f'{energy:.1f}',
+                    'x' if traj['interrupted'] else '']
             entries.append((tstats.duration, line))
-        for _, line in sorted(entries, key=lambda x: x[0]):
-            print(line)
-        ax[0, 0].legend(loc='center left', bbox_to_anchor=(-1., 0.5))
+        data = [['', '#', 'Name', 'Time', 'Length (km)', 'Mean GS (m/s)', 'Mean AS (m/s)',
+                 'Mean power (W)', 'Energy (kWh)', 'Intr']] + \
+               list(map(lambda x: x[1], sorted(entries, key=lambda x: x[0])))
+        # asciitable.write(data, sys.stdout, Writer=asciitable.FixedWidthNoHeader)
+        with open(os.path.join(self.output_dir, '..', '.post_proc', self.analysis_fn), 'w') as f:
+            writer = csv.writer(f)
+            writer.writerow([str(datetime.datetime.fromtimestamp(time.time())).split('.')[0]] + data[0][1:])
+            writer.writerows(data[1:])
+        ax[0, 0].legend(loc='center left', bbox_to_anchor=(0., 0.9))
         plt.show()
 
     def point_stats(self, ts, points, last_index=-1):
@@ -217,16 +243,16 @@ class PostProcessing:
             #
             # u = max([dx_arg - asin(right), dx_arg + asin(right) - pi], key=lambda uu: gs_f(uu, self.va, w, e_dx))
 
-            #gs[i] = gs_v = gs_f(u, self.va, w, e_dx)
+            # gs[i] = gs_v = gs_f(u, self.va, w, e_dx)
             gs[i] = np.linalg.norm(gsv)
             cw[i] = np.cross(e_dx, w)
             tw[i] = e_dx @ w
             vas[i] = v_a
-            controls[i] = u if self.coords == COORD_CARTESIAN else np.pi/2. - u
+            controls[i] = u if self.coords == COORD_CARTESIAN else np.pi / 2. - u
             t = ts[i + 1]
             duration += dt
 
-        tstats = TrajStats(length, duration, gs, cw, tw, vas, controls)
+        tstats = TrajStats(length, duration, gs, cw, tw, vas, controls, dt)
         return tstats
 
 
