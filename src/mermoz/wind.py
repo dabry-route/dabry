@@ -1220,6 +1220,24 @@ class LCWind(Wind):
         return LCWind(new_coeffs, self.winds)
 
 
+class LVWind(Wind):
+    """
+    Wind varying linearly with time. Wind is spaitially uniform at each timestep.
+    """
+
+    def __init__(self, wind_value, gradient, time_scale):
+        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        self.wind_value = np.array(wind_value)
+        self.gradient = np.array(gradient)
+        self.t_end = time_scale
+
+    def value(self, t, x):
+        return self.wind_value + t * self.gradient
+
+    def d_value(self, t, x):
+        return np.zeros(2)
+
+
 if __name__ == '__main__':
     wind = DiscreteWind(interp='linear')
     wind.load('/home/bastien/Documents/data/wind/windy/Dakar-Natal-0.5-padded.mz/data.h5')

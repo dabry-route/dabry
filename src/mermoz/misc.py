@@ -219,6 +219,7 @@ def distance(x1, x2, coords):
 def decorate(ax, title=None, xlab=None, ylab=None, legend=None, xlim=None, ylim=None, min_yspan=None):
     ax.xaxis.grid(color='k', linestyle='-', linewidth=0.2)
     ax.yaxis.grid(color='k', linestyle='-', linewidth=0.2)
+    ax.tick_params(direction='in')
     if xlab: ax.xaxis.set_label_text(xlab)
     if ylab: ax.yaxis.set_label_text(ylab)
     if title: ax.set_title(title, {'fontsize': 8})
@@ -274,6 +275,9 @@ def airspeed_opti(p, cost='dobrokhodov'):
     if cost == 'dobrokhodov':
         pn = np.linalg.norm(p)
         return airspeed_opti_(pn)
+    elif cost == 'subramani':
+        pn = np.linalg.norm(p)
+        return pn / 2.
 
 
 def airspeed_opti_(pn):
@@ -283,9 +287,12 @@ def airspeed_opti_(pn):
 
 
 def power(airspeed, cost='dobrokhodov'):
-    kp1 = 0.05
-    kp2 = 1000
-    return kp1 * airspeed ** 3 + kp2 / airspeed
+    if cost == 'dobrokhodov':
+        kp1 = 0.05
+        kp2 = 1000
+        return kp1 * airspeed ** 3 + kp2 / airspeed
+    elif cost == 'subramani':
+        return airspeed ** 2
 
 
 def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):

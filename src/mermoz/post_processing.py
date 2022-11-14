@@ -32,19 +32,24 @@ class TrajStats:
                  tgwind: ndarray,
                  vas: ndarray,
                  controls: ndarray,
-                 dt: float):
+                 dt: float,
+                 dtarget: ndarray,
+                 imax: int):
+        self.imax = imax
         self.length = length
         self.duration = duration
-        self.gs = np.zeros(gs.shape)
-        self.gs[:] = gs
-        self.cw = np.zeros(crosswind.shape)
-        self.cw[:] = crosswind
-        self.tw = np.zeros(tgwind.shape)
-        self.tw[:] = tgwind
-        self.vas = np.zeros(vas.shape)
-        self.vas[:] = vas
-        self.controls = np.zeros(controls.shape)
-        self.controls[:] = controls
+        self.gs = np.zeros(imax+1)
+        self.gs[:] = gs[:imax+1]
+        self.cw = np.zeros(imax+1)
+        self.cw[:] = crosswind[:imax+1]
+        self.tw = np.zeros(imax+1)
+        self.tw[:] = tgwind[:imax+1]
+        self.vas = np.zeros(imax+1)
+        self.vas[:] = vas[:imax+1]
+        self.controls = np.zeros(imax+1)
+        self.controls[:] = controls[:imax+1]
+        self.dtarget = np.zeros(imax+1)
+        self.dtarget[:] = dtarget[:imax+1]
 
         self.power = np.array(list(map(lambda v: 0.05 * v ** 3 + 1000 / v, self.vas)))
         self.energy = np.array(list(np.sum(self.power[:i]) for i in range(self.power.shape[0]))) * dt
@@ -58,13 +63,26 @@ class PostProcessing:
         self.wind_fn = wind_fn if wind_fn is not None else 'wind.h5'
         self.param_fn = param_fn if param_fn is not None else 'params.json'
         self.analysis_fn = 'postproc.csv'
+
+        self.x_init = np.zeros(2)
+        self.x_target = np.zeros(2)
         with open(os.path.join(self.output_dir, self.param_fn), 'r') as f:
             pd = json.load(f)
             try:
                 self.coords = pd['coords']
             except KeyError:
-                print('[postproc] Missing coordinates type', file=sys.stderr)
+                print('[PP-Error] Missing coordinates type', file=sys.stderr)
                 exit(1)
+
+            try:
+                self.x_init[:] = pd['x_init']
+            except KeyError:
+                print('[PP-Warn] No init point found')
+
+            try:
+                self.x_target[:] = pd['x_target']
+            except KeyError:
+                print('[PP-Warn] No target point found')
 
             success = False
             for name in ['va', 'airspeed']:
@@ -74,8 +92,10 @@ class PostProcessing:
                 except KeyError:
                     pass
             if not success:
-                print('[postproc] Airspeed not found in parameters, switching to default value')
+                print('[PP-Warn] Airspeed not found in parameters, switching to default value')
                 self.va = AIRSPEED_DEFAULT
+
+        self.geod_l = distance(self.x_init, self.x_target, self.coords)
 
         wind_fp = os.path.join(self.output_dir, self.wind_fn)
         self.wind = DiscreteWind(interp='linear')
@@ -116,12 +136,15 @@ class PostProcessing:
 
     def stats(self, fancynormplot=False):
         fig, ax = plt.subplots(ncols=3, nrows=2, figsize=(12, 8))
-        decorate(ax[0, 0], 'Delay per length unit', 'Time (scaled)', '[s/m]', ylim=(0., 3 / self.va))
+        decorate(ax[0, 0], 'Marginal delay per length unit', 'Curvilinear abscissa (scaled)', '[h]')
         decorate(ax[0, 1], 'Power', 'Time (scaled)', '[W]')
         decorate(ax[0, 2], 'Energy spent', 'Time (scaled)', '[kWh]')
         decorate(ax[1, 0], 'Ground speed', 'Time (scaled)', '[m/s]', ylim=(0., 2. * self.va))
         decorate(ax[1, 1], 'Wind norm', 'Time (scaled)', '[m/s]', ylim=(0, 1.1 * self.va))
         decorate(ax[1, 2], 'Airspeed', 'Time (scaled)', '[m/s]')
+        ax2 = ax[0, 2].twinx()
+        ax2.tick_params(direction='in')
+        ax2.set_ylabel('Distance to target (m)')
         tl, tu = None, None
         got_tu = False
         for k, traj in enumerate(self.trajs):
@@ -140,10 +163,14 @@ class PostProcessing:
             if not got_tu:
                 if tu is None or ttu > tu:
                     tu = ttu
-        for a in ax:
-            for b in a:
+        for i, a in enumerate(ax):
+            for j, b in enumerate(a):
+                if i == 0 and j == 0:
+                    continue
                 b.set_xlim(tl, tu)
         entries = []
+        ets = {}
+        va_dur = {}
         for k, traj in enumerate(self.trajs):
             if 'rft' in traj['info'].lower():
                 continue
@@ -153,10 +180,12 @@ class PostProcessing:
             nt = traj['last_index']
             color = path_colors[k % len(path_colors)]
             tstats = self.point_stats(ts, points, last_index=nt)
+            nt = tstats.imax + 2
             x = np.linspace(0, 1., nt - 1)
-            ax[0, 0].plot(ts[:nt - 1], 1 / tstats.gs, label=f'{traj["info"]}', color=color)
+            ax[0, 0].plot(x, tstats.length * 1 / tstats.gs/3.6e3, label=f'{traj["info"]}', color=color)
             ax[0, 1].plot(ts[:nt - 1], tstats.power, color=color)
             ax[0, 2].plot(ts[:nt - 1], tstats.energy / 3.6e6, color=color)
+            ax2.plot(ts[:nt - 1], tstats.dtarget, color=color, alpha=0.2)
             y = np.sqrt(tstats.cw ** 2 + tstats.tw ** 2)
             if fancynormplot:
                 xx = np.linspace(0, nt - 1, 10 * (nt - 1))
@@ -173,6 +202,8 @@ class PostProcessing:
             else:
                 timestamp = tstats.duration
             energy = np.mean(tstats.power) * tstats.duration
+            ets[k] = (energy, tstats.duration)
+            va_dur[k] = (tstats.vas[0], tstats.duration)
             e_kwh = energy / 3600000
             if int(e_kwh) >=1:
                 energy = e_kwh
@@ -197,7 +228,28 @@ class PostProcessing:
             writer.writerow([str(datetime.datetime.fromtimestamp(time.time())).split('.')[0]] + data[0][1:])
             writer.writerows(data[1:])
         ax[0, 0].legend(loc='center left', bbox_to_anchor=(0., 0.9))
+        plt.show(block=False)
+        fig, ax = plt.subplots()
+        times = list(map(lambda x: x[1]/3.6e3, ets.values()))
+        energies = list(map(lambda x: x[0]/3.6e6, ets.values()))
+        colors = [path_colors[k % len(path_colors)] for k in range(len(energies))]
+        ax.scatter(times, energies, c=colors)
+        v_minp = (1000/(3*0.05)) ** (1/4)
+        p_min = 0.05 * v_minp ** 3 + 1000 / v_minp
+        decorate(ax, 'Energy vs. time', 'Time (h)', 'Energy (kWh)')
+        ax.plot((0., 100), (0., 100 * p_min/1e3))
         plt.show()
+
+        """
+        fig, ax = plt.subplots()
+        valist = []
+        for k, traj in enumerate(self.trajs):
+            ax.scatter(*va_dur[k], color=colors[k])
+            valist.append(va_dur[k][0])
+        valist = np.linspace(min(valist), max(valist), 100)
+        ax.plot(valist, 2*self.geod_l / valist)
+        plt.show()
+        """
 
     def point_stats(self, ts, points, last_index=-1):
         """
@@ -216,9 +268,19 @@ class PostProcessing:
         tw = np.zeros(n - 1)
         vas = np.zeros(n - 1)
         controls = np.zeros(n - 1)
+        dtarget = np.zeros(n - 1)
         duration = 0.
         t = ts[0]
-        length = float(np.sum([distance(points[i], points[i + 1], self.coords) for i in range(n - 1)]))
+
+        dtarget = np.array([distance(points[i], self.x_target, self.coords) for i in range(n - 1)])
+
+        imax = n - 2
+        for i in range(len(dtarget)):
+            if dtarget[i]/self.geod_l < 5e-2:
+                imax = i
+                break
+
+        length = float(np.sum([distance(points[i], points[i + 1], self.coords) for i in range(imax + 1)]))
         for i in range(n - 1):
             dt = ts[i + 1] - ts[i]
             p = np.zeros(2)
@@ -250,9 +312,10 @@ class PostProcessing:
             vas[i] = v_a
             controls[i] = u if self.coords == COORD_CARTESIAN else np.pi / 2. - u
             t = ts[i + 1]
-            duration += dt
+            if i <= imax:
+                duration += dt
 
-        tstats = TrajStats(length, duration, gs, cw, tw, vas, controls, dt)
+        tstats = TrajStats(length, duration, gs, cw, tw, vas, controls, dt, dtarget, imax)
         return tstats
 
 

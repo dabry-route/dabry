@@ -9,7 +9,7 @@ from pyproj import Proj
 from mermoz.feedback import Feedback
 from mermoz.integration import IntEulerExpl
 from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
-    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind
+    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind, LVWind
 from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
@@ -263,7 +263,8 @@ class IndexedProblem(MermozProblem):
         14: ['Moving vortices', 'movors'],
         15: ['Gyre Rhoads2010', 'gyre-rhoads2010'],
         16: ['Gyre Transversality', 'gyre-transver'],
-        17: ['Band wind', 'band']
+        17: ['Band wind', 'band'],
+        18: ['Linearly varying wind', 'lva']
     }
 
     def __init__(self, i, seed=0):
@@ -819,7 +820,7 @@ class IndexedProblem(MermozProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
             self.time_scale = 3. * self._geod_l / v_a
         elif i == 17:
-            v_a = 11.58
+            v_a = 20.7
 
             sf = 1.
 
@@ -829,7 +830,7 @@ class IndexedProblem(MermozProblem):
             tr = sf * np.array((85, 85))
             coords = COORD_CARTESIAN
 
-            band_wind = BandWind(np.array((0., 50.)), np.array((1., 0.)), np.array((20., 0.)), 20)
+            band_wind = BandWind(np.array((0., 50.)), np.array((1., 0.)), np.array((-20., 0.)), 20)
             total_wind = DiscreteWind()
             total_wind.load_from_wind(band_wind, 101, 101, bl, tr, coords, fd=True)
 
@@ -839,6 +840,25 @@ class IndexedProblem(MermozProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  autodomain=False)
             self.time_scale = 1. * self._geod_l / v_a
+        elif i == 18:
+            v_a = 23.
+
+            sf = 3e6
+
+            x_init = sf * np.array((0.1, 0.))
+            x_target = sf * np.array((0.9, 0.))
+            coords = COORD_CARTESIAN
+            wind_value = np.array((0., -15.))
+            gradient = np.array((0., 30/130000))
+            time_scale = 130000
+            lv_wind = LVWind(wind_value, gradient, time_scale)
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(lv_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
+            self.time_scale = time_scale
+
         else:
             raise IndexError(f'No problem with index {i}')
 

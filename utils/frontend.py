@@ -5,6 +5,7 @@ import numpy as np
 import easygui
 import h5py
 import json
+import threading
 
 sys.path.extend(['/home/bastien/Documents/work/mermoz',
                  '/home/bastien/Documents/work/mermoz/src',
@@ -12,6 +13,7 @@ sys.path.extend(['/home/bastien/Documents/work/mermoz',
                  '/home/bastien/Documents/work/mdisplay/src'])
 from mdisplay.display import Display
 from mermoz.misc import *
+from mermoz.post_processing import PostProcessing
 
 
 class FrontendHandler:
@@ -111,7 +113,7 @@ class FrontendHandler:
                 with open(cache_fp, 'w') as f:
                     f.writelines(sel_dir)
 
-    def run_frontend(self, ex_name=None, noparams=True, noshow=False):
+    def run_frontend(self, ex_name=None, noparams=True, noshow=False, block=False):
         # if self.mode == 'default':
         #     if ex_name is None:
         #         self.output_path = easygui.diropenbox(default=os.path.join('..', 'output'))
@@ -134,7 +136,7 @@ class FrontendHandler:
         self.configure()
         self.display.update_title()
         if not noshow:
-            self.display.show(noparams=noparams)
+            self.display.show(noparams=noparams, block=block)
 
     def show_params(self):
         from IPython.core.display import HTML
@@ -285,8 +287,13 @@ class FrontendHandler:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Mermoz data display')
     parser.add_argument('-l', '--latest', help='Run latest results', required=False, nargs='?', const=True)
+    parser.add_argument('-p', '--postprocessing', help='Run post processing', required=False, nargs='?', const=True)
     args = parser.parse_args(sys.argv[1:])
     fh = FrontendHandler(mode='default')
     fh.select_example(select_latest=args.latest)
-    fh.run_frontend()
+    fh.run_frontend(block=not args.postprocessing)
+    if args.postprocessing:
+        pp = PostProcessing(fh.output_path)
+        pp.load()
+        pp.stats()
     # fh.post_processing()

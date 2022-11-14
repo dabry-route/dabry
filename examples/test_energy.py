@@ -3,11 +3,13 @@ import time
 from math import atan2
 
 from datetime import datetime, timedelta
+
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 from tqdm import tqdm
 
-from mermoz.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB
+from mermoz.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB, FixedHeadingFB
 from mermoz.mdf_manager import MDFmanager
 from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *
@@ -20,10 +22,10 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 17, 0
+    pb_id, seed = 0, 0
     dbpb = None  # '37W_8S_16W_17S_20220301_12'
     cache_rff = False
-    cache_wind = False
+    cache_wind = True
 
     chrono = Chrono()
 
@@ -66,23 +68,91 @@ if __name__ == '__main__':
         # shooting.set_adjoint(100. * -1. * np.array((np.cos(a), np.sin(a))))
         # trajs.append(shooting.integrate())
     """
-    a = 0.24538889370445727
-    l = np.linspace(0.3 * np.pi, 0.5 * np.pi, 20)
-    al, au = l[10], l[11]
-    l2 = np.linspace(al, au, 4)
-    for a in l2:
-        s = np.array((np.cos(a), np.sin(a)))
-        pn0 = scipy.optimize.brentq(lambda pn:
-                                    power(airspeed_opti_(pn)) - pn * (
-                                            airspeed_opti_(pn) + s @ pb.model.wind.value(0., pb.x_init)),
-                                    1., 200.)
-        shooting = Shooting(pb.model.dyn, pb.x_init, t_upper_bound, mode='energy-opt', domain=pb.domain,
+    """
+    l = np.linspace(-0.2 * np.pi, 0.1 * np.pi, 10)
+    # al, au = l[1], l[2]
+    # l2 = np.linspace(al, au, 4)
+    l2 = l
+    pn0s = [1., 10., 100., 1000.]
+    fig, ax = plt.subplots()
+    for k, a in enumerate(l2):
+        for pn0 in pn0s:
+            s = np.array((np.cos(a), np.sin(a)))
+            cost = 'dobrokhodov'
+            # pn0 = scipy.optimize.brentq(lambda pn:
+            #                             power(airspeed_opti(np.array((pn, 0.)), cost=cost), cost=cost) - pn * (
+            #                                     airspeed_opti(np.array((pn, 0.)), cost=cost) + s @ pb.model.wind.value(0., pb.x_init)),
+            #                             1., 300.)
+            #print(f'pn0 : {pn0:.2f}')
+            # pn0 = pn0s[k]
+            shooting = Shooting(pb.model.dyn, pb.x_init, 2 * t_upper_bound, mode='energy-opt', domain=pb.domain,
+                                energy_ceil=20. * 8.4 * 3.6e6)
+            shooting.set_adjoint(-1. * pn0 * s)
+            traj = shooting.integrate()
+            traj.info = f'trv'
+            trajs.append(traj)
+            point = pn0 * (-1. * s)
+            ax.scatter(point[0], point[1])
+    
+    ax.grid(True)
+    ax.axis('equal')
+    #plt.show()
+    """
+
+
+    def auto_upperb(pn):
+        va = airspeed_opti_(pn)
+        return 3 * pb._geod_l / va
+
+    good = [(5, 0.0626662),
+            (10, 0.0775),
+            (25, 0.0908558),
+            (50, 0.093),
+            (75, 0.0942757)]
+
+    for pn0, factor in good:
+        theta = factor * np.pi
+        s = np.array((np.cos(theta), np.sin(theta)))
+        shooting = Shooting(pb.model.dyn, pb.x_init, auto_upperb(pn0), mode='energy-opt', domain=pb.domain,
                             energy_ceil=20. * 8.4 * 3.6e6)
         shooting.set_adjoint(-1. * pn0 * s)
         traj = shooting.integrate()
-        traj.info = 'trv'
+        traj.info = f'trv_{int(pn0)}'
         trajs.append(traj)
+
+    def f(factor):
+        s = np.array((np.cos(factor * np.pi), np.sin(factor * np.pi))).reshape((2,))
+        shooting = Shooting(pb.model.dyn, pb.x_init, auto_upperb(pn0), mode='energy-opt', domain=pb.domain,
+                            energy_ceil=20. * 8.4 * 3.6e6)
+        shooting.set_adjoint(-1. * pn0 * s)
+        traj = shooting.integrate()
+        return np.min(np.linalg.norm(traj.points - pb.x_target) / pb._geod_l)
+
+    candidates =[]
+
+    for pn0 in [5.]:
+        print(pn0, end='')
+        for factor in np.linspace(0.18, 0.22, 0):
+            theta = factor * np.pi
+            fb = FixedHeadingFB(pb.model.wind, airspeed_opti_(pn0), theta, coords=pb.coords)
+            psi = fb.value(0, pb.x_init)
+            s = np.array((np.cos(psi), np.sin(psi)))
+            shooting = Shooting(pb.model.dyn, pb.x_init, auto_upperb(pn0), mode='energy-opt', domain=pb.domain,
+                                energy_ceil=20. * 8.4 * 3.6e6)
+            shooting.set_adjoint(-1. * pn0 * s)
+            traj = shooting.integrate()
+            traj.info = f'trv_{int(pn0)}_auto'
+            err = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1) / pb._geod_l)
+            reached = err < 0.05
+            if reached:
+                print('|', end='')
+                candidates.append((pn0, psi/np.pi))
+                trajs.append(traj)
+        print()
+    print(candidates)
     mdfm.dump_trajs(trajs)
+
+    """
     chrono.start('Computing EF')
     solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=500, rel_nb_ceil=0.05)
     reach_time, iit, p_init = solver.solve(no_fast=True)
@@ -98,6 +168,7 @@ if __name__ == '__main__':
     traj.type = TRAJ_OPTIMAL
     traj.info = 'Extremals'
     chrono.stop()
+    """
     # for v_a in np.linspace(12., 25., 5):
     #     pb.update_airspeed(v_a)
     #     t_upper_bound = pb.time_scale if pb.time_scale is not None else 1.2 * pb._geod_l / pb.model.v_a

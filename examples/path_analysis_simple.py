@@ -21,7 +21,7 @@ if __name__ == '__main__':
 
     base_dir = f'/home/bastien/Documents/work/mermoz/output/'
     output_dir = get_latest_output_dir(base_dir)
-    #output_dir = f'/home/bastien/Documents/work/mermoz/output/example_solver-ef_72W_15S_0W_57S_20220301_12'
+    # output_dir = f'/home/bastien/Documents/work/mermoz/output/example_energy_band'
     print(output_dir)
     pp = PostProcessing(output_dir)
     pp.load()
