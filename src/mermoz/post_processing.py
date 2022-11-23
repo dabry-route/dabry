@@ -177,6 +177,8 @@ class PostProcessing:
             points = np.zeros(traj['data'].shape)
             points[:] = traj['data']
             ts = np.array(traj['ts'])
+            if abs(ts[1] - ts[0]) < 1e-8:
+                continue
             nt = traj['last_index']
             color = path_colors[k % len(path_colors)]
             tstats = self.point_stats(ts, points, last_index=nt)

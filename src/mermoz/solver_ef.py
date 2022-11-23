@@ -9,7 +9,7 @@ from mermoz.misc import *
 from mermoz.model import ZermeloGeneralModel
 from mermoz.problem import MermozProblem
 from mermoz.shooting import Shooting
-from mermoz.trajectory import AugmentedTraj
+from mermoz.trajectory import AugmentedTraj, Trajectory
 
 
 def heappush(a, b):
@@ -25,10 +25,10 @@ class FrontPoint:
     def __init__(self, identifier, tsa, i_obs=-1, ccw=True):
         """
         :param identifier: The front point unique identifier
-        :param tsa: The point in (id_time, time, state, adjoint) form
+        :param tsa: The point in (id_time, time, state, adjoint, cost) form
         """
         self.i = identifier
-        self.tsa = (tsa[0], tsa[1], np.zeros(2), np.zeros(2))
+        self.tsa = (tsa[0], tsa[1], np.zeros(2), np.zeros(2), tsa[4])
         self.tsa[2][:] = tsa[2]
         self.tsa[3][:] = tsa[3]
         self.i_obs = i_obs
@@ -91,14 +91,18 @@ class SolverEF:
     """
     Solver for the navigation problem using progressive extremal field computation
     """
+    MODE_TIME = 0
+    MODE_ENERGY = 1
 
-    def __init__(self, mp: MermozProblem, max_time, N_disc_init=20, rel_nb_ceil=0.05, dt=None, max_steps=30,
-                 hard_obstacles=True):
+    def __init__(self, mp: MermozProblem, max_time, mode=0, N_disc_init=20, rel_nb_ceil=0.05, dt=None,
+                 max_steps=30, hard_obstacles=True):
         self.mp_primal = mp
         self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
         self.mp_dual.x_init = np.array(self.mp_dual.x_target)
         self.mp_dual.x_target = np.array(mem)
+
+        self.mode = mode
 
         self.N_disc_init = N_disc_init
         # Neighbouring distance ceil
@@ -118,6 +122,9 @@ class SolverEF:
         self.n_points = 0
         self.parents_primal = {}
         self.parents_dual = {}
+        self.child_order_primal = {}
+        self.child_order_dual = {}
+        self.child_order = None
 
         self.trajs_primal = {}
         self.trajs_dual = {}
@@ -172,11 +179,13 @@ class SolverEF:
         if b:
             self.mp = self.mp_primal
             self.trajs = self.trajs_primal
+            self.child_order = self.child_order_primal
             if self.dt < 0:
                 self.dt *= -1
         else:
             self.mp = self.mp_dual
             self.trajs = self.trajs_dual
+            self.child_order = self.child_order_dual
             if self.dt > 0:
                 self.dt *= -1
 
@@ -195,11 +204,16 @@ class SolverEF:
         t_start = self.mp_primal.model.wind.t_start + time_offset
         for k in range(self.N_disc_init):
             theta = 2 * np.pi * k / self.N_disc_init
-            p = np.array((np.cos(theta), np.sin(theta)))
+            pd = np.array((np.cos(theta), np.sin(theta)))
+            pn = 1.
+            if self.mode == self.MODE_ENERGY:
+                asp = self.mp.aero.asp_mlod(-pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
+                pn = self.mp.aero.d_power(asp)
+            p = pn * pd
             i = self.new_traj_index()
             self.p_inits[i] = np.zeros(2)
             self.p_inits[i][:] = p
-            a = FrontPoint(i, (0, t_start, self.mp.x_init, p))
+            a = FrontPoint(i, (0, t_start, self.mp.x_init, p, 0.))
             heappush(self.active, (1., a))
             self.trajs[k] = {}
             self.trajs[k][a.tsa[0]] = a.tsa[1:]
@@ -229,7 +243,14 @@ class SolverEF:
             it = a.tsa[0]
             t, x, p, status, i_obs, ccw = self.step_single(a.tsa[1:], a.i_obs, a.ccw)
             self.n_points += 1
-            tsa = (t, np.zeros(2), np.zeros(2))
+            # Cost computation
+            dt = t - a.tsa[1]
+            if self.mode == self.MODE_TIME:
+                power = self.mp.aero.power(self.mp.model.v_a)
+            else:
+                power = self.mp.aero.power(self.mp.aero.asp_opti(p))
+            c = power * dt + a.tsa[4]
+            tsa = (t, np.zeros(2), np.zeros(2), c)
             tsa[1][:] = x
             tsa[2][:] = p
             self.trajs[a.i][it + 1] = tsa
@@ -280,7 +301,7 @@ class SolverEF:
 
         thetal = np.arctan2(*pl[2][::-1])
         thetau = np.arctan2(*pu[2][::-1])
-        #thetal, thetau = DEG_TO_RAD * np.array(rectify(RAD_TO_DEG * thetal, RAD_TO_DEG * thetau))
+        # thetal, thetau = DEG_TO_RAD * np.array(rectify(RAD_TO_DEG * thetal, RAD_TO_DEG * thetau))
         rhol = np.linalg.norm(pl[2])
         rhou = np.linalg.norm(pu[2])
         angles = linspace_sph(thetal, thetau, self.N_filling_steps + 2)[1:-1]
@@ -300,6 +321,7 @@ class SolverEF:
         points = np.zeros((self.N_filling_steps, 2))
         points[:] = np.einsum('i,j->ij', 1 - alpha, pl[1]) \
                     + np.einsum('i,j->ij', alpha, pu[1])
+        costs = (1 - alpha) * pl[3] + alpha * pu[3]
         new_p_inits = np.einsum('i,j->ij', 1 - alpha, self.p_inits[ill]) \
                       + np.einsum('i,j->ij', alpha, self.p_inits[iuu])
         new_indexes = [self.new_traj_index(ill, iuu) for _ in range(self.N_filling_steps)]
@@ -307,8 +329,9 @@ class SolverEF:
             if not self.mp.domain(points[k]):
                 continue
             i = new_indexes[k]
+            self.child_order[i] = k
             t = pl[0]
-            tsa = (t, points[k], adjoints[k])
+            tsa = (t, points[k], adjoints[k], costs[k])
             # if self.mp.in_obs(points[k]):
             #     continue
             self.trajs[i] = {}
@@ -325,7 +348,13 @@ class SolverEF:
                 if not status:
                     break
                 self.n_points += 1
-                tsa = (t, np.zeros(2), np.zeros(2))
+                dt = t - self.trajs[i][iit - 1][0]
+                if self.mode == self.MODE_TIME:
+                    power = self.mp.aero.power(self.mp.model.v_a)
+                else:
+                    power = self.mp.aero.power(self.mp.aero.asp_opti(p))
+                c = power * dt + self.trajs[i][iit - 1][3]
+                tsa = (t, np.zeros(2), np.zeros(2), c)
                 tsa[1][:] = x
                 tsa[2][:] = p
                 self.trajs[i][iit] = tsa
@@ -345,9 +374,12 @@ class SolverEF:
         t = ap[0]
         if i_obs == -1 or not self.hard_obstacles:
             # For the moment, simple Euler scheme
-            u = control_time_opti(x, p, t, self.mp.coords)
-            dyn_x = self.mp.model.dyn.value(x, u, t)
-            A = -self.mp.model.dyn.d_value__d_state(x, u, t).transpose()
+            u = heading_opti(x, p, t, self.mp.coords)
+            kw = {}
+            if self.mode == self.MODE_ENERGY:
+                kw['v_a'] = self.mp.aero.asp_opti(p)
+            dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
+            A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
             dyn_p = A.dot(p)
             x += self.dt * dyn_x
             p += self.dt * dyn_p
@@ -435,7 +467,7 @@ class SolverEF:
             self.trajs_control[kp] = self.trajs_dual[kp]
             self.trajs_add_info[kp] = 'control'
 
-    def solve(self, exhaustive=False, verbose=False, no_fast=False, no_prepare_control=False):
+    def solve(self, exhaustive=False, verbose=False, no_fast=False, no_prepare_control=False, forward_only=False):
         """
         :param exhaustive: For complete coverage of state space by extremals
         :param verbose: To print steps
@@ -447,14 +479,24 @@ class SolverEF:
         """
         if verbose: self.debug = True
 
-        if not no_fast and self.mp.model.wind.t_end is None:
-            # Problem is steady
-            # Compute only backward extremals and return
-            self.set_primal(False)
+        if forward_only:
+            # Only compute forward front
+            self.set_primal(True)
             res = self.propagate(verbose)
-            if not no_prepare_control:
-                self.prepare_control_law()
+            polyfront = self.build_cfront()
+            if not polyfront.contains(Point(*self.mp.x_target)):
+                print('Warning : EF not containing target', file=sys.stderr)
+                res = res[0], -1, res[2]
             return res
+
+        elif not no_fast and self.mp.model.wind.t_end is None:
+                # Problem is steady
+                # Compute only backward extremals and return
+                self.set_primal(False)
+                res = self.propagate(verbose)
+                if not no_prepare_control:
+                    self.prepare_control_law()
+                return res
         else:
             # Problem is time-varying
             # First propagate forward extremals
@@ -478,12 +520,99 @@ class SolverEF:
         for k, v in self.trajs_control.items():
             for vv in v.values():
                 tt = vv[0]
-                if tt - t <= 10*abs(self.dt):
+                if tt - t <= 10 * abs(self.dt):
                     candidate = self.mp.distance(vv[1], x)
                     if m is None or candidate < m:
                         m = candidate
                         p[:] = vv[2]
         return self.mp.control_angle(p, x)
+
+    def aslaw(self, t, x):
+        m = None
+        p = np.zeros(2)
+        for k, v in self.trajs_control.items():
+            for vv in v.values():
+                tt = vv[0]
+                if tt - t <= 10 * abs(self.dt):
+                    candidate = self.mp.distance(vv[1], x)
+                    if m is None or candidate < m:
+                        m = candidate
+                        p[:] = vv[2]
+        return self.mp.aero.asp_opti(p)
+
+    def build_opti_traj(self, force_primal=False, force_dual=False):
+        if force_primal or ((not force_dual) and len(self.trajs_dual) == 0):
+            # Priorize dual. If empty then resort to primal.
+            trajs = self.trajs_primal
+            mp = self.mp_primal
+            parents = self.parents_primal
+            child_order = self.child_order_primal
+            using_primal = True
+        else:
+            trajs = self.trajs_dual
+            mp = self.mp_dual
+            parents = self.parents_dual
+            child_order = self.child_order_dual
+            using_primal = False
+        dist = None
+        k0 = 0
+        nt = 0
+        s0 = 0
+        for k, v in trajs.items():
+            for s, kl in enumerate(v.keys()):
+                i = kl
+                point = v[kl][1]
+                if dist is None or mp.distance(point, mp.x_target) < dist:
+                    dist = mp.distance(point, mp.x_target)
+                    k0 = k
+                    nt = i
+                    s0 = s
+        points = np.zeros((nt, 2))
+        ts = np.zeros(nt)
+        data = list(trajs[k0].values())
+        it = 0
+        s = s0
+        if k0 in range(self.N_disc_init):
+            cond = lambda s: s > 0
+        else:
+            cond = lambda s: s >= 0
+        while cond(s):
+            points[it] = data[s][1]
+            ts[it] = data[s][0]
+            it += 1
+            s -= 1
+
+        if k0 not in range(self.N_disc_init):
+            kl, ku = parents[k0]
+            a = (child_order[k0] + 1) / (self.N_filling_steps + 1)
+            while it < nt:
+                endl = (nt - 1 - it) not in trajs[kl].keys()
+                endu = (nt - 1 - it) not in trajs[ku].keys()
+                if endl and not endu:
+                    b = (child_order[kl] + 1) / (self.N_filling_steps + 1)
+                    kl, _ = parents[kl]
+                    a = a + b * (1 - a)
+                if endu and not endl:
+                    b = (child_order[ku] + 1) / (self.N_filling_steps + 1)
+                    _, ku = parents[ku]
+                    a = a * b
+                if endl and endu:
+                    b = (child_order[kl] + 1) / (self.N_filling_steps + 1)
+                    c = (child_order[ku] + 1) / (self.N_filling_steps + 1)
+                    kl, _ = parents[kl]
+                    _, ku = parents[ku]
+                    a = a * c + b * (1 - a)
+                datal = [v for j, v in trajs[kl].items() if j <= (nt - 1 - it)]
+                datau = [v for j, v in trajs[ku].items() if j <= (nt - 1 - it)]
+                ib = min(len(datal), len(datau))
+                for i in range(ib):
+                    points[it] = (1 - a) * datal[-1 - i][1] + a * datau[-1 - i][1]
+                    ts[it] = datal[- 1 - i][0]
+                    it += 1
+        if using_primal:
+            ts = ts[::-1]
+            points = points[::-1]
+        return Trajectory(ts, points, np.zeros(nt), nt - 1, mp.coords, info=f'opt_m{self.mode}')
 
     def get_trajs(self, primal_only=False, dual_only=False):
         res = []
@@ -500,6 +629,7 @@ class SolverEF:
                 adjoints = np.zeros((n, 2))
                 controls = np.zeros(n)
                 transver = np.zeros(n)
+                costs = np.zeros(n)
                 offset = 0.
                 if self.mp_primal.model.wind.t_end is None and i == 0:
                     # If wind is steady, offset timestamps to have a <self.reach_time>-long window
@@ -510,7 +640,9 @@ class SolverEF:
                     points[k, :] = e[1]
                     adjoints[k, :] = e[2]
                     controls[k] = self.mp.control_angle(e[2], e[1])
-                    transver[k] = 1 - self.mp.model.v_a * np.linalg.norm(e[2]) + e[2] @ self.mp.model.wind.value(e[0], e[1])
+                    transver[k] = 1 - self.mp.model.v_a * np.linalg.norm(e[2]) + e[2] @ self.mp.model.wind.value(e[0],
+                                                                                                                 e[1])
+                    costs[k] = e[3]
                 add_info = ''
                 if i == 0:
                     try:
@@ -520,6 +652,6 @@ class SolverEF:
                 res.append(
                     AugmentedTraj(timestamps, points, adjoints, controls, last_index=n - 1, coords=self.mp.coords,
                                   label=it,
-                                  type=TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver))
+                                  type=TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver, costs=costs))
 
         return res

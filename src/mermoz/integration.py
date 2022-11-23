@@ -13,6 +13,7 @@ class Integration(ABC):
                  dyn,
                  feedback,
                  coords,
+                 aslaw=None,
                  stop_cond=None,
                  max_iter=10000,
                  int_step=0.0001,
@@ -21,6 +22,7 @@ class Integration(ABC):
         self.wind = wind
         self.dyn = dyn
         self.feedback = feedback
+        self.aslaw = aslaw
         self.stop_cond = stop_cond
         self.max_iter = max_iter
         self.int_step = int_step
@@ -54,15 +56,37 @@ class IntEulerExpl(Integration):
         x = np.zeros(2)
         x[:] = x_init
         points[0, :] = x
-        controls[0] = self.feedback.value(t, x)
+        val = self.feedback.value(t, x)
+        if len(val) == 2:
+            heading, asp = val
+        else:
+            heading, asp = val, None
+        controls[0] = heading
         dt = self.int_step * (-1. if self.backward else 1.)
-        while (i + 1 < self.max_iter) and (self.stop_cond is None or not self.stop_cond.value(t, x)):
-            i += 1
-            t += dt
-            u = self.feedback.value(t, x)
-            d_val = self.dyn.value(x, u, t)
-            x += dt * d_val
-            timestamps[i] = t
-            points[i] = x
-            controls[i] = u
+        if self.aslaw is None and asp is None:
+            while (i + 1 < self.max_iter) and (self.stop_cond is None or not self.stop_cond.value(t, x)):
+                i += 1
+                t += dt
+                u = self.feedback.value(t, x)
+                d_val = self.dyn.value(x, u, t)
+                x += dt * d_val
+                timestamps[i] = t
+                points[i] = x
+                controls[i] = u
+        else:
+            while (i + 1 < self.max_iter) and (self.stop_cond is None or not self.stop_cond.value(t, x)):
+                i += 1
+                t += dt
+                u = self.feedback.value(t, x)
+                if self.aslaw is not None:
+                    v_a = self.aslaw.value(t, x)
+                    heading = u
+                else:
+                    v_a = u[1]
+                    heading = u[0]
+                d_val = self.dyn.value(x, heading, t, v_a=v_a)
+                x += dt * d_val
+                timestamps[i] = t
+                points[i] = x
+                controls[i] = heading
         return Trajectory(timestamps, points, controls, i, self.coords, type=TRAJ_INT)

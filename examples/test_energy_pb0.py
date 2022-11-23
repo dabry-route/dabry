@@ -9,14 +9,13 @@ import numpy as np
 import scipy.optimize
 from tqdm import tqdm
 
-from mermoz.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB, FixedHeadingFB, FunAS, E_GSTargetFB
+from mermoz.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB, FixedHeadingFB
 from mermoz.mdf_manager import MDFmanager
 from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *
 from mermoz.problem import IndexedProblem, DatabaseProblem
 from mermoz.shooting import Shooting
 from mermoz.solver_ef import SolverEF
-from mermoz.trajectory import Trajectory
 from mermoz.solver_rp import SolverRP
 from mermoz.stoppingcond import TimedSC, DistanceSC, DisjunctionSC
 from mermoz.wind import DiscreteWind
@@ -69,18 +68,16 @@ if __name__ == '__main__':
         # shooting.set_adjoint(100. * -1. * np.array((np.cos(a), np.sin(a))))
         # trajs.append(shooting.integrate())
     """
-    """
-    l = np.linspace(20/180 * np.pi, 30/180 * np.pi, 100)
-    # al, au = l[3], l[4]
-    # l2 = np.linspace(al, au, 10)
-    l2 = l
+
+    l = np.linspace(-0.2 * np.pi, 0.1 * np.pi, 10)
+    al, au = l[-2], l[-1]
+    l2 = np.linspace(al, au, 10)
     for k, a in enumerate(l2):
         s = np.array((np.cos(a), np.sin(a)))
         cost = 'dobrokhodov'
         pn0 = scipy.optimize.brentq(lambda pn:
                                     power(airspeed_opti(np.array((pn, 0.)), cost=cost), cost=cost) - pn * (
-                                            airspeed_opti(np.array((pn, 0.)), cost=cost) + s @ pb.model.wind.value(0.,
-                                                                                                                   pb.x_init)),
+                                            airspeed_opti(np.array((pn, 0.)), cost=cost) + s @ pb.model.wind.value(0., pb.x_init)),
                                     1., 300.)
         print(f'pn0 : {pn0:.2f}')
         # pn0 = pn0s[k]
@@ -90,18 +87,20 @@ if __name__ == '__main__':
         traj = shooting.integrate()
         traj.info = f'trv_opt'
         err = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1) / pb._geod_l)
-        reached = err < 0.02
-        #if reached:
-        print(pn0, a)
-        trajs.append(traj)
-    """
+        reached = err < 0.05
+        if reached:
+            print(pn0, a)
+            trajs.append(traj)
 
     def auto_upperb(pn):
         va = airspeed_opti_(pn)
         return 3 * pb._geod_l / va
 
-
-    good = []
+    good = [(5, 0.0626662),
+            (10, 0.0775),
+            (25, 0.0908558),
+            (50, 0.093),
+            (75, 0.0942757)]
 
     for pn0, factor in good:
         theta = factor * np.pi
@@ -113,7 +112,6 @@ if __name__ == '__main__':
         traj.info = f'trv_{int(pn0)}'
         trajs.append(traj)
 
-
     def f(factor):
         s = np.array((np.cos(factor * np.pi), np.sin(factor * np.pi))).reshape((2,))
         shooting = Shooting(pb.model.dyn, pb.x_init, auto_upperb(pn0), mode='energy-opt', domain=pb.domain,
@@ -122,12 +120,11 @@ if __name__ == '__main__':
         traj = shooting.integrate()
         return np.min(np.linalg.norm(traj.points - pb.x_target) / pb._geod_l)
 
+    candidates =[]
 
-    candidates = []
-
-    for pn0 in [10, 20, 30, 40]:
+    for pn0 in [5.]:
         print(pn0, end='')
-        for factor in np.linspace(10/180, 30/180, 10):
+        for factor in np.linspace(0.18, 0.22, 0):
             theta = factor * np.pi
             fb = FixedHeadingFB(pb.model.wind, airspeed_opti_(pn0), theta, coords=pb.coords)
             psi = fb.value(0, pb.x_init)
@@ -138,115 +135,34 @@ if __name__ == '__main__':
             traj = shooting.integrate()
             traj.info = f'trv_{int(pn0)}_auto'
             err = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1) / pb._geod_l)
-            reached = err < 0.02
+            reached = err < 0.05
             if reached:
                 print('|', end='')
-                candidates.append((pn0, psi / np.pi))
+                candidates.append((pn0, psi/np.pi))
                 trajs.append(traj)
         print()
     print(candidates)
     mdfm.dump_trajs(trajs)
-    chrono.start('Computing Energy EF')
-    t_upper_bound = 3 * pb._geod_l / pb.aero.v_minp
-    solver_ef = solver = SolverEF(pb, t_upper_bound, mode=1, max_steps=500, rel_nb_ceil=0.05)
-    reach_time, iit, p_init = solver.solve(forward_only=True)
-    chrono.stop()
-    print(f'Reach time : {reach_time / 3600:.2f}')
-    trajs = solver.get_trajs()
-    mdfm.dump_trajs(trajs)
 
-    chrono.start('Computing optimal traj')
-    traj = solver_ef.build_opti_traj(force_primal=True)
-    mdfm.dump_trajs([traj])
-    chrono.stop()
-
-    """
-    chrono.start('Computing optimal traj')
-    traj = solver_ef.build_opti_traj(force_dual=True)
-    mdfm.dump_trajs([traj])
-    chrono.stop()
-    """
-    """
-    for factor in [2, 4, 6, 8, 10]:
-        nrj_ceil = factor * 3.6e6
-        virt_points = []
-        pi_args = []
-        for i, traj in enumerate(trajs):
-            k0 = 0
-            for k, nrj in enumerate(traj.costs):
-                if nrj > nrj_ceil:
-                    k0 = k
-                    break
-            if k0 > 0:
-                virt_points.append(traj.points[k0])
-                pi_args.append(atan2(*(-solver.p_inits[i])[::-1]))
-
-        virt_points = [x for _, x in sorted(zip(pi_args, virt_points), key=lambda pair: pair[0])]
-
-        if len(virt_points) == 0:
-            continue
-
-        nvp = len(virt_points)
-        mdfm.dump_trajs([Trajectory(np.zeros(nvp), np.array(virt_points), np.zeros(nvp), nvp - 1, solver.mp.coords,
-                                    info=f'{factor}kWh')])
-    """
-    for v_a in np.linspace(20, 40, 5):
+    for v_a in np.linspace(13.19, 14.5, 5):  # [10.15, 11.17, 14.11, 18.51, 22.13]:
         pb.update_airspeed(v_a)
+        chrono.start('Computing EF')
         t_upper_bound = 2 * pb._geod_l / pb.model.v_a
-        solver_ef = solver = SolverEF(pb, t_upper_bound, mode=0, max_steps=500, rel_nb_ceil=0.05)
-        reach_time, iit, p_init = solver.solve(forward_only=True)
+        solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=500, rel_nb_ceil=0.05)
+        reach_time, iit, p_init = solver.solve(no_fast=True)
         chrono.stop()
         print(f'Reach time : {reach_time / 3600:.2f}')
         trajs = solver.get_trajs()
-        #mdfm.dump_trajs(trajs)
+        # mdfm.dump_trajs(trajs)
 
-        if iit >= 0:
-            chrono.start('Computing optimal traj')
-            traj = solver_ef.build_opti_traj()
-            traj.info = f'TEF-{v_a:.2f}'
-            mdfm.dump_trajs([traj])
-            chrono.stop()
-
-    pb.load_multifb(E_GSTargetFB(pb.model.wind, pb.aero, pb.x_target, pb.coords))
-    sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), 0.02 * pb._geod_l)
-    traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=pb.model.wind.t_start)
-    traj.type = TRAJ_INT
-    traj.info = f'Target'
-    mdfm.dump_trajs([traj])
-
-    """
-    for factor in [2, 4, 6, 8, 10]:
-        nrj_ceil = factor * 3.6e6
-        virt_points = []
-        pi_args = []
-        for i, traj in enumerate(trajs):
-            k0 = 0
-            for k, nrj in enumerate(traj.costs):
-                if nrj > nrj_ceil:
-                    k0 = k
-                    break
-            if k0 > 0:
-                virt_points.append(traj.points[k0])
-                pi_args.append(atan2(*(-solver.p_inits[i])[::-1]))
-
-        virt_points = [x for _, x in sorted(zip(pi_args, virt_points), key=lambda pair: pair[0])]
-
-        if len(virt_points) == 0:
-            continue
-
-        nvp = len(virt_points)
-        mdfm.dump_trajs([Trajectory(np.zeros(nvp), np.array(virt_points), np.zeros(nvp), nvp - 1, solver.mp.coords,
-                                    info=f'{factor}kWh (CTAS)')])
-    """
-    # chrono.start('Optimal trajectory Extremals')
-    # pb.load_feedback(FunFB(solver.control))
-    # pb.load_aslaw(FunAS(solver.aslaw))
-    # sc = TimedSC(pb.model.wind.t_start + solver.reach_time)
-    # traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=pb.model.wind.t_start)
-    # traj.type = TRAJ_OPTIMAL
-    # traj.info = f'Extremals_{v_a:.2f}'
-    # chrono.stop()
-    # mdfm.dump_trajs([traj])
+        chrono.start('Optimal trajectory Extremals')
+        pb.load_feedback(FunFB(solver.control))
+        sc = TimedSC(pb.model.wind.t_start + solver.reach_time)
+        traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=pb.model.wind.t_start)
+        traj.type = TRAJ_OPTIMAL
+        traj.info = f'Extremals_{v_a:.2f}'
+        chrono.stop()
+        mdfm.dump_trajs([traj])
 
     # for v_a in np.linspace(12., 25., 5):
     #     pb.update_airspeed(v_a)

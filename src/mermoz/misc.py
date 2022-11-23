@@ -260,7 +260,7 @@ def enlarge(bl, tr, factor=1.1):
     return c - factor * half_delta, c + factor * half_delta
 
 
-def control_time_opti(x, p, t, coords):
+def heading_opti(x, p, t, coords):
     if coords == COORD_CARTESIAN:
         v = -p / np.linalg.norm(p)
         res = np.arctan2(v[1], v[0])
