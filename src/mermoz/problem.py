@@ -327,7 +327,7 @@ class IndexedProblem(MermozProblem):
             zermelo_model = ZermeloGeneralModel(v_a)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, autodomain=False, bl=bl, tr=tr)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
 
         elif i == 1:
             v_a = 23.

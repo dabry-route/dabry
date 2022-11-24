@@ -110,7 +110,7 @@ class SolverEF:
         if dt is not None:
             self.dt = -dt
         else:
-            self.dt = -.005 * mp._geod_l / mp.model.v_a
+            self.dt = -.005 * mp._geod_l / mp.aero.v_minp
 
         # This group shall be reinitialized before new resolution
         # Contains augmented state points (id, time, state, adjoint) used to expand extremal field
@@ -165,11 +165,15 @@ class SolverEF:
             self._index_d += 1
         return i
 
-    def ancestors(self, i):
+    def get_parents(self, i):
         if self.mode_primal:
             p1, p2 = self.parents_primal[i]
         else:
             p1, p2 = self.parents_dual[i]
+        return p1, p2
+
+    def ancestors(self, i):
+        p1, p2 = self.get_parents(i)
         if p1 is None:
             return set()
         return {p1, p2}.union(self.ancestors(p1)).union(self.ancestors(p2))
@@ -278,7 +282,14 @@ class SolverEF:
                         and (na.i_obs < 0 or self.new_points[iu].i_obs < 0):
                     if self.debug:
                         print(f'Stepping between {na.i}, {iu}')
-                    self.step_between(na.i, iu)
+                    p1i, p2i = self.get_parents(na.i)
+                    p1u, p2u = self.get_parents(iu)
+                    same_parents = (p1i == p1u and p2i == p2u) or (p1i == p2u and p2i == p1u)
+                    no_parents = same_parents and p1i is None
+                    between_cond = na.i in (p1u, p2u) or iu in (p1i, p2i) or (same_parents and no_parents) or \
+                                   (same_parents and abs(self.child_order[na.i] - self.child_order[iu]) == 1)
+                    if between_cond:
+                        self.step_between(na.i, iu)
             else:
                 pass
                 """
@@ -490,13 +501,13 @@ class SolverEF:
             return res
 
         elif not no_fast and self.mp.model.wind.t_end is None:
-                # Problem is steady
-                # Compute only backward extremals and return
-                self.set_primal(False)
-                res = self.propagate(verbose)
-                if not no_prepare_control:
-                    self.prepare_control_law()
-                return res
+            # Problem is steady
+            # Compute only backward extremals and return
+            self.set_primal(False)
+            res = self.propagate(verbose)
+            if not no_prepare_control:
+                self.prepare_control_law()
+            return res
         else:
             # Problem is time-varying
             # First propagate forward extremals
@@ -629,7 +640,7 @@ class SolverEF:
                 adjoints = np.zeros((n, 2))
                 controls = np.zeros(n)
                 transver = np.zeros(n)
-                costs = np.zeros(n)
+                energy = np.zeros(n)
                 offset = 0.
                 if self.mp_primal.model.wind.t_end is None and i == 0:
                     # If wind is steady, offset timestamps to have a <self.reach_time>-long window
@@ -642,7 +653,7 @@ class SolverEF:
                     controls[k] = self.mp.control_angle(e[2], e[1])
                     transver[k] = 1 - self.mp.model.v_a * np.linalg.norm(e[2]) + e[2] @ self.mp.model.wind.value(e[0],
                                                                                                                  e[1])
-                    costs[k] = e[3]
+                    energy[k] = e[3]
                 add_info = ''
                 if i == 0:
                     try:
@@ -652,6 +663,6 @@ class SolverEF:
                 res.append(
                     AugmentedTraj(timestamps, points, adjoints, controls, last_index=n - 1, coords=self.mp.coords,
                                   label=it,
-                                  type=TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver, costs=costs))
+                                  type=TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver, energy=energy))
 
         return res

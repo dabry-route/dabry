@@ -69,6 +69,10 @@ class MDFmanager:
                     dset = trajgroup.create_dataset('airspeed', n, dtype='f8', fillvalue=0.)
                     dset[:] = traj.airspeed[:n]
 
+                if hasattr(traj, 'energy'):
+                    dset = trajgroup.create_dataset('energy', n - 1, dtype='f8', fillvalue=0.)
+                    dset[:] = traj.energy[:n - 1]
+
     def _grib_date_to_unix(self, grib_filename):
         date, hm = grib_filename.split('_')[2:4]
         hours = int(hm[:2])

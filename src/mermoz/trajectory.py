@@ -76,7 +76,7 @@ class AugmentedTraj(Trajectory):
                  info='',
                  transver=None,
                  airspeed=None,
-                 costs=None):
+                 energy=None):
         """
         :param adjoints: A list of adjoint states ((p_x0, p_y0), ..., (p_xN, p_yN))
         """
@@ -90,6 +90,6 @@ class AugmentedTraj(Trajectory):
         if airspeed is not None:
             self.airspeed = np.zeros(airspeed.shape)
             self.airspeed[:] = airspeed
-        if costs is not None:
-            self.costs = np.zeros(costs.shape)
-            self.costs[:] = costs
+        if energy is not None:
+            self.energy = np.zeros(energy.shape)
+            self.energy[:] = energy
