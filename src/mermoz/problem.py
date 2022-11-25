@@ -273,7 +273,8 @@ class IndexedProblem(MermozProblem):
         15: ['Gyre Rhoads2010', 'gyre-rhoads2010'],
         16: ['Gyre Transversality', 'gyre-transver'],
         17: ['Band wind', 'band'],
-        18: ['Linearly varying wind', 'lva']
+        18: ['Linearly varying wind', 'lva'],
+        19: ['Double gyre scaled', 'double-gyre-scaled']
     }
 
     def __init__(self, i, seed=0):
@@ -870,6 +871,24 @@ class IndexedProblem(MermozProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
             self.time_scale = time_scale
+
+        elif i == 19:
+            v_a = 15.
+
+            sf = 3e6
+
+            x_init = sf * np.array((0.6, 0.6))
+            x_target = sf * np.array((2.4, 2.4))
+            bl = sf * np.array((0.5, 0.5))
+            tr = sf * np.array((2.5, 2.5))
+            coords = COORD_CARTESIAN
+
+            total_wind = DoubleGyreWind(sf * 0.5, sf * 0.5, sf * 2., sf * 2., v_a / 2 * pi)
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
 
         else:
             raise IndexError(f'No problem with index {i}')

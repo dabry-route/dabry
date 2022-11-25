@@ -340,7 +340,7 @@ class SolverEF:
             if not status and self.rel.is_active(a.i):
                 self.rel.deactivate(a.i)
                 obstacle_list.append(a.i)
-            elif c > self.cost_ceil:
+            elif self.cost_ceil is not None and c > self.cost_ceil:
                 self.rel.deactivate(a.i)
             else:
                 if it == 0 or True:  # or not polyfront.contains(Point(*x)):
