@@ -81,10 +81,85 @@ class Relations:
         return list(self.rel.keys())[0]
 
     def deactivate(self, i):
-        self.active.remove(i)
+        if i in self.active:
+            self.active.remove(i)
 
     def is_active(self, i):
         return i in self.active
+
+
+class CollisionBuffer:
+    """
+    Discretize space and keep trace of trajectories to compute collisions efficiently
+    """
+
+    def __init__(self, nx, ny, bl, tr):
+        self._collbuf = [[{} for _ in range(ny)] for _ in range(nx)]
+        self.bl = np.zeros(2)
+        self.bl[:] = bl
+        self.tr = np.zeros(2)
+        self.tr[:] = tr
+
+    def _index(self, pos):
+        x, y = pos[0], pos[1]
+        xx = (x - self.bl[0]) / (self.tr[0] - self.bl[0])
+        yy = (y - self.bl[1]) / (self.tr[1] - self.bl[1])
+        nx, ny = len(self._collbuf), len(self._collbuf[0])
+        return int(nx * xx), int(ny * yy)
+
+    def add(self, pos, id, idt):
+        """
+        :param pos: Position in space (x, y)
+        :param id: Id of trajectory to log in
+        :param idt: Time index to log in
+        """
+        i, j = self._index(pos)
+        d = self._collbuf[i][j]
+        if id not in d.keys():
+            d[id] = (idt, idt)
+        else:
+            imin, imax = d[id]
+            if idt < imin:
+                imin = idt
+            elif idt > imax:
+                imax = idt
+            d[id] = (imin, imax)
+
+    def get_inter(self, *pos):
+        """
+        Get list of possible interactions with positions in pos list
+        :param pos: List of 2D ndarray containing coordinates
+        :return: Dictionary. Keys are trajectory identifier which could be in interaction
+        with positions. Values are corresponding min and max time index for which points can be in
+        interaction
+        """
+        res = {}
+        lines = []
+        cols = []
+        for p in pos:
+            i, j = self._index(p)
+            lines.append(i)
+            cols.append(j)
+        # Pad between non-adjescent tiles
+        imin, imax = min(lines), max(lines)
+        jmin, jmax = min(cols), max(cols)
+        for i in range(imin, imax + 1):
+            for j in range(jmin, jmax + 1):
+                try:
+                    d = self._collbuf[i][j]
+                    for k, l in d.items():
+                        if k not in res.keys():
+                            res[k] = l
+                        else:
+                            imin, imax = res[k]
+                            if l[0] < imin:
+                                imin = l[0]
+                            if l[1] > imax:
+                                imax = l[1]
+                            res[k] = (imin, imax)
+                except IndexError:
+                    continue
+        return res
 
 
 class SolverEF:
@@ -95,7 +170,7 @@ class SolverEF:
     MODE_ENERGY = 1
 
     def __init__(self, mp: MermozProblem, max_time, mode=0, N_disc_init=20, rel_nb_ceil=0.05, dt=None,
-                 max_steps=30, hard_obstacles=True):
+                 max_steps=30, hard_obstacles=True, collbuf_shape=None, cost_ceil=None, asp_offset=0.):
         self.mp_primal = mp
         self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
@@ -136,8 +211,13 @@ class SolverEF:
         self.trajs = self.trajs_dual
         self.max_extremals = 10000
         self.max_time = max_time
+        self.cost_ceil = cost_ceil
+        self.asp_offset = asp_offset
 
         self.it = 0
+
+        self.collbuf_shape = (50, 50) if collbuf_shape is None else collbuf_shape
+        self.collbuf = None
 
         self.reach_time = None
 
@@ -146,7 +226,7 @@ class SolverEF:
 
         self.max_steps = max_steps
 
-        self.N_filling_steps = 2
+        self.N_filling_steps = 1
         self.hard_obstacles = hard_obstacles
 
         self.debug = False
@@ -198,7 +278,7 @@ class SolverEF:
         Push all possible angles to active list from init point
         :return: None
         """
-        self.active = []
+        self.active = {}
         self.new_points = {}
         self.p_inits = {}
         self.lsets = []
@@ -206,19 +286,21 @@ class SolverEF:
         self.it = 0
         self.n_points = 0
         t_start = self.mp_primal.model.wind.t_start + time_offset
+        self.collbuf = CollisionBuffer(*self.collbuf_shape, self.mp.bl, self.mp.tr)
         for k in range(self.N_disc_init):
             theta = 2 * np.pi * k / self.N_disc_init
             pd = np.array((np.cos(theta), np.sin(theta)))
             pn = 1.
             if self.mode == self.MODE_ENERGY:
-                asp = self.mp.aero.asp_mlod(-pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
+                asp = self.asp_offset + self.mp.aero.asp_mlod(-pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
                 pn = self.mp.aero.d_power(asp)
             p = pn * pd
             i = self.new_traj_index()
             self.p_inits[i] = np.zeros(2)
             self.p_inits[i][:] = p
+            self.collbuf.add(self.mp.x_init, i, 0)
             a = FrontPoint(i, (0, t_start, self.mp.x_init, p, 0.))
-            heappush(self.active, (1., a))
+            self.active[i] = a
             self.trajs[k] = {}
             self.trajs[k][a.tsa[0]] = a.tsa[1:]
         self.rel = Relations(list(np.arange(self.N_disc_init)))
@@ -234,15 +316,12 @@ class SolverEF:
         return Polygon(front)
 
     def step_global(self):
-        # Build current front to test if next points fall into the latter
-        polyfront = self.build_cfront()
 
-        # Step the entire active list, look for domain violation and front collapse
+        # Step the entire active list, look for domain violation
         active_list = []
         obstacle_list = []
         front_list = []
-        while len(self.active) != 0:
-            _, a = heappop(self.active)
+        for i_a, a in self.active.items():
             active_list.append(a.i)
             it = a.tsa[0]
             t, x, p, status, i_obs, ccw = self.step_single(a.tsa[1:], a.i_obs, a.ccw)
@@ -261,8 +340,10 @@ class SolverEF:
             if not status and self.rel.is_active(a.i):
                 self.rel.deactivate(a.i)
                 obstacle_list.append(a.i)
+            elif c > self.cost_ceil:
+                self.rel.deactivate(a.i)
             else:
-                if it == 0 or not polyfront.contains(Point(*x)):
+                if it == 0 or True:  # or not polyfront.contains(Point(*x)):
                     na = FrontPoint(a.i, (it + 1,) + self.trajs[a.i][it + 1], i_obs, ccw)
                     self.new_points[a.i] = na
                 else:
@@ -273,10 +354,62 @@ class SolverEF:
             print(f'   Obstacle : {tuple(obstacle_list)}')
             print(f'      Front : {tuple(front_list)}')
 
+        for i_na, na in self.new_points.items():
+            it = self.active[i_na].tsa[0]
+            x_it = self.active[i_na].tsa[2]
+            x_itp1 = na.tsa[2]
+            interactions = self.collbuf.get_inter(x_it, x_itp1)
+            stop = False
+            for k, l in interactions.items():
+                if k == i_na:
+                    continue
+                for itt in range(l[0] - 1, l[1] + 1):
+                    if stop:
+                        break
+                    try:
+                        points = x_it, x_itp1, self.trajs[k][itt][1], self.trajs[k][itt + 1][1]
+                        if collision(*points):
+                            _, alpha1, alpha2 = intersection(*points)
+                            cost1 = (1 - alpha1) * self.active[i_na].tsa[4] + alpha1 * na.tsa[4]
+                            cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[k][itt + 1][3]
+                            if cost2 < cost1:
+                                self.rel.deactivate(i_na)
+                                stop = True
+                    except KeyError:
+                        pass
+                if stop:
+                    break
+                p1, p2 = self.get_parents(k)
+                for p in (p1, p2):
+                    if p in interactions.keys():
+                        l1 = interactions[k]
+                        l2 = interactions[p]
+                        l3 = (max(l1[0], l2[0]), min(l1[1], l2[1]))
+                        for itt in range(l3[0] - 1, l3[1] + 1):
+                            try:
+                                if itt + 1 < it:
+                                    points = x_it, x_itp1, self.trajs[k][itt][1], self.trajs[p][itt][1]
+                                    if collision(*points):
+                                        _, alpha1, alpha2 = intersection(*points)
+                                        cost1 = (1 - alpha1) * self.active[i_na].tsa[4] + alpha1 * na.tsa[4]
+                                        cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[p][itt][3]
+                                        if cost2 < cost1:
+                                            self.rel.deactivate(i_na)
+                                            stop = True
+                            except KeyError:
+                                pass
+                if stop:
+                    break
+
+        for i_na, na in self.new_points.items():
+            self.collbuf.add(na.tsa[2], i_na, na.tsa[0])
+
         # Fill in holes when extremals get too far from one another
-        for na in list(self.new_points.values()):
+
+        for i_na in list(self.new_points.keys()):
+            na = self.new_points[i_na]
             _, iu = self.rel.get(na.i)
-            if self.rel.is_active(iu):
+            if self.rel.is_active(i_na) and self.rel.is_active(iu):
                 # Case 1, both points are active and at least one lies out of an obstacle
                 if self.mp.distance(na.tsa[2], self.new_points[iu].tsa[2]) > self.abs_nb_ceil \
                         and (na.i_obs < 0 or self.new_points[iu].i_obs < 0):
@@ -299,8 +432,11 @@ class SolverEF:
                 if np.linalg.norm(na.tsa[2] - self.trajs[iu][last_it][2]) > self.abs_nb_ceil:
                     self.step_between(na.i, iu, self.it - last_it)
                 """
-        for na in self.new_points.values():
-            heappush(self.active, (1., na))
+
+        self.active.clear()
+        for i_na, na in self.new_points.items():
+            if self.rel.is_active(i_na):
+                self.active[i_na] = na
         self.new_points.clear()
         self.it += 1
 
@@ -343,6 +479,7 @@ class SolverEF:
             self.child_order[i] = k
             t = pl[0]
             tsa = (t, points[k], adjoints[k], costs[k])
+            self.collbuf.add(points[k], i, it)
             # if self.mp.in_obs(points[k]):
             #     continue
             self.trajs[i] = {}
@@ -356,6 +493,7 @@ class SolverEF:
             while iit <= self.it:
                 iit += 1
                 t, x, p, status, i_obs, ccw = self.step_single(self.trajs[i][iit - 1], i_obs, ccw)
+                self.collbuf.add(x, i, iit)
                 if not status:
                     break
                 self.n_points += 1

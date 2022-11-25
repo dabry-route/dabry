@@ -23,10 +23,10 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 7, 0
+    pb_id, seed = 5, 0
     dbpb = None  # '37W_8S_16W_17S_20220301_12'
     cache_rff = False
-    cache_wind = True
+    cache_wind = False
 
     chrono = Chrono()
 
@@ -58,16 +58,44 @@ if __name__ == '__main__':
 
     # Sequence
     pb.update_airspeed(pb.aero.v_minp)
+    asp_offlist = [0., 2., 4., 6., 8.]
+    for asp_offset in asp_offlist:
+        chrono.start('Computing Energy EF')
+        t_upper_bound = 2 * pb._geod_l / pb.aero.v_minp
+        solver_ef = solver = SolverEF(pb, t_upper_bound, mode=1, max_steps=300, rel_nb_ceil=0.01, cost_ceil=30*3.6e6,
+                                    asp_offset=asp_offset)
+        reach_time, iit, p_init = solver.solve(forward_only=True)
+        reach_time_tef = reach_time
+        chrono.stop()
+        print(f'Reach time : {reach_time / 3600:.2f}')
+        # trajs = solver.get_trajs()
+        # mdfm.dump_trajs(trajs)
 
-    chrono.start('Computing VminP EF')
-    t_upper_bound = 2 * pb._geod_l / pb.aero.v_minp
-    solver_ef = solver = SolverEF(pb, t_upper_bound, mode=0, max_steps=1000, rel_nb_ceil=0.01)
-    reach_time, iit, p_init = solver.solve(forward_only=True)
-    reach_time_tef = reach_time
-    chrono.stop()
-    print(f'Reach time : {reach_time / 3600:.2f}')
-    trajs = solver.get_trajs()
-    mdfm.dump_trajs(trajs)
+        chrono.start('Computing optimal traj')
+        traj = solver_ef.build_opti_traj(force_primal=True)
+        traj.info = traj.info + f'_v+{int(asp_offset)}'
+        if traj.timestamps.shape[0] > 0:
+            mdfm.dump_trajs([traj])
+        chrono.stop()
+
+    for asp_offset in asp_offlist:
+        chrono.start('Computing Time EF')
+        pb.update_airspeed(22. + asp_offset)
+        t_upper_bound = 2 * pb._geod_l / pb.aero.v_minp
+        solver_ef = solver = SolverEF(pb, t_upper_bound, mode=0, max_steps=300, rel_nb_ceil=0.01, cost_ceil=30*3.6e6)
+        reach_time, iit, p_init = solver.solve(forward_only=True)
+        reach_time_tef = reach_time
+        chrono.stop()
+        print(f'Reach time : {reach_time / 3600:.2f}')
+        # trajs = solver.get_trajs()
+        # mdfm.dump_trajs(trajs)
+
+        chrono.start('Computing optimal traj')
+        traj = solver_ef.build_opti_traj(force_primal=True)
+        traj.info = traj.info + f'_v+{int(asp_offset)}'
+        if traj.timestamps.shape[0] > 0:
+            mdfm.dump_trajs([traj])
+        chrono.stop()
 
     # chrono.start('Computing Energy EF')
     # t_upper_bound = 3 * pb._geod_l / pb.aero.v_minp

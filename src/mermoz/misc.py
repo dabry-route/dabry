@@ -336,6 +336,40 @@ def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
                       type='optimal')
 
 
+def ccw(a, b, c):
+    return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+
+def collision(a, b, c, d):
+    return ccw(a, c, d) != ccw(b, c, d) and ccw(a, b, c) != ccw(a, b, d)
+
+
+def intersection(a, b, c, d):
+    ref_dim = np.mean(list(map(np.linalg.norm, (a, b, c, d))))
+    xdiff = (a[0] - b[0], c[0] - d[0])
+    ydiff = (a[1] - b[1], c[1] - d[1])
+
+    def det(u, v):
+        return u[0] * v[1] - u[1] * v[0]
+
+    div = det(xdiff, ydiff)
+    if div == 0:
+        raise Exception('lines do not intersect')
+
+    d = (det(a, b), det(c, d))
+    x = det(d, xdiff) / div
+    y = det(d, ydiff) / div
+    if b[1] - a[1] < 1e-5 * ref_dim:
+        t_ab = (x - a[0]) / (b[0] - a[0])
+    else:
+        t_ab = (y - a[1]) / (b[1] - a[1])
+    if d[1] - c[1] < 1e-5 * ref_dim:
+        t_cd = (x - c[0]) / (d[0] - c[0])
+    else:
+        t_cd = (y - c[1]) / (d[1] - c[1])
+    return (x, y), t_ab, t_cd
+
+
 class Chrono:
     def __init__(self, no_verbose=False):
         self.t_start = 0.

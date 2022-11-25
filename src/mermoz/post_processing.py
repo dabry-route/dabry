@@ -236,6 +236,8 @@ class PostProcessing:
         energies = list(map(lambda x: x[0]/3.6e6, ets.values()))
         colors = [path_colors[k % len(path_colors)] for k in range(len(energies))]
         ax.scatter(times, energies, c=colors)
+        for k in ets.keys():
+            ax.annotate(self.trajs[k]['info'], (ets[k][1]/3.6e3, ets[k][0]/3.6e6), fontsize=8)
         v_minp = (1000/(3*0.05)) ** (1/4)
         p_min = 0.05 * v_minp ** 3 + 1000 / v_minp
         decorate(ax, 'Energy vs. time', 'Time (h)', 'Energy (kWh)')
