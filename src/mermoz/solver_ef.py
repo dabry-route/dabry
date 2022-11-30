@@ -170,7 +170,8 @@ class SolverEF:
     MODE_ENERGY = 1
 
     def __init__(self, mp: MermozProblem, max_time, mode=0, N_disc_init=20, rel_nb_ceil=0.05, dt=None,
-                 max_steps=30, hard_obstacles=True, collbuf_shape=None, cost_ceil=None, asp_offset=0.):
+                 max_steps=30, hard_obstacles=True, collbuf_shape=None, cost_ceil=None, asp_offset=0.,
+                 no_coll_filtering=False):
         self.mp_primal = mp
         self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
@@ -228,6 +229,8 @@ class SolverEF:
 
         self.N_filling_steps = 1
         self.hard_obstacles = hard_obstacles
+
+        self.no_coll_filtering = no_coll_filtering
 
         self.debug = False
 
@@ -354,55 +357,56 @@ class SolverEF:
             print(f'   Obstacle : {tuple(obstacle_list)}')
             print(f'      Front : {tuple(front_list)}')
 
-        for i_na, na in self.new_points.items():
-            it = self.active[i_na].tsa[0]
-            x_it = self.active[i_na].tsa[2]
-            x_itp1 = na.tsa[2]
-            interactions = self.collbuf.get_inter(x_it, x_itp1)
-            stop = False
-            for k, l in interactions.items():
-                if k == i_na:
-                    continue
-                for itt in range(l[0] - 1, l[1] + 1):
+        if not self.no_coll_filtering:
+            for i_na, na in self.new_points.items():
+                it = self.active[i_na].tsa[0]
+                x_it = self.active[i_na].tsa[2]
+                x_itp1 = na.tsa[2]
+                interactions = self.collbuf.get_inter(x_it, x_itp1)
+                stop = False
+                for k, l in interactions.items():
+                    if k == i_na:
+                        continue
+                    for itt in range(l[0] - 1, l[1] + 1):
+                        if stop:
+                            break
+                        try:
+                            points = x_it, x_itp1, self.trajs[k][itt][1], self.trajs[k][itt + 1][1]
+                            if collision(*points):
+                                _, alpha1, alpha2 = intersection(*points)
+                                cost1 = (1 - alpha1) * self.active[i_na].tsa[4] + alpha1 * na.tsa[4]
+                                cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[k][itt + 1][3]
+                                if cost2 < cost1:
+                                    self.rel.deactivate(i_na)
+                                    stop = True
+                        except KeyError:
+                            pass
                     if stop:
                         break
-                    try:
-                        points = x_it, x_itp1, self.trajs[k][itt][1], self.trajs[k][itt + 1][1]
-                        if collision(*points):
-                            _, alpha1, alpha2 = intersection(*points)
-                            cost1 = (1 - alpha1) * self.active[i_na].tsa[4] + alpha1 * na.tsa[4]
-                            cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[k][itt + 1][3]
-                            if cost2 < cost1:
-                                self.rel.deactivate(i_na)
-                                stop = True
-                    except KeyError:
-                        pass
-                if stop:
-                    break
-                p1, p2 = self.get_parents(k)
-                for p in (p1, p2):
-                    if p in interactions.keys():
-                        l1 = interactions[k]
-                        l2 = interactions[p]
-                        l3 = (max(l1[0], l2[0]), min(l1[1], l2[1]))
-                        for itt in range(l3[0] - 1, l3[1] + 1):
-                            try:
-                                if itt + 1 < it:
-                                    points = x_it, x_itp1, self.trajs[k][itt][1], self.trajs[p][itt][1]
-                                    if collision(*points):
-                                        _, alpha1, alpha2 = intersection(*points)
-                                        cost1 = (1 - alpha1) * self.active[i_na].tsa[4] + alpha1 * na.tsa[4]
-                                        cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[p][itt][3]
-                                        if cost2 < cost1:
-                                            self.rel.deactivate(i_na)
-                                            stop = True
-                            except KeyError:
-                                pass
-                if stop:
-                    break
+                    p1, p2 = self.get_parents(k)
+                    for p in (p1, p2):
+                        if p in interactions.keys():
+                            l1 = interactions[k]
+                            l2 = interactions[p]
+                            l3 = (max(l1[0], l2[0]), min(l1[1], l2[1]))
+                            for itt in range(l3[0] - 1, l3[1] + 1):
+                                try:
+                                    if itt + 1 < it:
+                                        points = x_it, x_itp1, self.trajs[k][itt][1], self.trajs[p][itt][1]
+                                        if collision(*points):
+                                            _, alpha1, alpha2 = intersection(*points)
+                                            cost1 = (1 - alpha1) * self.active[i_na].tsa[4] + alpha1 * na.tsa[4]
+                                            cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[p][itt][3]
+                                            if cost2 < cost1:
+                                                self.rel.deactivate(i_na)
+                                                stop = True
+                                except KeyError:
+                                    pass
+                    if stop:
+                        break
 
-        for i_na, na in self.new_points.items():
-            self.collbuf.add(na.tsa[2], i_na, na.tsa[0])
+            for i_na, na in self.new_points.items():
+                self.collbuf.add(na.tsa[2], i_na, na.tsa[0])
 
         # Fill in holes when extremals get too far from one another
 

@@ -23,7 +23,7 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 11, 1
+    pb_id, seed = 20, 0
     dbpb = None  # '37W_8S_16W_17S_20220301_12'
     cache_rff = False
     cache_wind = False
@@ -119,7 +119,9 @@ if __name__ == '__main__':
 
     chrono.start('Computing Time EF')
     t_upper_bound = 2 * pb._geod_l / pb.model.v_a
-    solver_ef = solver = SolverEF(pb, t_upper_bound, mode=0, max_steps=100, rel_nb_ceil=0.01, dt=0.01*pb._geod_l / pb.model.v_a)
+    solver_ef = solver = SolverEF(pb, 400000, mode=0, max_steps=1100, rel_nb_ceil=0.01,
+                                  dt=0.001 * pb._geod_l / pb.model.v_a,
+                                  no_coll_filtering=True)
     reach_time, iit, p_init = solver.solve(forward_only=True)
     reach_time_tef = reach_time
     chrono.stop()

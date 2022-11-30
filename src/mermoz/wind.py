@@ -1238,6 +1238,60 @@ class LVWind(Wind):
         return np.zeros(2)
 
 
+class TrapWind(Wind):
+    def __init__(self, wind_value, center, radius, rel_wid=0.05, t_start=0., t_end=None):
+        """
+        :param wind_value: (nt,) in meters per second
+        :param center: (nt, 2) in meters
+        :param radius: (nt,) in meters
+        """
+        if wind_value.shape[0] != radius.shape[0]:
+            raise Exception('Incoherent shapes')
+        nt = wind_value.shape[0]
+        super().__init__(value_func=self.value, d_value_func=self.d_value, nt=nt, t_start=t_start, t_end=t_end)
+        self.wind_value = np.array(wind_value)
+        self.center = np.array(center)
+        self.radius = np.array(radius)
+        # Relative obstacle variation width
+        self.rel_wid = rel_wid
+
+    @staticmethod
+    def sigmoid(r, wid):
+        return np.float(1 / (1 + np.exp(-4 / wid * r)))
+
+    @staticmethod
+    def d_sigmoid(r, wid):
+        lam = 4 / wid
+        s = TrapWind.sigmoid(r, wid)
+        return np.float(lam * s * (1 - s))
+
+    def value(self, t, x):
+        i, alpha = self._index(t)
+        wind_value = (1 - alpha) * self.wind_value[i] + (0. if alpha < 1e-3 else alpha * self.wind_value[i + 1])
+        center = (1 - alpha) * self.center[i] + (0. if alpha < 1e-3 else alpha * self.center[i + 1])
+        radius = (1 - alpha) * self.radius[i] + (0. if alpha < 1e-3 else alpha * self.radius[i + 1])
+        if (x - center) @ (x - center) < 1e-8 * radius ** 2:
+            return np.zeros(2)
+        else:
+            r = np.linalg.norm((x - center))
+            e_r = (x - center) / r
+            return -wind_value * TrapWind.sigmoid(r - radius, radius * self.rel_wid) * e_r
+
+    def d_value(self, t, x):
+        i, alpha = self._index(t)
+        wind_value = (1 - alpha) * self.wind_value[i] + (0. if alpha < 1e-3 else alpha * self.wind_value[i + 1])
+        center = (1 - alpha) * self.center[i] + (0. if alpha < 1e-3 else alpha * self.center[i + 1])
+        radius = (1 - alpha) * self.radius[i] + (0. if alpha < 1e-3 else alpha * self.radius[i + 1])
+        if (x - center) @ (x - center) < 1e-8 * radius ** 2:
+            return np.zeros((2, 2))
+        else:
+            r = np.linalg.norm((x - center))
+            e_r = (x - center) / r
+            P = np.array(((e_r[0], e_r[1]), (-e_r[1] / r, e_r[0] / r)))
+            return -wind_value * (P.transpose() @ np.diag((TrapWind.d_sigmoid(r - radius, radius * self.rel_wid),
+                                          TrapWind.sigmoid(r - radius, radius * self.rel_wid))) @ P)
+
+
 if __name__ == '__main__':
     wind = DiscreteWind(interp='linear')
     wind.load('/home/bastien/Documents/data/wind/windy/Dakar-Natal-0.5-padded.mz/data.h5')

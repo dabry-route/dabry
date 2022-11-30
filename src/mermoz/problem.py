@@ -10,7 +10,7 @@ from mermoz.aero import LLAero
 from mermoz.feedback import Feedback, AirspeedLaw, MultiFeedback
 from mermoz.integration import IntEulerExpl
 from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
-    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind, LVWind
+    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind, LVWind, TrapWind
 from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
@@ -274,7 +274,8 @@ class IndexedProblem(MermozProblem):
         16: ['Gyre Transversality', 'gyre-transver'],
         17: ['Band wind', 'band'],
         18: ['Linearly varying wind', 'lva'],
-        19: ['Double gyre scaled', 'double-gyre-scaled']
+        19: ['Double gyre scaled', 'double-gyre-scaled'],
+        20: ['Trap wind', 'trap']
     }
 
     def __init__(self, i, seed=0):
@@ -889,6 +890,31 @@ class IndexedProblem(MermozProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+
+        elif i == 20:
+            v_a = 23.
+
+            sf = 3e6
+
+            x_init = sf * np.array((0., 0.))
+            x_target = sf * np.array((1., 0.))
+            bl = sf * np.array((-0.2, -0.6))
+            tr = sf * np.array((1.2, 0.6))
+            coords = COORD_CARTESIAN
+
+            nt = 40
+            wind_value = 80 * np.ones(nt)
+            center = np.zeros((nt, 2))
+            for k in range(30):
+                center[10 + k] = sf * np.array((0.05*k, 0.))
+            radius = sf * 0.2 * np.ones(nt)
+
+            total_wind = TrapWind(wind_value, center, radius, t_end=400000)
+
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
 
         else:
             raise IndexError(f'No problem with index {i}')

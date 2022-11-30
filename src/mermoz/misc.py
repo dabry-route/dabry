@@ -228,7 +228,6 @@ def decorate(ax, title=None, xlab=None, ylab=None, legend=None, xlim=None, ylim=
     if ylim != None: ax.set_ylim(ylim[0], ylim[1])
     if min_yspan != None: ensure_yspan(ax, min_yspan)
 
-
 def ensure_yspan(ax, yspan):
     ymin, ymax = ax.get_ylim()
     if ymax - ymin < yspan:
