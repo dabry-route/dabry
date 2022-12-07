@@ -35,6 +35,128 @@ class FrontPoint:
         self.ccw = ccw
 
 
+class Pareto:
+
+    def __init__(self):
+        self.durations = []
+        self.energies = []
+
+    def _index(self, duration):
+        if duration < self.durations[0]:
+            return 0
+        if duration > self.durations[-1]:
+            return len(self.durations) - 1
+        i = 0
+        j = len(self.durations) - 1
+        m_idx = (i + j) // 2
+        while i < j:
+            m_idx = (i + j) // 2
+            mid_dur = self.durations[m_idx]
+            if m_idx == i or m_idx == j:
+                break
+            if mid_dur < duration:
+                i = m_idx
+            else:
+                j = m_idx
+        return min(i, m_idx)
+
+    def dominated(self, x):
+        """
+        :param x: 2D array or len 2 Iterable containing (time, energy)
+        :return: True if point is Pareto-dominated, False else
+        """
+        if len(self.durations) == 0:
+            return False
+        duration = x[0]
+        energy = x[1]
+        if duration < self.durations[0]:
+            return False
+        if duration >= self.durations[-1]:
+            return energy > self.energies[-1]
+        i = self._index(duration)
+        t1 = self.durations[i]
+        t2 = self.durations[i + 1]
+        e1 = self.energies[i]
+        e2 = self.energies[i + 1]
+        return e1 + (duration - t1) / (t2 - t1) * (e2 - e1) <= energy
+
+    def add(self, x):
+        """
+        Checks if point is dominated. If not, adds it to the front. Deletes then all points
+        dominated by new point.
+        :param x: 2D array or len 2 Iterable containing (time, energy)
+        """
+        if self.dominated(x):
+            return
+        # Duration and energy
+        t, e = x[0], x[1]
+        if len(self.durations) == 0:
+            self.durations.append(t)
+            self.energies.append(e)
+            return
+        if t < self.durations[0] and e > self.energies[0]:
+            self.durations = [t] + self.durations
+            self.energies = [e] + self.energies
+        elif t > self.durations[-1] and e < self.energies[-1]:
+            self.durations = self.durations + [t]
+            self.energies = self.energies + [e]
+        else:
+            i0 = self._index(t)
+            i = i0 + 1
+            for i in range(i0 + 1, len(self.durations)):
+                if self.energies[i] < e:
+                    break
+            if i == len(self.durations) - 1 and self.energies[i] > e:
+                i += 1
+            # Now points from first index to last index excluded shall be removed from front
+            # because they are Pareto-dominated by new point
+            self.durations = self.durations[:i0+1] + self.durations[i:]
+            self.energies = self.energies[:i0+1] + self.energies[i:]
+
+
+class EFOptRes:
+
+    def __init__(self, bests):
+        """
+        :param traj: Optimal trajectory
+        :param bests: Dictionary with keys being trajectory indexes and values containing at least the fields
+            'cost': cost to reach target
+            'duration': duration to reach target
+            'time_idx': the time index at which the target is reached
+            'adjoint': the initial adjoint state that led the trajectory
+        """
+        self.bests = bests
+        self.min_cost_idx = None
+        min_cost = None
+        for k, v in bests.items():
+            cost = v['cost']
+            if min_cost is None or cost < min_cost:
+                self.min_cost_idx = k
+                min_cost = cost
+
+    @property
+    def cost(self):
+        return self.bests[self.min_cost_idx]['cost']
+
+    @property
+    def duration(self):
+        return self.bests[self.min_cost_idx]['duration']
+
+    @property
+    def index(self):
+        return self.min_cost_idx
+
+    @property
+    def adjoint(self):
+        res = np.zeros(2)
+        res[:] = self.bests[self.min_cost_idx]['adjoint']
+        return res
+
+    @property
+    def traj(self):
+        return self.bests[self.min_cost_idx]['traj']
+
+
 class Relations:
 
     def __init__(self, members):
@@ -170,8 +292,8 @@ class SolverEF:
     MODE_ENERGY = 1
 
     def __init__(self, mp: MermozProblem, max_time, mode=0, N_disc_init=20, rel_nb_ceil=0.05, dt=None,
-                 max_steps=30, hard_obstacles=True, collbuf_shape=None, cost_ceil=None, asp_offset=0.,
-                 no_coll_filtering=False):
+                 max_steps=30, hard_obstacles=True, collbuf_shape=None, cost_ceil=None, asp_offset=0., asp_init=None,
+                 no_coll_filtering=False, quick_solve=False, pareto=None):
         self.mp_primal = mp
         self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
@@ -214,6 +336,7 @@ class SolverEF:
         self.max_time = max_time
         self.cost_ceil = cost_ceil
         self.asp_offset = asp_offset
+        self.asp_init = asp_init
 
         self.it = 0
 
@@ -221,6 +344,7 @@ class SolverEF:
         self.collbuf = None
 
         self.reach_time = None
+        self.reach_cost = None
 
         self._index_p = 0
         self._index_d = 0
@@ -231,6 +355,11 @@ class SolverEF:
         self.hard_obstacles = hard_obstacles
 
         self.no_coll_filtering = no_coll_filtering
+        self.quick_solve = quick_solve
+        self.quick_traj_idx = -1
+        self.best_distances = [self.mp._geod_l]
+
+        self.pareto = pareto
 
         self.debug = False
 
@@ -295,7 +424,11 @@ class SolverEF:
             pd = np.array((np.cos(theta), np.sin(theta)))
             pn = 1.
             if self.mode == self.MODE_ENERGY:
-                asp = self.asp_offset + self.mp.aero.asp_mlod(-pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
+                if self.asp_init is not None:
+                    asp = self.asp_init
+                else:
+                    asp = self.asp_offset + self.mp.aero.asp_mlod(
+                        -pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
                 pn = self.mp.aero.d_power(asp)
             p = pn * pd
             i = self.new_traj_index()
@@ -324,10 +457,15 @@ class SolverEF:
         active_list = []
         obstacle_list = []
         front_list = []
+        self.best_distances = [self.mp._geod_l]
         for i_a, a in self.active.items():
             active_list.append(a.i)
             it = a.tsa[0]
             t, x, p, status, i_obs, ccw = self.step_single(a.tsa[1:], a.i_obs, a.ccw)
+            dist = self.mp.distance(x, self.mp.x_target)
+            self.best_distances.append(dist)
+            if self.quick_solve and dist < self.abs_nb_ceil:
+                self.quick_traj_idx = i_a
             self.n_points += 1
             # Cost computation
             dt = t - a.tsa[1]
@@ -344,6 +482,8 @@ class SolverEF:
                 self.rel.deactivate(a.i)
                 obstacle_list.append(a.i)
             elif self.cost_ceil is not None and c > self.cost_ceil:
+                self.rel.deactivate(a.i)
+            elif self.pareto is not None and self.pareto.dominated((t,c)):
                 self.rel.deactivate(a.i)
             else:
                 if it == 0 or True:  # or not polyfront.contains(Point(*x)):
@@ -396,7 +536,8 @@ class SolverEF:
                                         if collision(*points):
                                             _, alpha1, alpha2 = intersection(*points)
                                             cost1 = (1 - alpha1) * self.active[i_na].tsa[4] + alpha1 * na.tsa[4]
-                                            cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[p][itt][3]
+                                            cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[p][itt][
+                                                3]
                                             if cost2 < cost1:
                                                 self.rel.deactivate(i_na)
                                                 stop = True
@@ -497,8 +638,14 @@ class SolverEF:
             while iit <= self.it:
                 iit += 1
                 t, x, p, status, i_obs, ccw = self.step_single(self.trajs[i][iit - 1], i_obs, ccw)
-                self.collbuf.add(x, i, iit)
+                dist = self.mp.distance(x, self.mp.x_target)
+                self.best_distances.append(dist)
+                if self.quick_solve and dist < self.abs_nb_ceil:
+                    self.quick_traj_idx = i
+                if not self.no_coll_filtering:
+                    self.collbuf.add(x, i, iit)
                 if not status:
+                    iit -= 1
                     break
                 self.n_points += 1
                 dt = t - self.trajs[i][iit - 1][0]
@@ -572,34 +719,27 @@ class SolverEF:
     def propagate(self, time_offset=0., verbose=False):
         self.setup(time_offset=time_offset)
         i = 0
-        while len(self.active) != 0 and i < self.max_steps and len(self.trajs) < self.max_extremals:
+        print('', end='')
+        while len(self.active) != 0 \
+                and i < self.max_steps \
+                and len(self.trajs) < self.max_extremals \
+                and ((not self.quick_solve) or self.quick_traj_idx == -1):
             i += 1
             if verbose:
                 print(i)
             self.step_global()
+            print(f'\rSteps : {i:>6}, Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
+                  f'Dist : {min(self.best_distances) / self.mp._geod_l * 100:>3.0f} ', end='', flush=True)
         msg = ''
         if i == self.max_steps:
             msg = f'Stopped on iteration limit {self.max_steps}'
         elif len(self.trajs) == self.max_extremals:
             msg = f'Stopped on extremals limit {self.max_extremals}'
+        elif self.quick_solve and self.quick_traj_idx != -1:
+            msg = 'Stopped quick solve'
         else:
             msg = f'Stopped empty active list'
-        print(f'Steps : {i}, Extremals : {len(self.trajs)}, Points : {self.n_points}, {msg}')
-        k0 = None
-        m = None
-        iit_opt = 0
-        for k, traj in self.trajs.items():
-            for iit in traj.keys():
-                candidate = self.mp.distance(traj[iit][1], self.mp.x_target)
-                if m is None or m > candidate:
-                    m = candidate
-                    k0 = k
-                    iit_opt = iit
-        if self.mode_primal:
-            self.reach_time = self.trajs[k0][iit_opt][0] - self.mp_primal.model.wind.t_start
-        else:
-            self.reach_time = self.mp_primal.model.wind.t_start + time_offset - self.trajs[k0][iit_opt][0]
-        return self.reach_time, iit_opt, self.p_inits[k0]
+        print(msg)
 
     def prepare_control_law(self):
         # For the control law, keep only trajectories close to the goal
@@ -635,18 +775,15 @@ class SolverEF:
         if forward_only:
             # Only compute forward front
             self.set_primal(True)
-            res = self.propagate(verbose)
-            polyfront = self.build_cfront()
-            if not polyfront.contains(Point(*self.mp.x_target)):
-                print('Warning : EF not containing target', file=sys.stderr)
-                res = res[0], -1, res[2]
+            self.propagate(verbose)
+            res = self.build_opti_traj()
             return res
 
         elif not no_fast and self.mp.model.wind.t_end is None:
             # Problem is steady
             # Compute only backward extremals and return
             self.set_primal(False)
-            res = self.propagate(verbose)
+            self.propagate(verbose)
             if not no_prepare_control:
                 self.prepare_control_law()
             return res
@@ -662,7 +799,7 @@ class SolverEF:
                 print('Warning : EF not containing target', file=sys.stderr)
             # Now than forward pass is completed, run the backward pass with correct start time
             self.set_primal(False)
-            res = self.propagate(time_offset=self.reach_time, verbose=verbose)
+            self.propagate(time_offset=self.reach_time, verbose=verbose)
             if not no_prepare_control:
                 self.prepare_control_law()
             return res
@@ -707,65 +844,127 @@ class SolverEF:
             parents = self.parents_dual
             child_order = self.child_order_dual
             using_primal = False
+
+        bests = {}
+        closest = None
         dist = None
-        k0 = 0
-        nt = 0
-        s0 = 0
+        best_cost = None
+        traj_idx_closest, time_idx_closest, rel_idx_closest = 0, 0, 0
         for k, v in trajs.items():
             for s, kl in enumerate(v.keys()):
                 i = kl
+                duration = v[kl][0] - self.mp_primal.model.wind.t_start
                 point = v[kl][1]
-                if dist is None or mp.distance(point, mp.x_target) < dist:
-                    dist = mp.distance(point, mp.x_target)
-                    k0 = k
-                    nt = i
-                    s0 = s
-        points = np.zeros((nt, 2))
-        ts = np.zeros(nt)
-        data = list(trajs[k0].values())
-        it = 0
-        s = s0
-        if k0 in range(self.N_disc_init):
-            cond = lambda s: s > 0
+                cost = v[kl][3]
+                cur_dist = mp.distance(point, mp.x_target)
+                if dist is None or cur_dist < dist:
+                    dist = cur_dist
+                    traj_idx_closest = k
+                    time_idx_closest = i
+                    rel_idx_closest = s
+                    closest = {
+                        'cost': cost,
+                        'duration': duration,
+                        'time_idx': i,
+                        'rel_idx': s,
+                        'adjoint': self.p_inits[k]
+                    }
+                if cur_dist < self.abs_nb_ceil:
+                    if best_cost is None or cost < best_cost:
+                        if k not in bests.keys() or duration < bests[k]['duration']:
+                            bests[k] = {
+                                'cost': cost,
+                                'duration': duration,
+                                'time_idx': i,
+                                'rel_idx': s,
+                                'adjoint': self.p_inits[k]
+                            }
+        traj_idx_list = []
+        time_idx_list = []
+        rel_idx_list = []
+        if len(bests) == 0:
+            print('Warning: Target not reached', file=sys.stderr)
+            traj_idx_list.append(traj_idx_closest)
+            time_idx_list.append(time_idx_closest)
+            rel_idx_list.append(rel_idx_closest)
+            bests = {traj_idx_closest: closest}
         else:
-            cond = lambda s: s >= 0
-        while cond(s):
-            points[it] = data[s][1]
-            ts[it] = data[s][0]
-            it += 1
-            s -= 1
+            # Filter out Pareto-dominated optima
+            # to_delete = []
+            # for a, b in bests.items():
+            #     for aa, bb in bests.items():
+            #         if a == aa:
+            #             continue
+            #         if bb['cost'] < b['cost'] and bb['duration'] < b['duration']:
+            #             to_delete.append(a)
+            #             break
+            # for a in to_delete:
+            #     del bests[a]
+            a0 = None
+            min_cost = None
+            for a, b in bests.items():
+                cost = b['cost']
+                if min_cost is None or cost < min_cost:
+                    a0 = a
+                    min_cost = cost
+            for a in bests.keys():
+                traj_idx_list.append(a)
+                time_idx_list.append(bests[a]['time_idx'])
+                rel_idx_list.append(bests[a]['rel_idx'])
 
-        if k0 not in range(self.N_disc_init):
-            kl, ku = parents[k0]
-            a = (child_order[k0] + 1) / (self.N_filling_steps + 1)
-            while it < nt:
-                endl = (nt - 1 - it) not in trajs[kl].keys()
-                endu = (nt - 1 - it) not in trajs[ku].keys()
-                if endl and not endu:
-                    b = (child_order[kl] + 1) / (self.N_filling_steps + 1)
-                    kl, _ = parents[kl]
-                    a = a + b * (1 - a)
-                if endu and not endl:
-                    b = (child_order[ku] + 1) / (self.N_filling_steps + 1)
-                    _, ku = parents[ku]
-                    a = a * b
-                if endl and endu:
-                    b = (child_order[kl] + 1) / (self.N_filling_steps + 1)
-                    c = (child_order[ku] + 1) / (self.N_filling_steps + 1)
-                    kl, _ = parents[kl]
-                    _, ku = parents[ku]
-                    a = a * c + b * (1 - a)
-                datal = [v for j, v in trajs[kl].items() if j <= (nt - 1 - it)]
-                datau = [v for j, v in trajs[ku].items() if j <= (nt - 1 - it)]
-                ib = min(len(datal), len(datau))
-                for i in range(ib):
-                    points[it] = (1 - a) * datal[-1 - i][1] + a * datau[-1 - i][1]
-                    ts[it] = datal[- 1 - i][0]
-                    it += 1
-        if using_primal:
-            ts = ts[::-1]
-            points = points[::-1]
-        return Trajectory(ts, points, np.zeros(nt), nt - 1, mp.coords, info=f'opt_m{self.mode}')
+        for k in range(len(traj_idx_list)):
+            k0 = traj_idx_list[k]
+            nt = time_idx_list[k]
+            s0 = rel_idx_list[k]
+            points = np.zeros((nt, 2))
+            ts = np.zeros(nt)
+            data = list(trajs[k0].values())
+            it = 0
+            s = s0
+            if k0 in range(self.N_disc_init):
+                cond = lambda s: s > 0
+            else:
+                cond = lambda s: s >= 0
+            while cond(s):
+                points[it] = data[s][1]
+                ts[it] = data[s][0]
+                it += 1
+                s -= 1
+
+            if k0 not in range(self.N_disc_init):
+                kl, ku = parents[k0]
+                a = (child_order[k0] + 1) / (self.N_filling_steps + 1)
+                while it < nt:
+                    endl = (nt - 1 - it) not in trajs[kl].keys()
+                    endu = (nt - 1 - it) not in trajs[ku].keys()
+                    if endl and not endu:
+                        b = (child_order[kl] + 1) / (self.N_filling_steps + 1)
+                        kl, _ = parents[kl]
+                        a = a + b * (1 - a)
+                    if endu and not endl:
+                        b = (child_order[ku] + 1) / (self.N_filling_steps + 1)
+                        _, ku = parents[ku]
+                        a = a * b
+                    if endl and endu:
+                        b = (child_order[kl] + 1) / (self.N_filling_steps + 1)
+                        c = (child_order[ku] + 1) / (self.N_filling_steps + 1)
+                        kl, _ = parents[kl]
+                        _, ku = parents[ku]
+                        a = a * c + b * (1 - a)
+                    datal = [v for j, v in trajs[kl].items() if j <= (nt - 1 - it)]
+                    datau = [v for j, v in trajs[ku].items() if j <= (nt - 1 - it)]
+                    ib = min(len(datal), len(datau))
+                    for i in range(ib):
+                        points[it] = (1 - a) * datal[-1 - i][1] + a * datau[-1 - i][1]
+                        ts[it] = datal[- 1 - i][0]
+                        it += 1
+            if using_primal:
+                ts = ts[::-1]
+                points = points[::-1]
+            traj = Trajectory(ts, points, np.zeros(nt), nt - 1, mp.coords, info=f'opt_m{self.mode}_{self.asp_init:.0f}')
+            bests[k0]['traj'] = traj
+        res = EFOptRes(bests)
+        return res
 
     def get_trajs(self, primal_only=False, dual_only=False):
         res = []

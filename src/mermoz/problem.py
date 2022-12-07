@@ -86,7 +86,7 @@ class MermozProblem:
                     self.bl = (self.x_init + self.x_target) / 2. - np.array((w / 2., w / 2.))
                     self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
                 if self.coords == COORD_GCS and mask_land:
-                    factor = 1. if wind.units_grid == U_RAD else RAD_TO_DEG
+                    factor = 1. if wind.units_grid == U_DEG else RAD_TO_DEG
                     self.bm = Basemap(llcrnrlon=factor * self.bl[0],
                                       llcrnrlat=factor * self.bl[1],
                                       urcrnrlon=factor * self.tr[0],
@@ -275,7 +275,8 @@ class IndexedProblem(MermozProblem):
         17: ['Band wind', 'band'],
         18: ['Linearly varying wind', 'lva'],
         19: ['Double gyre scaled', 'double-gyre-scaled'],
-        20: ['Trap wind', 'trap']
+        20: ['Trap wind', 'trap'],
+        21: ['San Juan Dublin Flattened Time varying', 'sanjuan-dublin-ortho-tv']
     }
 
     def __init__(self, i, seed=0):
@@ -913,6 +914,21 @@ class IndexedProblem(MermozProblem):
 
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
+
+        elif i == 21:
+            v_a = 23.
+
+            x_init = np.array((1.6e6, 1.6e6))
+            x_target = np.array((-2e6, 0.5e6))
+            bl = np.array((-2e6, -1.5e6))
+            tr = np.array((2e6, 2e6))
+            coords = COORD_CARTESIAN
+            wind = DiscreteWind()
+            wind.load('/home/bastien/Documents/data/wind/ncdc/san-juan-dublin-flattened-ortho-tv.mz/wind.h5')
+            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
+            zermelo_model.update_wind(wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
 

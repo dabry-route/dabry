@@ -15,7 +15,7 @@ from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *
 from mermoz.problem import IndexedProblem, DatabaseProblem
 from mermoz.shooting import Shooting
-from mermoz.solver_ef import SolverEF
+from mermoz.solver_ef import SolverEF, Pareto
 from mermoz.trajectory import Trajectory
 from mermoz.solver_rp import SolverRP
 from mermoz.stoppingcond import TimedSC, DistanceSC, DisjunctionSC
@@ -23,8 +23,8 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 20, 0
-    dbpb = None  # '37W_8S_16W_17S_20220301_12'
+    pb_id, seed = 21, 0
+    dbpb = None  # '72W_15S_0W_57S_20220301_12' # '37W_8S_16W_17S_20220301_12'
     cache_rff = False
     cache_wind = False
 
@@ -116,24 +116,56 @@ if __name__ == '__main__':
         mdfm.dump_trajs([traj])
     chrono.stop()
     """
+    pareto = Pareto()
+    pareto.add((3.6e3 * 50, 3.6e6 * 51))
+    pareto.add((3.6e3 * 53.5, 3.6e6 * 49))
+    pareto.add((3.6e3 * 58.5, 3.6e6 * 47))
+    pareto.add((3.6e3 * 68, 3.6e6 * 34))
 
-    chrono.start('Computing Time EF')
-    t_upper_bound = 2 * pb._geod_l / pb.model.v_a
-    solver_ef = solver = SolverEF(pb, 400000, mode=0, max_steps=1100, rel_nb_ceil=0.01,
-                                  dt=0.001 * pb._geod_l / pb.model.v_a,
-                                  no_coll_filtering=True)
-    reach_time, iit, p_init = solver.solve(forward_only=True)
-    reach_time_tef = reach_time
-    chrono.stop()
-    print(f'Reach time : {reach_time / 3600:.2f}')
-    trajs = solver.get_trajs()
-    mdfm.dump_trajs(trajs)
+    asp_inits = [[30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20],
+                 [20]]
 
-    chrono.start('Computing optimal traj')
-    traj = solver_ef.build_opti_traj(force_primal=True)
-    if traj.timestamps.shape[0] > 0:
-        mdfm.dump_trajs([traj])
-    chrono.stop()
+    dt = 0.001 * pb._geod_l / pb.model.v_a
+    for mode in [1]:
+        cost_ceil = None
+        t_upper_bound = 0.
+        for asp_init in asp_inits[mode]:
+            chrono.start(f'Computing EF Mode {mode} Airspeed {asp_init:.2f}')
+            # if mode == 0:
+            #     pb.update_airspeed(asp_init)
+            #     if t_upper_bound is None:
+            #         t_upper_bound = 1.5 * pb._geod_l / asp_init
+            #     else:
+            #         t_upper_bound = reach_time
+            # if mode == 1:
+            #     if cost_ceil is None:
+            #         cost_ceil = 1.5 * pb.aero.power(asp_init) * pb._geod_l / asp_init
+            #     else:
+            #         cost_ceil = reach_cost
+            #    t_upper_bound = 1.5 * pb._geod_l / asp_init
+            solver_ef = solver = SolverEF(pb, t_upper_bound, mode=mode, max_steps=3000, rel_nb_ceil=0.01,
+                                          dt=dt,
+                                          no_coll_filtering=True,
+                                          # cost_ceil=47*3.6e6,
+                                          asp_init=asp_init,
+                                          quick_solve=not mode,
+                                          pareto=pareto)
+            optim_res = solver.solve(forward_only=True)
+            reach_time = optim_res.duration
+            reach_cost = optim_res.cost
+            reach_time_tef = reach_time
+            chrono.stop()
+            print(f'Time/Cost : {reach_time / 3600:.2f}h/{reach_cost / 3.6e6:.2f}kWh')
+            if mode == 0:
+                mdfm.dump_trajs([optim_res.traj])
+                pareto.add((optim_res.duration, optim_res.cost))
+            else:
+                for b in optim_res.bests.values():
+                    mdfm.dump_trajs([b['traj']])
+                    pareto.add((b['duration'], b['cost']))
+            # trajs = solver.get_trajs()
+            # mdfm.dump_trajs(trajs)
+
 
     # chrono.start('Computing Energy EF')
     # t_upper_bound = 3 * pb._geod_l / pb.aero.v_minp
@@ -149,7 +181,6 @@ if __name__ == '__main__':
     # mdfm.dump_trajs([traj])
     # chrono.stop()
 
-
     def f(a, pn, rtraj=False):
         angle = 2 * np.arctan(a)  # maps a to -pi, pi
         s = np.array((np.cos(angle), np.sin(angle)))
@@ -161,6 +192,7 @@ if __name__ == '__main__':
             return traj
         return np.min(dist)
 
+
     """
     for pn0 in [10, 20, 30, 40]:
         chrono.start(f'Minimizing for {pn0}')
@@ -171,12 +203,12 @@ if __name__ == '__main__':
 
     mdfm.dump_trajs(trajs)
     """
-        # err = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1) / pb._geod_l)
-        # reached = err < 0.02
-        # if reached:
-        #     print('|', end='')
-        #     candidates.append((pn0, psi / np.pi))
-        #     trajs.append(traj)
+    # err = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1) / pb._geod_l)
+    # reached = err < 0.02
+    # if reached:
+    #     print('|', end='')
+    #     candidates.append((pn0, psi / np.pi))
+    #     trajs.append(traj)
 
     """
     chrono.start('Computing optimal traj')

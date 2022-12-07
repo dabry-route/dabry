@@ -98,7 +98,7 @@ class PostProcessing:
         self.geod_l = distance(self.x_init, self.x_target, self.coords)
 
         wind_fp = os.path.join(self.output_dir, self.wind_fn)
-        self.wind = DiscreteWind(interp='linear')
+        self.wind = DiscreteWind(interp='pwc')
         self.wind.load(wind_fp)
 
         self.trajs = []
@@ -196,7 +196,8 @@ class PostProcessing:
             else:
                 ax[1, 1].plot(ts[:nt - 1], y, color=color)
             ax[1, 0].plot(ts[:nt - 1], tstats.gs, color=color)
-            ax[1, 2].plot(ts[:nt - 1], tstats.vas, color=color)
+            N_convolve = 10
+            ax[1, 2].plot(ts[:nt - 1], np.convolve(tstats.vas, np.ones(N_convolve)/N_convolve, mode='same'), color=color)
             hours = int(tstats.duration / 3600)
             minutes = int((tstats.duration - 3600 * hours) / 60.)
             if int(hours) >= 1:
@@ -242,6 +243,10 @@ class PostProcessing:
         p_min = 0.05 * v_minp ** 3 + 1000 / v_minp
         decorate(ax, 'Energy vs. time', 'Time (h)', 'Energy (kWh)')
         ax.plot((0., 100), (0., 100 * p_min/1e3))
+        tts = np.linspace(4, 100., 100)
+        ax.plot(tts, list(map(lambda t: t/1e3 * (0.05 * (self.geod_l/(t*3.6e3)) ** 3 + 1000 / (self.geod_l/(t*3.6e3))), tts)))
+        ax.set_xlim((0, 100))
+        ax.set_ylim((0, 60))
         plt.show()
 
         """
@@ -274,7 +279,6 @@ class PostProcessing:
         controls = np.zeros(n - 1)
         dtarget = np.zeros(n - 1)
         duration = 0.
-        t = ts[0]
 
         dtarget = np.array([distance(points[i], self.x_target, self.coords) for i in range(n - 1)])
 
@@ -296,7 +300,7 @@ class PostProcessing:
             dx_norm = np.linalg.norm(delta_x)
             e_dx = delta_x / dx_norm
             dx_arg = atan2(delta_x[1], delta_x[0])
-            w = self.wind.value(t, p)
+            w = self.wind.value(ts[i], p)
             w_norm = np.linalg.norm(w)
             w_arg = atan2(w[1], w[0])
             right = w_norm / self.va * sin(w_arg - dx_arg)
@@ -315,7 +319,6 @@ class PostProcessing:
             tw[i] = e_dx @ w
             vas[i] = v_a
             controls[i] = u if self.coords == COORD_CARTESIAN else np.pi / 2. - u
-            t = ts[i + 1]
             if i <= imax:
                 duration += dt
 

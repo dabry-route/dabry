@@ -34,9 +34,11 @@ class Aero(ABC):
         :param wind_speed: Wind speed in m/s
         :return: Airspeed in m/s
         """
-        v_minp = 0.1  # if self.v_minp is None else self.v_minp
-        return scipy.optimize.brentq(
-            lambda asp: self.d_power(asp) - self.power(asp) / (asp + wind_speed), v_minp, 100.)
+        v_minp = 8  # if self.v_minp is None else self.v_minp
+        f = lambda asp: self.d_power(asp) - self.power(asp) / (asp + wind_speed)
+        # return scipy.optimize.brentq(
+        #     lambda asp: self.d_power(asp) - self.power(asp) / (asp + wind_speed), v_minp, 100.)
+        return f(scipy.optimize.brute(f, ((v_minp, 50.),))[0])
 
     @staticmethod
     def _vec_or_float_to_norm(x):

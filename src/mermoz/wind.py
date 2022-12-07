@@ -300,15 +300,6 @@ class DiscreteWind(Wind):
                 self.grid[:] = wind_data['grid']
                 self.ts = np.zeros((self.nt,))
                 self.ts[:] = wind_data['ts'][:self.nt]
-                self.t_start = self.ts[0]
-                self.t_end = None if self.nt == 1 else self.ts[-1]
-                # Detecting millisecond-formated timestamps
-                if np.any(self.ts > 1e11):
-                    self.ts[:] = self.ts / 1000.
-                    self.t_start /= 1000.
-                    if self.t_end is not None:
-                        self.t_end /= 1000.
-
             else:
                 nx_wind = wind_data['data'].shape[1]
                 ny_wind = wind_data['data'].shape[2]
@@ -320,25 +311,37 @@ class DiscreteWind(Wind):
                                                     np.linspace(self.y_min, self.y_max, self.ny))).transpose((2, 1, 0))
                 grid_wind = np.zeros(wind_data['grid'].shape)
                 grid_wind[:] = np.array(wind_data['grid'])
-                u_wind = np.zeros((nx_wind, ny_wind))
-                v_wind = np.zeros((nx_wind, ny_wind))
-                u_wind[:] = np.array(wind_data['data'][0, :, :, 0])
-                v_wind[:] = np.array(wind_data['data'][0, :, :, 1])
-                u_itp = np.zeros((self.nx, self.ny))
-                u_itp[:] = itp.griddata(grid_wind.reshape((nx_wind * ny_wind, 2)),
-                                        u_wind.reshape((nx_wind * ny_wind,)),
-                                        self.grid.reshape((self.nx * self.ny, 2)), method='linear',
-                                        fill_value=0.).reshape((self.nx, self.ny))
-                v_itp = np.zeros((self.nx, self.ny))
-                v_itp[:] = itp.griddata(grid_wind.reshape((nx_wind * ny_wind, 2)),
-                                        v_wind.reshape((nx_wind * ny_wind,)),
-                                        self.grid.reshape((self.nx * self.ny, 2)), method='linear',
-                                        fill_value=0.).reshape((self.nx, self.ny))
+                grid_wind_rshp = grid_wind.reshape((nx_wind * ny_wind, 2))
                 self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
                 for kt in range(self.nt):
+
+                    u_wind = np.zeros((nx_wind, ny_wind))
+                    v_wind = np.zeros((nx_wind, ny_wind))
+                    u_wind[:] = np.array(wind_data['data'][kt, :, :, 0])
+                    v_wind[:] = np.array(wind_data['data'][kt, :, :, 1])
+                    u_itp = np.zeros((self.nx, self.ny))
+                    u_itp[:] = itp.griddata(grid_wind_rshp,
+                                            u_wind.reshape((nx_wind * ny_wind,)),
+                                            self.grid.reshape((self.nx * self.ny, 2)), method='linear',
+                                            fill_value=0.).reshape((self.nx, self.ny))
+                    v_itp = np.zeros((self.nx, self.ny))
+                    v_itp[:] = itp.griddata(grid_wind_rshp,
+                                            v_wind.reshape((nx_wind * ny_wind,)),
+                                            self.grid.reshape((self.nx * self.ny, 2)), method='linear',
+                                            fill_value=0.).reshape((self.nx, self.ny))
                     self.uv[kt, :] = np.stack((u_itp, v_itp), axis=2)
                 self.ts = np.zeros((self.nt,))
                 self.ts[:] = wind_data['ts']
+
+        # Time bounds
+        self.t_start = self.ts[0]
+        self.t_end = None if self.nt == 1 else self.ts[-1]
+        # Detecting millisecond-formated timestamps
+        if np.any(self.ts > 1e11):
+            self.ts[:] = self.ts / 1000.
+            self.t_start /= 1000.
+            if self.t_end is not None:
+                self.t_end /= 1000.
 
         # Post processing
         if self.units_grid == U_DEG:
