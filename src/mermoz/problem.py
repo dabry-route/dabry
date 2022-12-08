@@ -16,6 +16,7 @@ from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
 
 
+
 class MermozProblem:
     """
     The Mermoz problem class defines the whole optimal control problem.

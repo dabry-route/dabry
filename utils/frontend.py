@@ -143,7 +143,10 @@ class FrontendHandler:
                 kwargs['fps'] = fps
             self.display.to_movie(**kwargs)
         elif not noshow:
-            self.display.show(noparams=noparams, block=block)
+            try:
+                self.display.show(noparams=noparams, block=block)
+            except KeyboardInterrupt:
+                pass
 
     def show_params(self):
         from IPython.core.display import HTML

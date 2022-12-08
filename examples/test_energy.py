@@ -8,7 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.optimize
 from tqdm import tqdm
-
+import sys
+sys.path.extend([
+    '/home/bastien/Documents/work/mermoz/src',
+    '/home/bastien/Documents/work/mdisplay/src'
+])
 from mermoz.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB, FixedHeadingFB, FunAS, E_GSTargetFB
 from mermoz.mdf_manager import MDFmanager
 from mermoz.params_summary import ParamsSummary
@@ -20,6 +24,7 @@ from mermoz.trajectory import Trajectory
 from mermoz.solver_rp import SolverRP
 from mermoz.stoppingcond import TimedSC, DistanceSC, DisjunctionSC
 from mermoz.wind import DiscreteWind
+
 
 if __name__ == '__main__':
     # Choose problem ID
@@ -117,36 +122,18 @@ if __name__ == '__main__':
     chrono.stop()
     """
     pareto = Pareto()
-    pareto.add((3.6e3 * 50, 3.6e6 * 51))
-    pareto.add((3.6e3 * 53.5, 3.6e6 * 49))
-    pareto.add((3.6e3 * 58.5, 3.6e6 * 47))
-    pareto.add((3.6e3 * 68, 3.6e6 * 34))
 
-    asp_inits = [[30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20],
-                 [20]]
+    asp_inits = [[20, 19, 18, 17, 16],
+                 [16, 15.5]]
 
     dt = 0.001 * pb._geod_l / pb.model.v_a
-    for mode in [1]:
-        cost_ceil = None
-        t_upper_bound = 0.
-        for asp_init in asp_inits[mode]:
+    for mode in [0]:
+        for asp_init in [16]:#asp_inits[mode]:
             chrono.start(f'Computing EF Mode {mode} Airspeed {asp_init:.2f}')
-            # if mode == 0:
-            #     pb.update_airspeed(asp_init)
-            #     if t_upper_bound is None:
-            #         t_upper_bound = 1.5 * pb._geod_l / asp_init
-            #     else:
-            #         t_upper_bound = reach_time
-            # if mode == 1:
-            #     if cost_ceil is None:
-            #         cost_ceil = 1.5 * pb.aero.power(asp_init) * pb._geod_l / asp_init
-            #     else:
-            #         cost_ceil = reach_cost
-            #    t_upper_bound = 1.5 * pb._geod_l / asp_init
-            solver_ef = solver = SolverEF(pb, t_upper_bound, mode=mode, max_steps=3000, rel_nb_ceil=0.01,
+            pb.update_airspeed(asp_init)
+            solver_ef = solver = SolverEF(pb, 100*3.6e3, mode=mode, rel_nb_ceil=0.01,
                                           dt=dt,
                                           no_coll_filtering=True,
-                                          # cost_ceil=47*3.6e6,
                                           asp_init=asp_init,
                                           quick_solve=not mode,
                                           pareto=pareto)
@@ -163,8 +150,8 @@ if __name__ == '__main__':
                 for b in optim_res.bests.values():
                     mdfm.dump_trajs([b['traj']])
                     pareto.add((b['duration'], b['cost']))
-            # trajs = solver.get_trajs()
-            # mdfm.dump_trajs(trajs)
+            trajs = solver.get_trajs()
+            mdfm.dump_trajs(trajs)
 
 
     # chrono.start('Computing Energy EF')

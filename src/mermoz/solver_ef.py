@@ -292,7 +292,7 @@ class SolverEF:
     MODE_ENERGY = 1
 
     def __init__(self, mp: MermozProblem, max_time, mode=0, N_disc_init=20, rel_nb_ceil=0.05, dt=None,
-                 max_steps=30, hard_obstacles=True, collbuf_shape=None, cost_ceil=None, asp_offset=0., asp_init=None,
+                 max_steps=None, hard_obstacles=True, collbuf_shape=None, cost_ceil=None, asp_offset=0., asp_init=None,
                  no_coll_filtering=False, quick_solve=False, pareto=None):
         self.mp_primal = mp
         self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
@@ -349,7 +349,7 @@ class SolverEF:
         self._index_p = 0
         self._index_d = 0
 
-        self.max_steps = max_steps
+        self.max_steps = max_steps if max_steps is not None else int(max_time / abs(dt))
 
         self.N_filling_steps = 1
         self.hard_obstacles = hard_obstacles
@@ -483,7 +483,7 @@ class SolverEF:
                 obstacle_list.append(a.i)
             elif self.cost_ceil is not None and c > self.cost_ceil:
                 self.rel.deactivate(a.i)
-            elif self.pareto is not None and self.pareto.dominated((t,c)):
+            elif self.pareto is not None and self.pareto.dominated((t - self.mp_primal.model.wind.t_start, c)):
                 self.rel.deactivate(a.i)
             else:
                 if it == 0 or True:  # or not polyfront.contains(Point(*x)):
@@ -728,7 +728,7 @@ class SolverEF:
             if verbose:
                 print(i)
             self.step_global()
-            print(f'\rSteps : {i:>6}, Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
+            print(f'\rSteps : {i:>6}/{self.max_steps}, Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
                   f'Dist : {min(self.best_distances) / self.mp._geod_l * 100:>3.0f} ', end='', flush=True)
         msg = ''
         if i == self.max_steps:
@@ -889,17 +889,17 @@ class SolverEF:
             rel_idx_list.append(rel_idx_closest)
             bests = {traj_idx_closest: closest}
         else:
-            # Filter out Pareto-dominated optima
-            # to_delete = []
-            # for a, b in bests.items():
-            #     for aa, bb in bests.items():
-            #         if a == aa:
-            #             continue
-            #         if bb['cost'] < b['cost'] and bb['duration'] < b['duration']:
-            #             to_delete.append(a)
-            #             break
-            # for a in to_delete:
-            #     del bests[a]
+            #Filter out Pareto-dominated optima
+            to_delete = []
+            for a, b in bests.items():
+                for aa, bb in bests.items():
+                    if a == aa:
+                        continue
+                    if bb['cost'] < b['cost'] and bb['duration'] < b['duration']:
+                        to_delete.append(a)
+                        break
+            for a in to_delete:
+                del bests[a]
             a0 = None
             min_cost = None
             for a, b in bests.items():
@@ -917,6 +917,7 @@ class SolverEF:
             nt = time_idx_list[k]
             s0 = rel_idx_list[k]
             points = np.zeros((nt, 2))
+            adjoints = np.zeros((nt, 2))
             ts = np.zeros(nt)
             data = list(trajs[k0].values())
             it = 0
@@ -927,6 +928,7 @@ class SolverEF:
                 cond = lambda s: s >= 0
             while cond(s):
                 points[it] = data[s][1]
+                adjoints[it] = data[s][2]
                 ts[it] = data[s][0]
                 it += 1
                 s -= 1
@@ -956,12 +958,14 @@ class SolverEF:
                     ib = min(len(datal), len(datau))
                     for i in range(ib):
                         points[it] = (1 - a) * datal[-1 - i][1] + a * datau[-1 - i][1]
+                        adjoints[it] = (1 - a) * datal[-1 - i][2] + a * datau[-1 - i][2]
                         ts[it] = datal[- 1 - i][0]
                         it += 1
             if using_primal:
                 ts = ts[::-1]
                 points = points[::-1]
-            traj = Trajectory(ts, points, np.zeros(nt), nt - 1, mp.coords, info=f'opt_m{self.mode}_{self.asp_init:.0f}')
+                adjoints = adjoints[::-1]
+            traj = AugmentedTraj(ts, points, adjoints, np.zeros(nt), nt - 1, mp.coords, info=f'opt_m{self.mode}_{self.asp_init:.0f}')
             bests[k0]['traj'] = traj
         res = EFOptRes(bests)
         return res

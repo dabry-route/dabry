@@ -13,6 +13,8 @@ from numpy import sin, pi, cos
 from math import atan2, asin
 import matplotlib.pyplot as plt
 
+from mermoz.aero import LLAero
+
 sys.path.extend('/home/bastien/Documents/work/mdisplay/src/mdisplay/')
 from mdisplay.misc import windy_cm
 
@@ -117,6 +119,9 @@ class PostProcessing:
             _traj['controls'][:] = traj['controls']
             _traj['ts'] = np.zeros(traj['ts'].shape)
             _traj['ts'][:] = traj['ts']
+            if 'adjoints' in traj.keys():
+                _traj['adjoints'] = np.zeros(traj['adjoints'].shape)
+                _traj['adjoints'][:] = traj['adjoints']
 
             _traj['type'] = traj.attrs['type']
             _traj['last_index'] = traj.attrs['last_index']
@@ -183,6 +188,13 @@ class PostProcessing:
             color = path_colors[k % len(path_colors)]
             tstats = self.point_stats(ts, points, last_index=nt)
             nt = tstats.imax + 2
+            aero = LLAero()
+            if 'adjoints' in traj.keys() and 'm0' not in traj['info']:
+                tstats.vas = np.array(list(map(aero.asp_opti, traj['adjoints'][:nt-1])))
+                tstats.power = np.array(list(map(aero.power, tstats.vas)))
+            if len(traj['info'].split('_')) >= 3 and traj['info'].split('_')[1] == 'm0':
+                tstats.vas = float(traj['info'].split('_')[2]) * np.ones(tstats.vas.shape)
+                tstats.power = np.array(list(map(aero.power, tstats.vas)))
             x = np.linspace(0, 1., nt - 1)
             ax[0, 0].plot(x, tstats.length * 1 / tstats.gs/3.6e3, label=f'{traj["info"]}', color=color)
             ax[0, 1].plot(ts[:nt - 1], tstats.power, color=color)
@@ -197,7 +209,8 @@ class PostProcessing:
                 ax[1, 1].plot(ts[:nt - 1], y, color=color)
             ax[1, 0].plot(ts[:nt - 1], tstats.gs, color=color)
             N_convolve = 10
-            ax[1, 2].plot(ts[:nt - 1], np.convolve(tstats.vas, np.ones(N_convolve)/N_convolve, mode='same'), color=color)
+            vas = np.convolve(tstats.vas, np.ones(N_convolve)/N_convolve, mode='same') if 'adjoint' not in traj.keys() else tstats.vas
+            ax[1, 2].plot(ts[:nt - 1], vas, color=color)
             hours = int(tstats.duration / 3600)
             minutes = int((tstats.duration - 3600 * hours) / 60.)
             if int(hours) >= 1:
@@ -284,7 +297,7 @@ class PostProcessing:
 
         imax = n - 2
         for i in range(len(dtarget)):
-            if dtarget[i]/self.geod_l < 5e-2:
+            if dtarget[i]/self.geod_l < 1e-2:
                 imax = i
                 break
 
