@@ -107,6 +107,7 @@ class ParamsSummary:
         self.add_param('target_radius', 0.05 * pb._geod_l)
         self.add_param('geodesic_time', pb._geod_l / pb.model.v_a)
         self.add_param('geodesic_length', pb._geod_l)
+        self.add_param('aero_mode', pb.aero.mode)
 
     def process_params(self):
         params = self.params

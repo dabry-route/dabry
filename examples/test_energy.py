@@ -28,7 +28,7 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 21, 0
+    pb_id, seed = 5, 0
     dbpb = None  # '72W_15S_0W_57S_20220301_12' # '37W_8S_16W_17S_20220301_12'
     cache_rff = False
     cache_wind = False
@@ -42,15 +42,10 @@ if __name__ == '__main__':
     else:
         output_dir = f'/home/bastien/Documents/work/mermoz/output/example_energy_{IndexedProblem.problems[pb_id][1]}'
     mdfm.set_output_dir(output_dir)
-    mdfm.clean_output_dir(keep_rff=cache_rff, keep_wind=cache_wind)
+    #mdfm.clean_output_dir(keep_rff=cache_rff, keep_wind=cache_wind)
 
-    nx_rft = 101
-    ny_rft = 101
-    nt_rft = 20
+    nx_rft, ny_rft, nt_rft = 101, 101, 20
 
-    # Create problem
-    # mdfm.dump_wind_from_grib2(grib_fps, bl, tr)
-    # pb = DatabaseProblem('/home/bastien/Documents/data/wind/ncdc/tmp.mz/wind.h5')
     if dbpb is not None:
         pb = DatabaseProblem(os.path.join('/home/bastien/Documents/data/wind/ncdc/', dbpb, 'wind.h5'), airspeed=23.)
     else:
@@ -61,74 +56,15 @@ if __name__ == '__main__':
         mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
         chrono.stop()
 
-    # Sequence
-    """
-    pb.update_airspeed(pb.aero.v_minp)
-    asp_offlist = [0., 2., 4., 6., 8.]
-    for asp_offset in asp_offlist:
-        chrono.start('Computing Energy EF')
-        t_upper_bound = 2 * pb._geod_l / pb.aero.v_minp
-        solver_ef = solver = SolverEF(pb, t_upper_bound, mode=1, max_steps=300, rel_nb_ceil=0.01, cost_ceil=30*3.6e6,
-                                    asp_offset=asp_offset)
-        reach_time, iit, p_init = solver.solve(forward_only=True)
-        reach_time_tef = reach_time
-        chrono.stop()
-        print(f'Reach time : {reach_time / 3600:.2f}')
-        # trajs = solver.get_trajs()
-        # mdfm.dump_trajs(trajs)
-
-        chrono.start('Computing optimal traj')
-        traj = solver_ef.build_opti_traj(force_primal=True)
-        traj.info = traj.info + f'_v+{int(asp_offset)}'
-        if traj.timestamps.shape[0] > 0:
-            mdfm.dump_trajs([traj])
-        chrono.stop()
-    
-    for asp_offset in asp_offlist:
-        chrono.start('Computing Time EF')
-        pb.update_airspeed(pb.aero.v_minp + asp_offset)
-        t_upper_bound = 2 * pb._geod_l / pb.aero.v_minp
-        solver_ef = solver = SolverEF(pb, t_upper_bound, mode=0, max_steps=300, rel_nb_ceil=0.01, cost_ceil=30*3.6e6)
-        reach_time, iit, p_init = solver.solve(forward_only=True)
-        reach_time_tef = reach_time
-        chrono.stop()
-        print(f'Reach time : {reach_time / 3600:.2f}')
-        # trajs = solver.get_trajs()
-        # mdfm.dump_trajs(trajs)
-
-        chrono.start('Computing optimal traj')
-        traj = solver_ef.build_opti_traj(force_primal=True)
-        traj.info = traj.info + f'_v+{int(asp_offset)}'
-        if traj.timestamps.shape[0] > 0:
-            mdfm.dump_trajs([traj])
-        chrono.stop()
-    """
-    """
-    chrono.start('Computing Min Energy EF')
-    t_upper_bound = 2 * pb._geod_l / pb.aero.v_minp
-    solver_ef = solver = SolverEF(pb, t_upper_bound, mode=1, max_steps=300, rel_nb_ceil=0.01, cost_ceil=60 * 3.6e6, asp_offset=20.)
-    reach_time, iit, p_init = solver.solve(forward_only=True)
-    reach_time_tef = reach_time
-    chrono.stop()
-    print(f'Reach time : {reach_time / 3600:.2f}')
-    trajs = solver.get_trajs()
-    mdfm.dump_trajs(trajs)
-
-    chrono.start('Computing optimal traj')
-    traj = solver_ef.build_opti_traj(force_primal=True)
-    traj.info = traj.info
-    if traj.timestamps.shape[0] > 0:
-        mdfm.dump_trajs([traj])
-    chrono.stop()
-    """
     pareto = Pareto()
+    pareto.load(output_dir)
 
-    asp_inits = [[20, 19, 18, 17, 16],
-                 [16, 15.5]]
+    asp_inits = [[11.5, 12, 12.5, 14],
+                 []]
 
     dt = 0.001 * pb._geod_l / pb.model.v_a
-    for mode in [0]:
-        for asp_init in [16]:#asp_inits[mode]:
+    for mode in [0, 1]:
+        for asp_init in asp_inits[mode]:
             chrono.start(f'Computing EF Mode {mode} Airspeed {asp_init:.2f}')
             pb.update_airspeed(asp_init)
             solver_ef = solver = SolverEF(pb, 100*3.6e3, mode=mode, rel_nb_ceil=0.01,
@@ -136,7 +72,7 @@ if __name__ == '__main__':
                                           no_coll_filtering=True,
                                           asp_init=asp_init,
                                           quick_solve=not mode,
-                                          pareto=pareto)
+                                          pareto=None if not mode else pareto)
             optim_res = solver.solve(forward_only=True)
             reach_time = optim_res.duration
             reach_cost = optim_res.cost
@@ -145,13 +81,18 @@ if __name__ == '__main__':
             print(f'Time/Cost : {reach_time / 3600:.2f}h/{reach_cost / 3.6e6:.2f}kWh')
             if mode == 0:
                 mdfm.dump_trajs([optim_res.traj])
-                pareto.add((optim_res.duration, optim_res.cost))
+                if optim_res.status:
+                    pareto.add((optim_res.duration, optim_res.cost))
             else:
                 for b in optim_res.bests.values():
                     mdfm.dump_trajs([b['traj']])
-                    pareto.add((b['duration'], b['cost']))
-            trajs = solver.get_trajs()
-            mdfm.dump_trajs(trajs)
+                    if optim_res.status:
+                        pareto.add((b['duration'], b['cost']))
+            # trajs = solver.get_trajs()
+            # mdfm.dump_trajs(trajs)
+
+    pareto.dump(output_dir)
+
 
 
     # chrono.start('Computing Energy EF')

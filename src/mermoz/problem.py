@@ -421,7 +421,7 @@ class IndexedProblem(MermozProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
 
         elif i == 5:
-            v_a = 40.
+            v_a = 18.
             sf = 1e6
 
             x_init = sf * np.array((0., 0.))
@@ -430,6 +430,7 @@ class IndexedProblem(MermozProblem):
             tr = sf * np.array((1.1, 1.))
             coords = COORD_CARTESIAN
 
+            # To get w as wind value at start point, choose gamma = w / 0.583
             gamma = v_a / sf * 1.
             omega = 0.
             total_wind = PointSymWind(sf * 0.5, sf * 0.3, gamma, omega)
@@ -800,17 +801,17 @@ class IndexedProblem(MermozProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
         elif i == 15:
-            v_a = 0.6
+            v_a = 23.
 
-            sf = 1.
+            sf = 3e6
 
-            x_init = sf * np.array((250., 375.))
-            x_target = sf * np.array((250., 350.))
-            bl = sf * np.array((100, 250))
-            tr = sf * np.array((400, 500))
+            x_init = sf * np.array((0, 0.25))
+            x_target = sf * np.array((0.03, -0.25))
+            bl = sf * np.array((-1, -0.5))
+            tr = sf * np.array((1., 0.5))
             coords = COORD_CARTESIAN
 
-            total_wind = DoubleGyreWind(0., 0., 500., 500., 1.)
+            total_wind = DoubleGyreWind(sf*0, sf*-0.5, sf*2, sf*2, 30.)
 
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)

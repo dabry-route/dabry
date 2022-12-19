@@ -13,7 +13,7 @@ from numpy import sin, pi, cos
 from math import atan2, asin
 import matplotlib.pyplot as plt
 
-from mermoz.aero import LLAero
+from mermoz.aero import LLAero, Aero
 
 sys.path.extend('/home/bastien/Documents/work/mdisplay/src/mdisplay/')
 from mdisplay.misc import windy_cm
@@ -36,24 +36,25 @@ class TrajStats:
                  controls: ndarray,
                  dt: float,
                  dtarget: ndarray,
-                 imax: int):
+                 imax: int,
+                 aero: Aero):
         self.imax = imax
         self.length = length
         self.duration = duration
-        self.gs = np.zeros(imax+1)
-        self.gs[:] = gs[:imax+1]
-        self.cw = np.zeros(imax+1)
-        self.cw[:] = crosswind[:imax+1]
-        self.tw = np.zeros(imax+1)
-        self.tw[:] = tgwind[:imax+1]
-        self.vas = np.zeros(imax+1)
-        self.vas[:] = vas[:imax+1]
-        self.controls = np.zeros(imax+1)
-        self.controls[:] = controls[:imax+1]
-        self.dtarget = np.zeros(imax+1)
-        self.dtarget[:] = dtarget[:imax+1]
+        self.gs = np.zeros(imax + 1)
+        self.gs[:] = gs[:imax + 1]
+        self.cw = np.zeros(imax + 1)
+        self.cw[:] = crosswind[:imax + 1]
+        self.tw = np.zeros(imax + 1)
+        self.tw[:] = tgwind[:imax + 1]
+        self.vas = np.zeros(imax + 1)
+        self.vas[:] = vas[:imax + 1]
+        self.controls = np.zeros(imax + 1)
+        self.controls[:] = controls[:imax + 1]
+        self.dtarget = np.zeros(imax + 1)
+        self.dtarget[:] = dtarget[:imax + 1]
 
-        self.power = np.array(list(map(lambda v: 0.05 * v ** 3 + 1000 / v, self.vas)))
+        self.power = np.array(list(map(lambda v: aero.power(v), self.vas)))
         self.energy = np.array(list(np.sum(self.power[:i]) for i in range(self.power.shape[0]))) * dt
 
 
@@ -97,7 +98,17 @@ class PostProcessing:
                 print('[PP-Warn] Airspeed not found in parameters, switching to default value')
                 self.va = AIRSPEED_DEFAULT
 
-        self.geod_l = distance(self.x_init, self.x_target, self.coords)
+            try:
+                self.geod_l = pd['geodesic_length']
+            except KeyError:
+                self.geod_l = distance(self.x_init, self.x_target, self.coords)
+
+            try:
+                self.aero_mode = pd['aero_mode']
+            except KeyError:
+                self.aero_mode = 'dobro'
+
+        self.aero = LLAero(mode=self.aero_mode)
 
         wind_fp = os.path.join(self.output_dir, self.wind_fn)
         self.wind = DiscreteWind(interp='pwc')
@@ -119,6 +130,8 @@ class PostProcessing:
             _traj['controls'][:] = traj['controls']
             _traj['ts'] = np.zeros(traj['ts'].shape)
             _traj['ts'][:] = traj['ts']
+            if _traj['ts'].shape[0] == 0:
+                continue
             if 'adjoints' in traj.keys():
                 _traj['adjoints'] = np.zeros(traj['adjoints'].shape)
                 _traj['adjoints'][:] = traj['adjoints']
@@ -188,15 +201,14 @@ class PostProcessing:
             color = path_colors[k % len(path_colors)]
             tstats = self.point_stats(ts, points, last_index=nt)
             nt = tstats.imax + 2
-            aero = LLAero()
             if 'adjoints' in traj.keys() and 'm0' not in traj['info']:
-                tstats.vas = np.array(list(map(aero.asp_opti, traj['adjoints'][:nt-1])))
-                tstats.power = np.array(list(map(aero.power, tstats.vas)))
+                tstats.vas = np.array(list(map(self.aero.asp_opti, traj['adjoints'][:nt - 1])))
+                tstats.power = np.array(list(map(self.aero.power, tstats.vas)))
             if len(traj['info'].split('_')) >= 3 and traj['info'].split('_')[1] == 'm0':
                 tstats.vas = float(traj['info'].split('_')[2]) * np.ones(tstats.vas.shape)
-                tstats.power = np.array(list(map(aero.power, tstats.vas)))
+                tstats.power = np.array(list(map(self.aero.power, tstats.vas)))
             x = np.linspace(0, 1., nt - 1)
-            ax[0, 0].plot(x, tstats.length * 1 / tstats.gs/3.6e3, label=f'{traj["info"]}', color=color)
+            ax[0, 0].plot(x, tstats.length * 1 / tstats.gs / 3.6e3, label=f'{traj["info"]}', color=color)
             ax[0, 1].plot(ts[:nt - 1], tstats.power, color=color)
             ax[0, 2].plot(ts[:nt - 1], tstats.energy / 3.6e6, color=color)
             ax2.plot(ts[:nt - 1], tstats.dtarget, color=color, alpha=0.2)
@@ -209,7 +221,8 @@ class PostProcessing:
                 ax[1, 1].plot(ts[:nt - 1], y, color=color)
             ax[1, 0].plot(ts[:nt - 1], tstats.gs, color=color)
             N_convolve = 10
-            vas = np.convolve(tstats.vas, np.ones(N_convolve)/N_convolve, mode='same') if 'adjoint' not in traj.keys() else tstats.vas
+            vas = np.convolve(tstats.vas, np.ones(N_convolve) / N_convolve,
+                              mode='same') if 'adjoint' not in traj.keys() else tstats.vas
             ax[1, 2].plot(ts[:nt - 1], vas, color=color)
             hours = int(tstats.duration / 3600)
             minutes = int((tstats.duration - 3600 * hours) / 60.)
@@ -218,10 +231,10 @@ class PostProcessing:
             else:
                 timestamp = tstats.duration
             energy = np.mean(tstats.power) * tstats.duration
-            ets[k] = (energy, tstats.duration)
+            ets[k] = (energy, tstats.duration, np.any(tstats.dtarget < 0.02 * self.geod_l))
             va_dur[k] = (tstats.vas[0], tstats.duration)
             e_kwh = energy / 3600000
-            if int(e_kwh) >=1:
+            if int(e_kwh) >= 1:
                 energy = e_kwh
 
             line = ['',
@@ -245,21 +258,38 @@ class PostProcessing:
             writer.writerows(data[1:])
         ax[0, 0].legend(loc='center left', bbox_to_anchor=(0., 0.9))
         plt.show(block=False)
-        fig, ax = plt.subplots()
-        times = list(map(lambda x: x[1]/3.6e3, ets.values()))
-        energies = list(map(lambda x: x[0]/3.6e6, ets.values()))
+        fig, ax = plt.subplots(figsize=(10, 8))
+        fig.tight_layout()
+        times = list(map(lambda x: x[1] / 3.6e3, ets.values()))
+        energies = list(map(lambda x: x[0] / 3.6e6, ets.values()))
         colors = [path_colors[k % len(path_colors)] for k in range(len(energies))]
-        ax.scatter(times, energies, c=colors)
+        markers = list(map(lambda x: 'o' if np.bool(x[2]) else 'x', ets.values()))
+        for k, t in enumerate(times):
+            ax.scatter(t, energies[k], c=colors[k], marker=markers[k])
         for k in ets.keys():
-            ax.annotate(self.trajs[k]['info'], (ets[k][1]/3.6e3, ets[k][0]/3.6e6), fontsize=8)
-        v_minp = (1000/(3*0.05)) ** (1/4)
+            ax.annotate(self.trajs[k]['info'], (ets[k][1] / 3.6e3, ets[k][0] / 3.6e6), fontsize=8)
+        v_minp = (1000 / (3 * 0.05)) ** (1 / 4)
         p_min = 0.05 * v_minp ** 3 + 1000 / v_minp
         decorate(ax, 'Energy vs. time', 'Time (h)', 'Energy (kWh)')
-        ax.plot((0., 100), (0., 100 * p_min/1e3))
+        x = np.linspace(5, 1.15 * max(times), 100)
+        y = np.linspace(0.5, 1.15 * max(energies), 100)
+        x, y = np.meshgrid(x, y, indexing='ij')
+        points = zip(x, y)
+        levels = p_min*(1 + np.arange(13)/4)
+        labels = {}
+        for l in levels:
+            labels[l] = f'{l/p_min:.2f}'+'$P_{min}$'
+        cont = ax.contour(x, y, list(map(lambda p: 1e3 * p[1] / p[0], points)), levels=levels, alpha=0.5)
+        def constant_asp_energy(l, t):
+            return t * self.aero.power(l/t)
+        ax.clabel(cont, fontsize=12, fmt=labels)
         tts = np.linspace(4, 100., 100)
-        ax.plot(tts, list(map(lambda t: t/1e3 * (0.05 * (self.geod_l/(t*3.6e3)) ** 3 + 1000 / (self.geod_l/(t*3.6e3))), tts)))
-        ax.set_xlim((0, 100))
-        ax.set_ylim((0, 60))
+        tts = tts[tts < (self.geod_l / self.aero.v_minp / 3.6e3)]
+        ax.plot(tts, list(
+            map(lambda t: constant_asp_energy(self.geod_l, t*3.6e3)/3.6e6,
+                tts)), color='gray', alpha=0.5, linestyle='--')
+        ax.set_xlim((0, 1.15 * max(times)))
+        ax.set_ylim((0, 1.15 * max(energies)))
         plt.show()
 
         """
@@ -290,14 +320,13 @@ class PostProcessing:
         tw = np.zeros(n - 1)
         vas = np.zeros(n - 1)
         controls = np.zeros(n - 1)
-        dtarget = np.zeros(n - 1)
         duration = 0.
 
         dtarget = np.array([distance(points[i], self.x_target, self.coords) for i in range(n - 1)])
 
         imax = n - 2
         for i in range(len(dtarget)):
-            if dtarget[i]/self.geod_l < 1e-2:
+            if dtarget[i] / self.geod_l < 1e-2:
                 imax = i
                 break
 
@@ -335,7 +364,7 @@ class PostProcessing:
             if i <= imax:
                 duration += dt
 
-        tstats = TrajStats(length, duration, gs, cw, tw, vas, controls, dt, dtarget, imax)
+        tstats = TrajStats(length, duration, gs, cw, tw, vas, controls, dt, dtarget, imax, self.aero)
         return tstats
 
 

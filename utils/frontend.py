@@ -113,7 +113,8 @@ class FrontendHandler:
                 with open(cache_fp, 'w') as f:
                     f.writelines(sel_dir)
 
-    def run_frontend(self, ex_name=None, noparams=True, noshow=False, block=False, movie=False, frames=None, fps=None):
+    def run_frontend(self, ex_name=None, noparams=True, noshow=False, block=False, movie=False, frames=None, fps=None,
+                     flags=''):
         # if self.mode == 'default':
         #     if ex_name is None:
         #         self.output_path = easygui.diropenbox(default=os.path.join('..', 'output'))
@@ -134,6 +135,7 @@ class FrontendHandler:
         self.display = Display()
         self.display.set_output_path(self.output_path)
         self.configure()
+        self.display.set_mode(flags)
         self.display.update_title()
         if movie:
             kwargs = {}
@@ -301,10 +303,15 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--movie', help='Produce movie with case', required=False, nargs='?', const=True)
     parser.add_argument('--frames', help='Number of frames for movie', required=False, nargs='?', const=True)
     parser.add_argument('--fps', help='Framerate for movie', required=False, nargs='?', const=True)
+    parser.add_argument('--flags', help='Flags for display', required=False, nargs='?', const=True)
     args = parser.parse_args(sys.argv[1:])
     fh = FrontendHandler(mode='default')
     fh.select_example(select_latest=args.latest)
-    fh.run_frontend(block=not args.postprocessing, movie=args.movie, frames=args.frames, fps=args.fps)
+    fh.run_frontend(block=not args.postprocessing,
+                    movie=args.movie,
+                    frames=args.frames,
+                    fps=args.fps,
+                    flags=args.flags)
     if args.postprocessing:
         pp = PostProcessing(fh.output_path)
         pp.load()

@@ -59,14 +59,19 @@ class LLAero(Aero):
     Lifting-line type model where polar is of the form CD = CD0 + k CL ** 2
     """
 
-    def __init__(self):
+    def __init__(self, mode='dobro'):
         super().__init__()
-        # Coefficients extracted from Dobrokhodov et al. 2020
-        self.kp1 = 0.05
-        self.kp2 = 1000
-        # Coefficients from Mermoz
-        # self.kp1 = 0.011
-        # self.kp2 = 500
+        self.mode = mode
+        if mode == 'dobro':
+            # Coefficients extracted from Dobrokhodov et al. 2020
+            self.kp1 = 0.05
+            self.kp2 = 1000
+        elif mode == 'mermoz':
+            # Coefficients from Mermoz
+            self.kp1 = 0.011
+            self.kp2 = 500
+        else:
+            raise Exception(f'Unknown mode {mode}')
         self.v_minp = (self.kp2 / (3 * self.kp1)) ** (1/4)
 
     def power(self, airspeed):

@@ -1,9 +1,11 @@
 # from heapq import heappush, heappop
+import os
 import sys
 
 import numpy as np
 from math import atan2
 from shapely.geometry import Polygon, Point
+import csv
 
 from mermoz.misc import *
 from mermoz.model import ZermeloGeneralModel
@@ -40,6 +42,26 @@ class Pareto:
     def __init__(self):
         self.durations = []
         self.energies = []
+        self.filename = 'pareto.csv'
+
+    def load(self, directory):
+        filepath = os.path.join(directory, self.filename)
+        if os.path.exists(filepath):
+            with open(filepath, 'r') as f:
+                r = csv.reader(f)
+                for k, line in enumerate(r):
+                    if k == 0:
+                        self.durations = list(map(float, line))
+                    else:
+                        self.energies = list(map(float, line))
+        else:
+            print('Pareto : nothing to load')
+
+    def dump(self, directory):
+        with open(os.path.join(directory, self.filename), 'w') as f:
+            w = csv.writer(f)
+            w.writerow(self.durations)
+            w.writerow(self.energies)
 
     def _index(self, duration):
         if duration < self.durations[0]:
@@ -74,11 +96,12 @@ class Pareto:
         if duration >= self.durations[-1]:
             return energy > self.energies[-1]
         i = self._index(duration)
-        t1 = self.durations[i]
-        t2 = self.durations[i + 1]
-        e1 = self.energies[i]
-        e2 = self.energies[i + 1]
-        return e1 + (duration - t1) / (t2 - t1) * (e2 - e1) <= energy
+        # t1 = self.durations[i]
+        # t2 = self.durations[i + 1]
+        # e1 = self.energies[i]
+        # e2 = self.energies[i + 1]
+        # return e1 + (duration - t1) / (t2 - t1) * (e2 - e1) <= energy
+        return duration >= self.durations[i] and energy >= self.energies[i]
 
     def add(self, x):
         """
@@ -116,15 +139,19 @@ class Pareto:
 
 class EFOptRes:
 
-    def __init__(self, bests):
+    def __init__(self, status, bests):
         """
-        :param traj: Optimal trajectory
+        :param status: If problem was solved to optimality
+            0: not solved, information is relative to closest trajectory
+            1: solved in fast mode
+            2: global optimum
         :param bests: Dictionary with keys being trajectory indexes and values containing at least the fields
             'cost': cost to reach target
             'duration': duration to reach target
-            'time_idx': the time index at which the target is reached
+            'traj': the associated trajectory
             'adjoint': the initial adjoint state that led the trajectory
         """
+        self.status = status
         self.bests = bests
         self.min_cost_idx = None
         min_cost = None
@@ -882,12 +909,14 @@ class SolverEF:
         traj_idx_list = []
         time_idx_list = []
         rel_idx_list = []
+        status = 1 if self.quick_solve else 2
         if len(bests) == 0:
             print('Warning: Target not reached', file=sys.stderr)
             traj_idx_list.append(traj_idx_closest)
             time_idx_list.append(time_idx_closest)
             rel_idx_list.append(rel_idx_closest)
             bests = {traj_idx_closest: closest}
+            status = 0
         else:
             #Filter out Pareto-dominated optima
             to_delete = []
@@ -967,7 +996,7 @@ class SolverEF:
                 adjoints = adjoints[::-1]
             traj = AugmentedTraj(ts, points, adjoints, np.zeros(nt), nt - 1, mp.coords, info=f'opt_m{self.mode}_{self.asp_init:.0f}')
             bests[k0]['traj'] = traj
-        res = EFOptRes(bests)
+        res = EFOptRes(status, bests)
         return res
 
     def get_trajs(self, primal_only=False, dual_only=False):
