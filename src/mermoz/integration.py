@@ -57,10 +57,10 @@ class IntEulerExpl(Integration):
         x[:] = x_init
         points[0, :] = x
         val = self.feedback.value(t, x)
-        if len(val) == 2:
-            heading, asp = val
-        else:
+        if type(val) in [float, np.float64] or len(val) == 1:
             heading, asp = val, None
+        else:
+            heading, asp = val
         controls[0] = heading
         dt = self.int_step * (-1. if self.backward else 1.)
         if self.aslaw is None and asp is None:

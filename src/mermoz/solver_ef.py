@@ -1,17 +1,11 @@
 # from heapq import heappush, heappop
 import os
-import sys
-
-import numpy as np
-from math import atan2
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Polygon
 import csv
 
 from mermoz.misc import *
-from mermoz.model import ZermeloGeneralModel
 from mermoz.problem import MermozProblem
-from mermoz.shooting import Shooting
-from mermoz.trajectory import AugmentedTraj, Trajectory
+from mermoz.trajectory import AugmentedTraj
 
 
 def heappush(a, b):
@@ -133,8 +127,8 @@ class Pareto:
                 i += 1
             # Now points from first index to last index excluded shall be removed from front
             # because they are Pareto-dominated by new point
-            self.durations = self.durations[:i0+1] + self.durations[i:]
-            self.energies = self.energies[:i0+1] + self.energies[i:]
+            self.durations = self.durations[:i0 + 1] + self.durations[i:]
+            self.energies = self.energies[:i0 + 1] + self.energies[i:]
 
 
 class EFOptRes:
@@ -320,7 +314,7 @@ class SolverEF:
 
     def __init__(self, mp: MermozProblem, max_time, mode=0, N_disc_init=20, rel_nb_ceil=0.05, dt=None,
                  max_steps=None, hard_obstacles=True, collbuf_shape=None, cost_ceil=None, asp_offset=0., asp_init=None,
-                 no_coll_filtering=False, quick_solve=False, pareto=None):
+                 no_coll_filtering=False, pareto=None):
         self.mp_primal = mp
         self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
@@ -331,11 +325,14 @@ class SolverEF:
 
         self.N_disc_init = N_disc_init
         # Neighbouring distance ceil
-        self.abs_nb_ceil = rel_nb_ceil * mp._geod_l
+        self.abs_nb_ceil = rel_nb_ceil * mp.geod_l
         if dt is not None:
             self.dt = -dt
         else:
-            self.dt = -.005 * mp._geod_l / mp.aero.v_minp
+            if mode == 0:
+                self.dt = -.005 * mp.l_ref / mp.model.v_a
+            else:
+                self.dt = -.005 * mp.l_ref / mp.aero.v_minp
 
         # This group shall be reinitialized before new resolution
         # Contains augmented state points (id, time, state, adjoint) used to expand extremal field
@@ -363,7 +360,7 @@ class SolverEF:
         self.max_time = max_time
         self.cost_ceil = cost_ceil
         self.asp_offset = asp_offset
-        self.asp_init = asp_init
+        self.asp_init = asp_init if asp_init is not None else self.mp.model.v_a
 
         self.it = 0
 
@@ -381,10 +378,11 @@ class SolverEF:
         self.N_filling_steps = 1
         self.hard_obstacles = hard_obstacles
 
-        self.no_coll_filtering = no_coll_filtering
-        self.quick_solve = quick_solve
+        # Base collision filtering scheme only for steady problems
+        self.no_coll_filtering = no_coll_filtering or self.mp.model.wind.t_end is not None
+        self.quick_solve = False
         self.quick_traj_idx = -1
-        self.best_distances = [self.mp._geod_l]
+        self.best_distances = [self.mp.geod_l]
 
         self.pareto = pareto
 
@@ -484,7 +482,7 @@ class SolverEF:
         active_list = []
         obstacle_list = []
         front_list = []
-        self.best_distances = [self.mp._geod_l]
+        self.best_distances = [self.mp.geod_l]
         for i_a, a in self.active.items():
             active_list.append(a.i)
             it = a.tsa[0]
@@ -715,7 +713,7 @@ class SolverEF:
         else:
             if obs_fllw_strategy:
                 # Obstacle mode. Follow the obstacle boundary as fast as possible
-                dx = self.mp._geod_l / 1e6
+                dx = self.mp.geod_l / 1e6
                 phi = self.mp.phi_obs[i_obs]
                 grad = np.array((1 / dx * (phi(t, x + np.array((dx, 0.))) - phi(t, x)),
                                  1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
@@ -735,7 +733,7 @@ class SolverEF:
         if status and i_obs < 0:
             i_obs = self.mp.in_obs(t, x)
             if i_obs >= 0:
-                dx = self.mp._geod_l / 1e6
+                dx = self.mp.geod_l / 1e6
                 phi = self.mp.phi_obs[i_obs]
                 grad = np.array((1 / dx * (phi(t, x + np.array((dx, 0.))) - phi(t, x)),
                                  1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
@@ -743,7 +741,7 @@ class SolverEF:
                 ccw = np.cross(grad, dyn_x) > 0.
         return t, x, p, status, i_obs, ccw
 
-    def propagate(self, time_offset=0., verbose=False):
+    def propagate(self, time_offset=0.):
         self.setup(time_offset=time_offset)
         i = 0
         print('', end='')
@@ -752,12 +750,12 @@ class SolverEF:
                 and len(self.trajs) < self.max_extremals \
                 and ((not self.quick_solve) or self.quick_traj_idx == -1):
             i += 1
-            if verbose:
+            if self.debug:
                 print(i)
             self.step_global()
-            print(f'\rSteps : {i:>6}/{self.max_steps}, Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
-                  f'Dist : {min(self.best_distances) / self.mp._geod_l * 100:>3.0f} ', end='', flush=True)
-        msg = ''
+            print(
+                f'\rSteps : {i:>6}/{self.max_steps}, Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
+                f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} ', end='', flush=True)
         if i == self.max_steps:
             msg = f'Stopped on iteration limit {self.max_steps}'
         elif len(self.trajs) == self.max_extremals:
@@ -776,7 +774,7 @@ class SolverEF:
                 candidate = self.mp.distance(vv[1], self.mp_primal.x_init)
                 if m is None or candidate < m:
                     m = candidate
-            if m < self.mp._geod_l * 0.1:
+            if m < self.mp.geod_l * 0.1:
                 self.trajs_control[k] = v
                 self.trajs_add_info[k] = 'control'
         # Add parent trajectories
@@ -787,48 +785,35 @@ class SolverEF:
             self.trajs_control[kp] = self.trajs_dual[kp]
             self.trajs_add_info[kp] = 'control'
 
-    def solve(self, exhaustive=False, verbose=False, no_fast=False, no_prepare_control=False, forward_only=False):
+    def solve(self, quick_solve=False, verbose=False, backward=False):
         """
-        :param exhaustive: For complete coverage of state space by extremals
+        :param quick_solve: Whether to stop solving when at least one extremal is sufficiently close to target
         :param verbose: To print steps
-        :param no_fast: When problem is not time-varying, do not skip forward extremals
-        :param no_prepare_control: After computation, a trajectory selection is performed unless this option
-        is set to True
+        :param backward: To run forward and backward extremal computation
         :return: Minimum time to reach destination, corresponding global time index,
         corresponding initial adjoint state
         """
-        if verbose: self.debug = True
+        if verbose:
+            self.debug = True
 
-        if forward_only:
+        self.quick_solve = quick_solve
+
+        if not backward:
             # Only compute forward front
             self.set_primal(True)
-            self.propagate(verbose)
+            self.propagate()
             res = self.build_opti_traj()
             return res
 
-        elif not no_fast and self.mp.model.wind.t_end is None:
-            # Problem is steady
-            # Compute only backward extremals and return
-            self.set_primal(False)
-            self.propagate(verbose)
-            if not no_prepare_control:
-                self.prepare_control_law()
-            return res
         else:
-            # Problem is time-varying
             # First propagate forward extremals
             # Then compute backward extremals initialized at correct time
-            # to get a closed-loop control law
             self.set_primal(True)
-            self.propagate(verbose)
-            polyfront = self.build_cfront()
-            if not polyfront.contains(Point(*self.mp.x_target)):
-                print('Warning : EF not containing target', file=sys.stderr)
+            self.propagate()
             # Now than forward pass is completed, run the backward pass with correct start time
             self.set_primal(False)
-            self.propagate(time_offset=self.reach_time, verbose=verbose)
-            if not no_prepare_control:
-                self.prepare_control_law()
+            self.propagate(time_offset=self.reach_time)
+            res = self.build_opti_traj()
             return res
 
     def control(self, t, x):
@@ -918,7 +903,7 @@ class SolverEF:
             bests = {traj_idx_closest: closest}
             status = 0
         else:
-            #Filter out Pareto-dominated optima
+            # Filter out Pareto-dominated optima
             to_delete = []
             for a, b in bests.items():
                 for aa, bb in bests.items():
@@ -994,7 +979,8 @@ class SolverEF:
                 ts = ts[::-1]
                 points = points[::-1]
                 adjoints = adjoints[::-1]
-            traj = AugmentedTraj(ts, points, adjoints, np.zeros(nt), nt - 1, mp.coords, info=f'opt_m{self.mode}_{self.asp_init:.0f}')
+            traj = AugmentedTraj(ts, points, adjoints, np.zeros(nt), nt - 1, mp.coords,
+                                 info=f'opt_m{self.mode}_{self.asp_init:.0f}')
             bests[k0]['traj'] = traj
         res = EFOptRes(status, bests)
         return res

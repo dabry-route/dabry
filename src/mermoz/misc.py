@@ -223,10 +223,11 @@ def decorate(ax, title=None, xlab=None, ylab=None, legend=None, xlim=None, ylim=
     if xlab: ax.xaxis.set_label_text(xlab)
     if ylab: ax.yaxis.set_label_text(ylab)
     if title: ax.set_title(title, {'fontsize': 8})
-    if legend != None: ax.legend(legend, loc='best')
-    if xlim != None: ax.set_xlim(xlim[0], xlim[1])
-    if ylim != None: ax.set_ylim(ylim[0], ylim[1])
-    if min_yspan != None: ensure_yspan(ax, min_yspan)
+    if legend is not None: ax.legend(legend, loc='best')
+    if xlim is not None: ax.set_xlim(xlim[0], xlim[1])
+    if ylim is not None: ax.set_ylim(ylim[0], ylim[1])
+    if min_yspan is not None: ensure_yspan(ax, min_yspan)
+
 
 def ensure_yspan(ax, yspan):
     ymin, ymax = ax.get_ylim()
@@ -367,6 +368,20 @@ def intersection(a, b, c, d):
     else:
         t_cd = (y - c[1]) / (d[1] - c[1])
     return (x, y), t_ab, t_cd
+
+
+def time_fmt(duration):
+    """
+    Formats duration to proper units
+    :param duration: Duration in seconds
+    :return: String representation of duration in proper units
+    """
+    if duration < 200:
+        return f'{duration:.2f}s'
+    elif duration < 60 * 200:
+        return f'{duration / 60:.2f}min'
+    else:
+        return f'{duration / 3600:.2f}h'
 
 
 class Chrono:

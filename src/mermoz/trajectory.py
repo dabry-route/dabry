@@ -48,6 +48,11 @@ class Trajectory:
         self.coords = coords
         self.info = info
 
+    def flip(self):
+        self.timestamps[:self.last_index + 1] = self.timestamps[:self.last_index + 1][::-1]
+        self.points[:self.last_index + 1] = self.points[:self.last_index + 1][::-1]
+        self.controls[:self.last_index + 1] = self.controls[:self.last_index + 1][::-1]
+
     def get_final_time(self):
         return self.timestamps[self.last_index]
 

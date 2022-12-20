@@ -11,7 +11,7 @@ class Aero(ABC):
     def __init__(self):
         self.v_minp = None
 
-    def power(self, airspeed):
+    def power(self, _):
         """
         Return required power to maintain level flight at sea level at given airspeed
         :param airspeed: Airspeed in m/s

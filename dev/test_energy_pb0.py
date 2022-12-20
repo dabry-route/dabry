@@ -57,7 +57,7 @@ if __name__ == '__main__':
 
     # Setting the solver
 
-    t_upper_bound = pb.time_scale if pb.time_scale is not None else 1.2 * pb._geod_l / pb.model.v_a
+    t_upper_bound = pb.time_scale if pb.time_scale is not None else 1.2 * pb.geod_l / pb.model.v_a
     trajs = []
     """
     for a in np.linspace(0.01 * np.pi + 0.01, 0.15 * np.pi - 0.01, 3):
@@ -86,7 +86,7 @@ if __name__ == '__main__':
         shooting.set_adjoint(-1. * pn0 * s)
         traj = shooting.integrate()
         traj.info = f'trv_opt'
-        err = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1) / pb._geod_l)
+        err = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1) / pb.geod_l)
         reached = err < 0.05
         if reached:
             print(pn0, a)
@@ -94,7 +94,7 @@ if __name__ == '__main__':
 
     def auto_upperb(pn):
         va = airspeed_opti_(pn)
-        return 3 * pb._geod_l / va
+        return 3 * pb.geod_l / va
 
     good = [(5, 0.0626662),
             (10, 0.0775),
@@ -118,7 +118,7 @@ if __name__ == '__main__':
                             energy_ceil=20. * 8.4 * 3.6e6)
         shooting.set_adjoint(-1. * pn0 * s)
         traj = shooting.integrate()
-        return np.min(np.linalg.norm(traj.points - pb.x_target) / pb._geod_l)
+        return np.min(np.linalg.norm(traj.points - pb.x_target) / pb.geod_l)
 
     candidates =[]
 
@@ -134,7 +134,7 @@ if __name__ == '__main__':
             shooting.set_adjoint(-1. * pn0 * s)
             traj = shooting.integrate()
             traj.info = f'trv_{int(pn0)}_auto'
-            err = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1) / pb._geod_l)
+            err = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1) / pb.geod_l)
             reached = err < 0.05
             if reached:
                 print('|', end='')
@@ -147,7 +147,7 @@ if __name__ == '__main__':
     for v_a in np.linspace(13.19, 14.5, 5):  # [10.15, 11.17, 14.11, 18.51, 22.13]:
         pb.update_airspeed(v_a)
         chrono.start('Computing EF')
-        t_upper_bound = 2 * pb._geod_l / pb.model.v_a
+        t_upper_bound = 2 * pb.geod_l / pb.model.v_a
         solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=500, rel_nb_ceil=0.05)
         reach_time, iit, p_init = solver.solve(no_fast=True)
         chrono.stop()
@@ -166,7 +166,7 @@ if __name__ == '__main__':
 
     # for v_a in np.linspace(12., 25., 5):
     #     pb.update_airspeed(v_a)
-    #     t_upper_bound = pb.time_scale if pb.time_scale is not None else 1.2 * pb._geod_l / pb.model.v_a
+    #     t_upper_bound = pb.time_scale if pb.time_scale is not None else 1.2 * pb.geod_l / pb.model.v_a
     #     chrono.start('Computing EF')
     #     solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=500, rel_nb_ceil=0.05)
     #     reach_time, iit, p_init = solver.solve(no_fast=True)
@@ -240,7 +240,7 @@ if __name__ == '__main__':
     #     chrono.start('Optimal trajectory RFF')
     #     tu = solver.rft.get_time(pb.x_target)
     #     pb.load_feedback(FunFB(lambda x: solver.control(x, backward=True), no_time=True))
-    #     sc = DistanceSC(lambda x: pb.distance(x, pb.x_init), pb._geod_l * 0.01)
+    #     sc = DistanceSC(lambda x: pb.distance(x, pb.x_init), pb.geod_l * 0.01)
     #     # sc = TimedSC(pb.model.wind.t_start)
     #     traj = pb.integrate_trajectory(pb.x_target, sc, int_step=reach_time / iit,
     #                                    t_init=tu,
@@ -263,7 +263,7 @@ if __name__ == '__main__':
     #
     # chrono.start('GSTarget FB')
     # pb.load_feedback(GSTargetFB(pb.model.wind, pb.model.v_a, pb.x_target, pb.coords))
-    # sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb._geod_l / 100.)
+    # sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb.geod_l / 100.)
     # traj = pb.integrate_trajectory(pb.x_init, sc, max_iter=2 * iit, int_step=reach_time / iit,
     #                                t_init=pb.model.wind.t_start)
     # traj.info = 'GSTarget FB'
@@ -271,14 +271,14 @@ if __name__ == '__main__':
     #
     # chrono.start('HTarget FB')
     # pb.load_feedback(HTargetFB(pb.x_target, pb.coords))
-    # sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb._geod_l / 100.)
+    # sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb.geod_l / 100.)
     # traj = pb.integrate_trajectory(pb.x_init, sc, max_iter=2 * iit, int_step=reach_time / iit,
     #                                t_init=pb.model.wind.t_start)
     # traj.info = 'HTarget FB'
     # chrono.stop()
 
     # pb.load_feedback(GreatCircleFB(pb.model.wind, pb.model.v_a, pb.x_target))
-    # sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb._geod_l / 100.)
+    # sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb.geod_l / 100.)
     # traj = pb.integrate_trajectory(pb.x_init, sc, max_iter=2 * iit, int_step=reach_time / iit, t_init=t_init)
     # traj.info = 'Great circle'
 

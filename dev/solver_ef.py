@@ -19,10 +19,10 @@ from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
-    pb_id, seed = 14, 0
-    dbpb = '37W_8S_16W_17S_20220301_12'
-    cache_rff = False
-    cache_wind = False
+    pb_id, seed = 0, 0
+    dbpb = None#'37W_8S_16W_17S_20220301_12'
+    cache_rff = True
+    cache_wind = True
 
     chrono = Chrono()
 
@@ -53,29 +53,41 @@ if __name__ == '__main__':
         chrono.stop()
 
     # Setting the solver
-    t_upper_bound = pb.time_scale if pb.time_scale is not None else 1.2 * pb._geod_l / pb.model.v_a
+    t_upper_bound = pb.time_scale if pb.time_scale is not None else 1.2 * pb.geod_l / pb.model.v_a
     solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=500, rel_nb_ceil=0.05)
 
     chrono.start('Computing EF')
-    reach_time, iit, p_init = solver.solve(no_fast=True)
+    res = solver.solve()
+    reach_time, iit, p_init = res.duration, res.index, res.adjoint
+    mdfm.dump_trajs([res.traj])
     chrono.stop()
     print(f'Reach time : {reach_time / 3600:.2f}')
 
     trajs = solver.get_trajs()
-    # m = None
-    # k0 = -1
-    # for k, traj in enumerate(trajs):
-    #     candidate = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1))
-    #     if m is None or m > candidate:
-    #         m = candidate
-    #         k0 = k
+    m = None
+    k0 = -1
+    for k, traj in enumerate(trajs):
+        candidate = np.min(np.linalg.norm(traj.points - pb.x_target, axis=1))
+        if m is None or m > candidate:
+            m = candidate
+            k0 = k
 
-    # solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft, extremals=False)
-    # if cache_rff:
-    #     solver_rp.rft.load_cache(os.path.join(output_dir, 'rff.h5'))
-    # solver_rp.solve()
-    # if not cache_rff:
-    # solver.rft.dump_rff(output_dir)
+    solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft)
+    if cache_rff:
+        solver_rp.rft.load_cache(os.path.join(output_dir, 'rff.h5'))
+    solver_rp.solve()
+
+    if not cache_rff:
+        solver_rp.rft.dump_rff(output_dir)
+
+    pb.load_feedback(FunFB(lambda x: solver_rp.control(x, backward=True), no_time=True))
+    sc = DistanceSC(lambda x: pb.distance(x, pb.x_init), pb.geod_l * 0.001)
+    # sc = TimedSC(pb.model.wind.t_start)
+    traj = pb.integrate_trajectory(pb.x_target, sc, int_step=reach_time / iit,
+                                   t_init=pb.model.wind.t_start + reach_time,
+                                   backward=True)
+    traj.flip()
+    mdfm.dump_trajs([traj])
 
     """
     x_dim = np.linalg.norm(pb.x_init - pb.x_target)
@@ -108,7 +120,7 @@ if __name__ == '__main__':
         traj.type = TRAJ_INT
         pb.trajs.append(traj)
     """
-
+    """
     chrono.start('Optimal trajectory Extremals')
     pb.load_feedback(FunFB(solver.control))
     sc = TimedSC(pb.model.wind.t_start + solver.reach_time)
@@ -130,7 +142,7 @@ if __name__ == '__main__':
         chrono.start('Optimal trajectory RFF')
         tu = solver.rft.get_time(pb.x_target)
         pb.load_feedback(FunFB(lambda x: solver.control(x, backward=True), no_time=True))
-        sc = DistanceSC(lambda x: pb.distance(x, pb.x_init), pb._geod_l * 0.01)
+        sc = DistanceSC(lambda x: pb.distance(x, pb.x_init), pb.geod_l * 0.01)
         #sc = TimedSC(pb.model.wind.t_start)
         traj = pb.integrate_trajectory(pb.x_target, sc, int_step=reach_time / iit,
                                        t_init=tu,
@@ -153,7 +165,7 @@ if __name__ == '__main__':
 
     chrono.start('GSTarget FB')
     pb.load_feedback(GSTargetFB(pb.model.wind, pb.model.v_a, pb.x_target, pb.coords))
-    sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb._geod_l / 100.)
+    sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb.geod_l / 100.)
     traj = pb.integrate_trajectory(pb.x_init, sc, max_iter=2 * iit, int_step=reach_time / iit,
                                    t_init=pb.model.wind.t_start)
     traj.info = 'GSTarget FB'
@@ -161,14 +173,14 @@ if __name__ == '__main__':
 
     chrono.start('HTarget FB')
     pb.load_feedback(HTargetFB(pb.x_target, pb.coords))
-    sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb._geod_l / 100.)
+    sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb.geod_l / 100.)
     traj = pb.integrate_trajectory(pb.x_init, sc, max_iter=2 * iit, int_step=reach_time / iit,
                                    t_init=pb.model.wind.t_start)
     traj.info = 'HTarget FB'
     chrono.stop()
-
+    """
     # pb.load_feedback(GreatCircleFB(pb.model.wind, pb.model.v_a, pb.x_target))
-    # sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb._geod_l / 100.)
+    # sc = DistanceSC(lambda x: pb.distance(x, pb.x_target), pb.geod_l / 100.)
     # traj = pb.integrate_trajectory(pb.x_init, sc, max_iter=2 * iit, int_step=reach_time / iit, t_init=t_init)
     # traj.info = 'Great circle'
 

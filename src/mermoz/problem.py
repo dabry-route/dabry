@@ -59,7 +59,7 @@ class MermozProblem:
         else:
             self.tr = None
 
-        self._geod_l = distance(self.x_init, self.x_target, coords=self.coords)
+        self.geod_l = distance(self.x_init, self.x_target, coords=self.coords)
 
         # It is usually sufficient to scale time on geodesic / airspeed
         # but for some problems not
@@ -73,7 +73,7 @@ class MermozProblem:
             if not autodomain:
                 if self.bl is not None and self.tr is not None:
                     self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
-                    self._geod_l = self.distance(self.bl, self.tr)
+                    self.geod_l = self.distance(self.bl, self.tr)
                 else:
                     self.domain = lambda _: True
             else:
@@ -83,7 +83,7 @@ class MermozProblem:
                     self.bl = np.array((wind.x_min, wind.y_min))
                     self.tr = np.array((wind.x_max, wind.y_max))
                 else:
-                    w = 1.15 * self._geod_l
+                    w = 1.15 * self.geod_l
                     self.bl = (self.x_init + self.x_target) / 2. - np.array((w / 2., w / 2.))
                     self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
                 if self.coords == COORD_GCS and mask_land:
@@ -101,9 +101,11 @@ class MermozProblem:
             else:
                 self.domain = domain
 
+        self.l_ref = self.distance(self.bl, self.tr)
+
         if phi_obs is not None:
             self.phi_obs = phi_obs
-            dx = self._geod_l / 1e6
+            dx = self.geod_l / 1e6
             self.grad_phi_obs = {}
             for k, phi in self.phi_obs.items():
                 self.grad_phi_obs[k] = \
@@ -817,7 +819,7 @@ class IndexedProblem(MermozProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
-            self.time_scale = 3. * self._geod_l / v_a
+            self.time_scale = 3. * self.geod_l / v_a
         elif i == 16:
             v_a = 0.6
 
@@ -835,7 +837,7 @@ class IndexedProblem(MermozProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
-            self.time_scale = 3. * self._geod_l / v_a
+            self.time_scale = 3. * self.geod_l / v_a
         elif i == 17:
             v_a = 20.7
 
@@ -856,7 +858,7 @@ class IndexedProblem(MermozProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  autodomain=False)
-            self.time_scale = 1. * self._geod_l / v_a
+            self.time_scale = 1. * self.geod_l / v_a
         elif i == 18:
             v_a = 23.
 

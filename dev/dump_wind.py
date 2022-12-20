@@ -1,30 +1,12 @@
 import os
-import time
-from math import atan2
-
-from datetime import datetime, timedelta
-
-import matplotlib.pyplot as plt
-import numpy as np
-import scipy.optimize
-from tqdm import tqdm
-
-from mermoz.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB, FixedHeadingFB, FunAS, E_GSTargetFB
 from mermoz.mdf_manager import MDFmanager
-from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *
 from mermoz.problem import IndexedProblem, DatabaseProblem
-from mermoz.shooting import Shooting
-from mermoz.solver_ef import SolverEF
-from mermoz.trajectory import Trajectory
-from mermoz.solver_rp import SolverRP
-from mermoz.stoppingcond import TimedSC, DistanceSC, DisjunctionSC
-from mermoz.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
     pb_id, seed = 10, 0
-    dbpb = '72W_15S_0W_57S_20220301_12' #'37W_8S_16W_17S_20220301_12'
+    dbpb = '72W_15S_0W_57S_20220301_12'  # '37W_8S_16W_17S_20220301_12'
 
     chrono = Chrono()
 

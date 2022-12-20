@@ -1298,4 +1298,4 @@ class TrapWind(Wind):
 if __name__ == '__main__':
     wind = DiscreteWind(interp='linear')
     wind.load('/home/bastien/Documents/data/wind/windy/Dakar-Natal-0.5-padded.mz/data.h5')
-    f_wind = wind.flatten()
+    wind.flatten()

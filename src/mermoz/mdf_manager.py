@@ -14,9 +14,16 @@ class MDFmanager:
     """
 
     def __init__(self):
-        self.output_dir = None
+        self.output_dir = os.environ.get('MERMOZ_PATH')
         self.trajs_filename = 'trajectories.h5'
         self.wind_filename = 'wind.h5'
+        self.case_name = None
+
+    def set_case(self, case_name):
+        self.case_name = case_name
+        if self.output_dir is None:
+            raise Exception('Output directory not specified yet')
+        self.set_output_dir(os.path.join(self.output_dir, 'output', case_name))
 
     def set_output_dir(self, output_dir):
         if not os.path.exists(output_dir):
