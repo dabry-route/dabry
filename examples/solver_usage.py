@@ -82,6 +82,7 @@ if __name__ == '__main__':
     if not cache_rff:
         solver_rp.rft.dump_rff(mdfm.output_dir)
 
+    # Extract information for display and write it to output
     ps = ParamsSummary()
     ps.set_output_dir(mdfm.output_dir)
     ps.load_from_problem(pb)

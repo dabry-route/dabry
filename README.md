@@ -1,18 +1,27 @@
-## Mermoz path planning problem analysis
+## Optimal trajectory planning in winds
 
 ### Presentation
 
-This module helps get insight into the Mermoz path planning problem.
+This module tackles trajectory optimization problems in strong,
+non-uniform and unsteady flow fields, in particular wind fields.
 
-It comes up with a model of the situation and wind conditions that enables
-definition of arbitrary windfields from base potential flow elements.
+It provides the following features for wind fields:
+- Code-level classes of analytic wind fields
+- Custom H5 format definition for wind grid data
+  - Translation from Windy API data to custom format
+  - Translation from grib format to custom format
+ 
+The module performs point-to-point trajectory optimization, which can 
+be done using:
+- A custom extremal shooting, Python coded algorithm
+- An external front tracking, Matlab coded module (ToolboxLS)
 
-The reachability analysis is performed on the augmented system with
-adjoint state. 
-Candidate time-optimal trajectories can be computed and plotted.
-Explicit feedback control laws can also be defined and corresponding
-trajectories can be integrated and plotted.
+The module supports 2D planar environment as well as spherical problems.
 
-### Run examples
+### Getting started
 
-Running examples `example1.py` and `example2.py` are provided in the `src` folder.
+1) Set the environment variable `MERMOZ_PATH` to the installation path
+2) Checkout `examples/solver_usage.py` to perform problem solving
+
+Results are saved to the `output` folder. The different output files are
+saved in `.h5` custom formats, which specification can be found in `docs`

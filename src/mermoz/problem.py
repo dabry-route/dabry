@@ -1,7 +1,4 @@
-from math import atan2
-
 import h5py
-import numpy as np
 from mdisplay.geodata import GeoData
 from mpl_toolkits.basemap import Basemap
 from pyproj import Proj
@@ -15,6 +12,25 @@ from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
 
+"""
+problem.py
+Handles navigation problem data
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class MermozProblem:
@@ -550,9 +566,9 @@ class IndexedProblem(MermozProblem):
             tr = f * np.array([1.2, 1.])
 
             omega = f * np.array(((0.5, 0.5),
-                                       (0.5, 0.2),
-                                       (0.5, -0.2),
-                                       (0.5, -0.5)))
+                                  (0.5, 0.2),
+                                  (0.5, -0.2),
+                                  (0.5, -0.5)))
             strength = f * fs * np.array([1., -1., 1.5, -1.5])
             radius = f * np.array([1e-1, 1e-1, 1e-1, 1e-1])
             vortices = [RankineVortexWind(omega[i], strength[i], radius[i]) for i in range(len(omega))]
@@ -584,7 +600,7 @@ class IndexedProblem(MermozProblem):
             gamma = f * fs * -1. * np.ones(nt)
             radius = f * 1e-1 * np.ones(nt)
 
-            vortex = RankineVortexWind(omega, gamma, radius, t_end=1.*f/v_a)
+            vortex = RankineVortexWind(omega, gamma, radius, t_end=1. * f / v_a)
             const_wind = UniformWind(np.array([0., 5.]))
 
             total_wind = vortex
@@ -787,16 +803,16 @@ class IndexedProblem(MermozProblem):
                 gamma = g * np.ones(nt)
                 radius = r * np.ones(nt)
 
-                vortices.append(RankineVortexWind(omega, gamma, radius, t_end=1.*f/v_a))
+                vortices.append(RankineVortexWind(omega, gamma, radius, t_end=1. * f / v_a))
 
             obstacles = []
-            #obstacles.append(RadialGaussWind(f * 0.5, f * 0.15, f * 0.1, 1 / 2 * 0.2, 10*v_a))
+            # obstacles.append(RadialGaussWind(f * 0.5, f * 0.15, f * 0.1, 1 / 2 * 0.2, 10*v_a))
             winds = [UniformWind(np.array((-5., 0.)))] + vortices + obstacles
             # const_wind = UniformWind(np.array([0., 5.]))
             N = len(winds) - len(obstacles)
             M = len(obstacles)
 
-            total_wind = LCWind(np.array(tuple(1/N for _ in range(N)) + tuple(1. for _ in range(M))), tuple(winds))
+            total_wind = LCWind(np.array(tuple(1 / N for _ in range(N)) + tuple(1. for _ in range(M))), tuple(winds))
 
             zermelo_model = ZermeloGeneralModel(v_a)
             zermelo_model.update_wind(total_wind)
@@ -813,12 +829,13 @@ class IndexedProblem(MermozProblem):
             tr = sf * np.array((1., 0.5))
             coords = COORD_CARTESIAN
 
-            total_wind = DoubleGyreWind(sf*0, sf*-0.5, sf*2, sf*2, 30.)
+            total_wind = DoubleGyreWind(sf * 0, sf * -0.5, sf * 2, sf * 2, 30.)
 
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
+                                                 autodomain=False)
             self.time_scale = 3. * self.geod_l / v_a
         elif i == 16:
             v_a = 0.6
@@ -836,7 +853,8 @@ class IndexedProblem(MermozProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
+                                                 autodomain=False)
             self.time_scale = 3. * self.geod_l / v_a
         elif i == 17:
             v_a = 20.7
@@ -868,7 +886,7 @@ class IndexedProblem(MermozProblem):
             x_target = sf * np.array((0.9, 0.))
             coords = COORD_CARTESIAN
             wind_value = np.array((0., -15.))
-            gradient = np.array((0., 30/130000))
+            gradient = np.array((0., 30 / 130000))
             time_scale = 130000
             lv_wind = LVWind(wind_value, gradient, time_scale)
 
@@ -911,7 +929,7 @@ class IndexedProblem(MermozProblem):
             wind_value = 80 * np.ones(nt)
             center = np.zeros((nt, 2))
             for k in range(30):
-                center[10 + k] = sf * np.array((0.05*k, 0.))
+                center[10 + k] = sf * np.array((0.05 * k, 0.))
             radius = sf * 0.2 * np.ones(nt)
 
             total_wind = TrapWind(wind_value, center, radius, t_end=400000)
@@ -919,7 +937,8 @@ class IndexedProblem(MermozProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
+                                                 autodomain=False)
 
         elif i == 21:
             v_a = 23.
@@ -934,7 +953,8 @@ class IndexedProblem(MermozProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
+                                                 autodomain=False)
 
         else:
             raise IndexError(f'No problem with index {i}')
