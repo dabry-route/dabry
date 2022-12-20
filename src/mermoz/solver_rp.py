@@ -1,11 +1,9 @@
-import time
-from math import atan2
-
 from mermoz.problem import MermozProblem
 from mermoz.rft import RFT
 from mermoz.misc import *
 from mermoz.feedback import FunFB
-from mermoz.stoppingcond import TimedSC, DistanceSC
+from mermoz.solver_ef import EFOptRes
+from mermoz.stoppingcond import DistanceSC
 
 
 class SolverRP:
@@ -23,7 +21,6 @@ class SolverRP:
                  ny_rft,
                  nt_rft,
                  nt_pmp=1000,
-                 only_opti_extremals=False,
                  max_time=None):
         self.mp = mp
         self.x_init = np.zeros(2)
@@ -50,11 +47,12 @@ class SolverRP:
         self.opti_ceil = self.geod_l / 50
         self.neighb_ceil = self.opti_ceil / 2.
 
-        l = 2. * self.geod_l
+        self.reach_time = None
+
         bl_rft = np.zeros(2)
         tr_rft = np.zeros(2)
-        bl_rft[:] = mp.bl # (self.x_init + self.x_target) / 2. - np.array((l / 2., l / 2.))
-        tr_rft[:] = mp.tr # (self.x_init + self.x_target) / 2. + np.array((l / 2., l / 2.))
+        bl_rft[:] = mp.bl  # (self.x_init + self.x_target) / 2. - np.array((l / 2., l / 2.))
+        tr_rft[:] = mp.tr  # (self.x_init + self.x_target) / 2. + np.array((l / 2., l / 2.))
 
         self.rft = RFT(bl_rft, tr_rft, self.T, nx_rft, ny_rft, nt_rft, mp, kernel='matlab')
 
@@ -63,14 +61,30 @@ class SolverRP:
 
     def solve(self):
         self.rft.compute()
+        status = 2 if self.rft.has_reached() else 0
+        if status:
+            self.reach_time = self.rft.get_time(self.mp.x_target) - self.mp.model.wind.t_start
+            traj = self.get_opti_traj()
+            bests = {
+                0: {'cost': self.reach_time,
+                    'duration': self.reach_time,
+                    'traj': traj,
+                    'adjoint': None}
+            }
+        else:
+            bests = {}
+        return EFOptRes(status, bests)
 
-        # tu = self.rft.get_time(self.mp.x_target)
-        # tl = self.mp.model.wind.t_start
-        # self.mp.load_feedback(FunFB(lambda x: self.rft.control(x, backward=True)))
-        # sc = DistanceSC(lambda x: self.mp.distance(x, self.mp.x_init), self.mp._geod_l / 100.)
-        # traj = self.mp.integrate_trajectory(self.mp.x_target, sc, 1000, (tu - tl)/999, backward=True, t_init=tu)
-        # li = traj.last_index
-        # traj.timestamps[:li + 1] = traj.timestamps[:li + 1][::-1]
-        # traj.points[:li + 1] = traj.points[:li + 1][::-1]
-        # traj.type = TRAJ_OPTIMAL
-        # traj.info = 'RFT'
+    def get_opti_traj(self, int_step=100):
+        self.mp.load_feedback(FunFB(lambda x: self.control(x, backward=True), no_time=True))
+        sc = DistanceSC(lambda x: self.mp.distance(x, self.mp.x_init), self.mp.geod_l * 0.001)
+        traj = self.mp.integrate_trajectory(self.mp.x_target, sc, int_step=self.reach_time / int_step,
+                                            t_init=self.mp.model.wind.t_start + self.reach_time,
+                                            backward=True)
+        traj.timestamps = traj.timestamps[:traj.last_index + 1]
+        traj.points = traj.points[:traj.last_index + 1]
+        traj.controls = traj.controls[:traj.last_index + 1]
+        traj.flip()
+        traj.info = 'rft'
+        traj.type = TRAJ_INT
+        return traj

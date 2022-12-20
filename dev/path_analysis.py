@@ -1,10 +1,9 @@
 import random
-import time
 import os
 
 import h5py
 
-from mermoz.problem import problems, DatabaseProblem, IndexedProblem
+from mermoz.problem import IndexedProblem
 from mermoz.misc import *
 from mermoz.trajectory import Trajectory
 from mermoz.post_processing import PostProcessing
@@ -16,7 +15,7 @@ if __name__ == '__main__':
     # Choose problem ID
     pb_id = 9
 
-    output_dir = f'/home/bastien/Documents/work/mermoz/output/example_pa_{problems[pb_id][1]}'
+    output_dir = f'/home/bastien/Documents/work/mermoz/output/example_pa_{IndexedProblem.problems[pb_id][1]}'
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
 
@@ -44,7 +43,7 @@ if __name__ == '__main__':
     ps = ParamsSummary()
     ps.set_output_dir(output_dir)
     ps.load_from_problem(pb)
-    # ps.add_param('max_time', pb._geod_l / pb.model.v_a)
+    # ps.add_param('max_time', pb.geod_l / pb.model.v_a)
 
     L = np.linalg.norm(pb.x_target - pb.x_init)
     cr = np.array(((0., -1.), (1., 0.))) @ (pb.x_target - pb.x_init)

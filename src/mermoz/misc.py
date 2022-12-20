@@ -219,13 +219,14 @@ def distance(x1, x2, coords):
 def decorate(ax, title=None, xlab=None, ylab=None, legend=None, xlim=None, ylim=None, min_yspan=None):
     ax.xaxis.grid(color='k', linestyle='-', linewidth=0.2)
     ax.yaxis.grid(color='k', linestyle='-', linewidth=0.2)
+    ax.tick_params(direction='in')
     if xlab: ax.xaxis.set_label_text(xlab)
     if ylab: ax.yaxis.set_label_text(ylab)
     if title: ax.set_title(title, {'fontsize': 8})
-    if legend != None: ax.legend(legend, loc='best')
-    if xlim != None: ax.set_xlim(xlim[0], xlim[1])
-    if ylim != None: ax.set_ylim(ylim[0], ylim[1])
-    if min_yspan != None: ensure_yspan(ax, min_yspan)
+    if legend is not None: ax.legend(legend, loc='best')
+    if xlim is not None: ax.set_xlim(xlim[0], xlim[1])
+    if ylim is not None: ax.set_ylim(ylim[0], ylim[1])
+    if min_yspan is not None: ensure_yspan(ax, min_yspan)
 
 
 def ensure_yspan(ax, yspan):
@@ -259,7 +260,7 @@ def enlarge(bl, tr, factor=1.1):
     return c - factor * half_delta, c + factor * half_delta
 
 
-def control_time_opti(x, p, t, coords):
+def heading_opti(x, p, t, coords):
     if coords == COORD_CARTESIAN:
         v = -p / np.linalg.norm(p)
         res = np.arctan2(v[1], v[0])
@@ -268,6 +269,30 @@ def control_time_opti(x, p, t, coords):
         v = v / np.linalg.norm(v)
         res = np.pi / 2. - np.arctan2(v[1], v[0])
     return res
+
+
+def airspeed_opti(p, cost='dobrokhodov'):
+    if cost == 'dobrokhodov':
+        pn = np.linalg.norm(p)
+        return airspeed_opti_(pn)
+    elif cost == 'subramani':
+        pn = np.linalg.norm(p)
+        return pn / 2.
+
+
+def airspeed_opti_(pn):
+    kp1 = 0.05
+    kp2 = 1000
+    return np.sqrt(pn / (6 * kp1) + np.sqrt(kp2 / (3 * kp1) + pn ** 2 / (36 * kp1 ** 2)))
+
+
+def power(airspeed, cost='dobrokhodov'):
+    if cost == 'dobrokhodov':
+        kp1 = 0.05
+        kp2 = 1000
+        return kp1 * airspeed ** 3 + kp2 / airspeed
+    elif cost == 'subramani':
+        return airspeed ** 2
 
 
 def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
@@ -309,6 +334,54 @@ def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
                       points.shape[0] - 1,
                       coords=COORD_CARTESIAN,
                       type='optimal')
+
+
+def ccw(a, b, c):
+    return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+
+def collision(a, b, c, d):
+    return ccw(a, c, d) != ccw(b, c, d) and ccw(a, b, c) != ccw(a, b, d)
+
+
+def intersection(a, b, c, d):
+    ref_dim = np.mean(list(map(np.linalg.norm, (a, b, c, d))))
+    xdiff = (a[0] - b[0], c[0] - d[0])
+    ydiff = (a[1] - b[1], c[1] - d[1])
+
+    def det(u, v):
+        return u[0] * v[1] - u[1] * v[0]
+
+    div = det(xdiff, ydiff)
+    if div == 0:
+        raise Exception('lines do not intersect')
+
+    d = (det(a, b), det(c, d))
+    x = det(d, xdiff) / div
+    y = det(d, ydiff) / div
+    if b[1] - a[1] < 1e-5 * ref_dim:
+        t_ab = (x - a[0]) / (b[0] - a[0])
+    else:
+        t_ab = (y - a[1]) / (b[1] - a[1])
+    if d[1] - c[1] < 1e-5 * ref_dim:
+        t_cd = (x - c[0]) / (d[0] - c[0])
+    else:
+        t_cd = (y - c[1]) / (d[1] - c[1])
+    return (x, y), t_ab, t_cd
+
+
+def time_fmt(duration):
+    """
+    Formats duration to proper units
+    :param duration: Duration in seconds
+    :return: String representation of duration in proper units
+    """
+    if duration < 200:
+        return f'{duration:.2f}s'
+    elif duration < 60 * 200:
+        return f'{duration / 60:.2f}min'
+    else:
+        return f'{duration / 3600:.2f}h'
 
 
 class Chrono:

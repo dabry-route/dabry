@@ -1,3 +1,5 @@
+import numpy as np
+
 from .misc import *
 
 
@@ -46,6 +48,11 @@ class Trajectory:
         self.coords = coords
         self.info = info
 
+    def flip(self):
+        self.timestamps[:self.last_index + 1] = self.timestamps[:self.last_index + 1][::-1]
+        self.points[:self.last_index + 1] = self.points[:self.last_index + 1][::-1]
+        self.controls[:self.last_index + 1] = self.controls[:self.last_index + 1][::-1]
+
     def get_final_time(self):
         return self.timestamps[self.last_index]
 
@@ -72,7 +79,9 @@ class AugmentedTraj(Trajectory):
                  type=TRAJ_INT,
                  label=0,
                  info='',
-                 transver=None):
+                 transver=None,
+                 airspeed=None,
+                 energy=None):
         """
         :param adjoints: A list of adjoint states ((p_x0, p_y0), ..., (p_xN, p_yN))
         """
@@ -83,3 +92,9 @@ class AugmentedTraj(Trajectory):
         if transver is not None:
             self.transver = np.zeros(transver.shape)
             self.transver[:] = transver
+        if airspeed is not None:
+            self.airspeed = np.zeros(airspeed.shape)
+            self.airspeed[:] = airspeed
+        if energy is not None:
+            self.energy = np.zeros(energy.shape)
+            self.energy[:] = energy

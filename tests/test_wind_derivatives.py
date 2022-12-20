@@ -3,7 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-from mermoz.wind import VortexWind, RadialGaussWind, RankineVortexWind, DoubleGyreWind, PointSymWind, DiscreteWind
+from mermoz.wind import VortexWind, RadialGaussWind, RankineVortexWind, DoubleGyreWind, PointSymWind, DiscreteWind, \
+    TrapWind
 from mermoz.misc import *
 
 
@@ -32,7 +33,7 @@ class WindTester:
         return np.array([x, y])
 
     def setup(self):
-        wind_samples = np.array([self.wind._value(self.r_point()) for _ in range(self.N_samples)])
+        wind_samples = np.array([self.wind.value(0., self.r_point()) for _ in range(self.N_samples)])
         self.wind_mean = np.mean(wind_samples)
         self.wind_mean_norm = np.linalg.norm(self.wind_mean)
 
@@ -48,12 +49,12 @@ class WindTester:
         for i in tqdm(range(self.N_samples)):
             p = self.r_point()
             points[i, :] = p
-            dwind = self.wind.d_value(p)
+            dwind = self.wind.d_value(0., p)
             dx = np.array([self.eps_x, 0.])
             dy = np.array([0., self.eps_y])
 
-            dwind_est = np.column_stack((1 / (2 * self.eps_x) * (self.wind._value(p + dx) - self.wind._value(p - dx)),
-                                         1 / (2 * self.eps_y) * (self.wind._value(p + dy) - self.wind._value(p - dy))))
+            dwind_est = np.column_stack((1 / (2 * self.eps_x) * (self.wind.value(0., p + dx) - self.wind.value(0., p - dx)),
+                                         1 / (2 * self.eps_y) * (self.wind.value(0., p + dy) - self.wind.value(0., p - dy))))
 
             err_x = np.linalg.norm(dwind[:, 0] - dwind_est[:, 0])
             err_y = np.linalg.norm(dwind[:, 1] - dwind_est[:, 1])
@@ -84,19 +85,20 @@ if __name__ == '__main__':
     # wind = VortexWind(x_center, y_center, radius)
     # wind = RankineVortexWind(x_center, y_center, 20., radius)
     # wind = PointSymWind(x_center, y_center, 20. / l_factor, 10/ l_factor)
-    wind2 = DoubleGyreWind(x_center, y_center, (x_max - x_min)/5., (y_max - y_min)/5., 20.)
+    # wind2 = DoubleGyreWind(x_center, y_center, (x_max - x_min)/5., (y_max - y_min)/5., 20.)
     # wind2 = RadialGaussWind(x_center, y_center, radius, 1/3 * np.log(0.5), 20.)
-    wind = DiscreteWind(interp='linear')
-    total_wind = DiscreteWind(force_analytical=True, interp='linear')
-    total_wind.load('/home/bastien/Documents/work/mermoz/output/example_wf_san-juan_dublin/wind.h5')
+    wind = TrapWind(np.array(10.).reshape((1,1)), np.zeros((1, 2)), np.array(l_factor).reshape((1, 1)))
+    # wind = DiscreteWind(interp='linear')
+    # total_wind = DiscreteWind(force_analytical=True, interp='linear')
+    # total_wind.load('/home/bastien/Documents/work/mermoz/output/example_wf_san-juan_dublin/wind.h5')
     x_min, x_max = -1. * l_factor, 3 * l_factor
     y_min, y_max = -1. * l_factor, 3 * l_factor
 
-    tester = WindTester(total_wind.x_min,
-                        total_wind.x_max,
-                        total_wind.y_min,
-                        total_wind.y_max,
-                        total_wind,
+    tester = WindTester(x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                        wind,
                         eps=1e-8,
                         rtol=1e-4)
     tester.setup()

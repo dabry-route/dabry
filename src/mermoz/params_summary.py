@@ -104,9 +104,10 @@ class ParamsSummary:
         self.add_param('x_init', tuple(pb.x_init))
         self.add_param('x_target', tuple(pb.x_target))
         self.add_param('airspeed', pb.model.v_a)
-        self.add_param('target_radius', 0.05 * pb._geod_l)
-        self.add_param('geodesic_time', pb._geod_l / pb.model.v_a)
-        self.add_param('geodesic_length', pb._geod_l)
+        self.add_param('target_radius', 0.05 * pb.geod_l)
+        self.add_param('geodesic_time', pb.geod_l / pb.model.v_a)
+        self.add_param('geodesic_length', pb.geod_l)
+        self.add_param('aero_mode', pb.aero.mode)
 
     def process_params(self):
         params = self.params

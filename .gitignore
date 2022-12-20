@@ -160,3 +160,10 @@ cython_debug/
 .idea/
 
 output/*
+/utils/test.py
+/rft/html/
+/rft/input/
+/rft/dev/
+/rft/output/
+/rft/main/
+/rft/main.prj

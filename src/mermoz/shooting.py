@@ -3,7 +3,7 @@ from abc import ABC
 from scipy.integrate import ode, odeint
 
 from mermoz.dynamics import Dynamics
-from mermoz.stoppingcond import PrecisionSC
+from mermoz.stoppingcond import PrecisionSC, TimedSC
 from mermoz.trajectory import AugmentedTraj
 from mermoz.misc import *
 
@@ -21,6 +21,7 @@ class Shooting(ABC):
                  dyn: Dynamics,
                  x_init: ndarray,
                  final_time,
+                 mode='time-opt',
                  N_iter=1000,
                  adapt_ts=False,
                  factor=3e-2,
@@ -28,7 +29,8 @@ class Shooting(ABC):
                  abort_on_precision=False,
                  fail_on_maxiter=False,
                  coords=COORD_CARTESIAN,
-                 target_crit=None
+                 target_crit=None,
+                 energy_ceil=None,
                  ):
         """
         :param dyn: The dynamics of the problem
@@ -36,6 +38,7 @@ class Shooting(ABC):
         :param final_time: The final time for integration
         :param N_iter: The number of subdivisions for fixed stepsize integration scheme or the maximum number of
         steps for adaptative integration
+        :param mode: 'time-opt' or 'energy-opt'
         :param adapt_ts: Whether to use adaptation of timestep
         :param factor: Factor to use when comparing control law characteristic
         time and integration step.
@@ -48,11 +51,13 @@ class Shooting(ABC):
         :param target_crit: If not None, shooting process will monitor optimality with this criteria while
         computing trajectories. Should take a 2D np array position vector as input and return boolean
         stating if point is close enough to goal.
+        :param energy_ceil: Energy ceil to stop integration, in joules
         """
         self.dyn = dyn
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
         self.final_time = final_time
+        self.mode = mode
         self.N_iter = N_iter
         self.adapt_ts = adapt_ts
         self.factor = factor
@@ -66,6 +71,7 @@ class Shooting(ABC):
         self.coords = coords
         ensure_coords(coords)
         self.target_crit = target_crit
+        self.energy_ceil = energy_ceil
 
     def set_adjoint(self, p_init: ndarray):
         self.p_init[:] = p_init
@@ -85,18 +91,27 @@ class Shooting(ABC):
 
         if self.p_init is None:
             raise ValueError("No initial value provided for adjoint state")
-        print(f'p_init : {tuple(self.p_init)}, |p_init| : {np.linalg.norm(self.p_init)}')
+        if verbose:
+            print(f'p_init : {tuple(self.p_init)}, |p_init| : {np.linalg.norm(self.p_init)}')
         if custom_int:
             timestamps = np.zeros(self.N_iter)
             states = np.zeros((self.N_iter, 2))
             adjoints = np.zeros((self.N_iter, 2))
             controls = np.zeros(self.N_iter)
+            if self.mode == 'time-opt':
+                airspeed = self.dyn.v_a * np.ones(self.N_iter)
+            else:
+                airspeed = np.zeros(self.N_iter)
             t = 0.
             x = self.x_init
             p = self.p_init
             states[0] = x
             adjoints[0] = p
-            u = controls[0] = control_time_opti(x, p, 0., self.coords)
+            u = controls[0] = heading_opti(x, p, 0., self.coords)
+            v_a = None
+            energy = 0.
+            if self.mode == 'energy-opt':
+                v_a = airspeed[0] = airspeed_opti(p)
             interrupted = False
             optimal = False
             list_dt = []
@@ -118,10 +133,17 @@ class Shooting(ABC):
                         interrupted = True
                         optimal = True
                         break
+                    if self.energy_ceil is not None and energy > self.energy_ceil:
+                        interrupted = True
+                        break
                     t += dt
-                    u = control_time_opti(x, p, t, self.coords)
-                    dyn_x = self.dyn.value(x, u, t)
-                    A = -self.dyn.d_value__d_state(x, u, t).transpose()
+                    u = heading_opti(x, p, t, self.coords)
+                    if self.mode == 'energy-opt':
+                        v_a = airspeed[i] = airspeed_opti(p)
+                    else:
+                        v_a = None
+                    dyn_x = self.dyn.value(x, u, t, v_a=v_a)
+                    A = -self.dyn.d_value__d_state(x, u, t, v_a=v_a).transpose()
                     dyn_p = A.dot(p)
                     x += dt * dyn_x
                     p += dt * dyn_p
@@ -129,17 +151,20 @@ class Shooting(ABC):
                     states[i] = x
                     adjoints[i] = p
                     controls[i] = u
+                    energy += power(v_a) * dt
                     if verbose:
                         print(sumup(i, t, x, p, u))
+                if interrupted:
+                    i = i-1
                 return AugmentedTraj(timestamps, states, adjoints, controls, i, optimal=optimal, type=TRAJ_PMP,
-                                     interrupted=interrupted, coords=self.coords)
+                                     interrupted=interrupted, coords=self.coords, info=self.mode, airspeed=airspeed)
             else:
                 i = 1
                 while t < self.final_time and i < self.N_iter and self.domain(x):
                     dt = 1 / self.dyn.wind.grad_norm(x) * self.factor
                     t += dt
                     list_dt.append(dt)
-                    u = control_time_opti(x, p, t, self.coords)
+                    u = heading_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -183,7 +208,7 @@ class Shooting(ABC):
                     x[:] = z[:2]
                     p = np.zeros(2)
                     p[:] = z[2:]
-                    u = control_time_opti(x, p, t, self.coords)
+                    u = heading_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -198,7 +223,7 @@ class Shooting(ABC):
                     if not self.domain(zz[i, :2]):
                         last_index = i + 1
                         break
-                controls = np.array(list(map(lambda z: control_time_opti(z[:2], z[2:], 0, self.coords), zz)))
+                controls = np.array(list(map(lambda z: heading_opti(z[:2], z[2:], 0, self.coords), zz)))
                 return AugmentedTraj(timestamps, zz[:, :2], zz[:, 2:], controls, last_index=last_index, type=TRAJ_PMP,
                                      interrupted=(last_index != self.N_iter), coords=self.coords)
             else:
@@ -212,7 +237,7 @@ class Shooting(ABC):
                     x[:] = z[:2]
                     p = np.zeros(2)
                     p[:] = z[2:]
-                    u = control_time_opti(x, p, t, self.coords)
+                    u = heading_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -240,9 +265,9 @@ class Shooting(ABC):
                     last_index += 1
                     states[last_index, :] = z[:2]
                     adjoints[last_index, :] = z[2:]
-                    controls[last_index] = control_time_opti(z[:2], z[2:], solver.t, self.coords)
+                    controls[last_index] = heading_opti(z[:2], z[2:], solver.t, self.coords)
                     if last_index == self.N_iter - 1:
                         break
-                controls = np.array(list(map(lambda z: control_time_opti(z[:2], z[2:], 0, self.coords), np.concatenate((states, adjoints), axis=0))))
+                controls = np.array(list(map(lambda z: heading_opti(z[:2], z[2:], 0, self.coords), np.concatenate((states, adjoints), axis=0))))
                 return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter, type=TRAJ_PMP,
                                      interrupted=False, coords=self.coords)

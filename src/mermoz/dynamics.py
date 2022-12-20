@@ -24,7 +24,8 @@ class Dynamics(ABC):
     def value(self,
               x: ndarray,
               u: ndarray,
-              t: float) -> ndarray:
+              t: float,
+              v_a=None) -> ndarray:
         """
         Computes the derivative of the state relative to time in the given model
 
@@ -39,7 +40,8 @@ class Dynamics(ABC):
     def d_value__d_state(self,
                          x: ndarray,
                          u: ndarray,
-                         t: float) -> ndarray:
+                         t: float,
+                         v_a=None) -> ndarray:
         """
         Computes the derivative of f w.r.t. the state x
         :param x: The state vector
@@ -65,10 +67,12 @@ class ZermeloDyn(Dynamics):
         super().__init__(wind)
         self.v_a = v_a
 
-    def value(self, x, u, t):
-        return self.v_a * np.array([np.cos(u), np.sin(u)]) + self.wind.value(t, x)
+    def value(self, x, u, t, v_a=None):
+        if v_a is None:
+            v_a = self.v_a
+        return v_a * np.array([np.cos(u), np.sin(u)]) + self.wind.value(t, x)
 
-    def d_value__d_state(self, x, u, t):
+    def d_value__d_state(self, x, u, t, v_a=None):
         return self.wind.d_value(t, x)
 
     def __str__(self):
@@ -92,16 +96,20 @@ class PCZermeloDyn(Dynamics):
         self.v_a = v_a
         self.factor = 1 / EARTH_RADIUS
 
-    def value(self, x, psi, t):
+    def value(self, x, psi, t, v_a=None):
+        if v_a is None:
+            v_a = self.v_a
         return self.factor * (
-                np.diag([1 / cos(x[1]), 1.]) @ (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)))
+                np.diag([1 / cos(x[1]), 1.]) @ (v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)))
 
-    def d_value__d_state(self, x, psi, t):
+    def d_value__d_state(self, x, psi, t, v_a=None):
+        if v_a is None:
+            v_a = self.v_a
         wind_gradient = np.zeros((x.size, x.size))
         wind_gradient[:] = self.wind.d_value(t, x)
         res = self.factor * np.column_stack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
                                              np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
-                                             (self.v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)) +
+                                             (v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)) +
                                              np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1]))
         return res
 

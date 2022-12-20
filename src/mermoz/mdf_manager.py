@@ -14,9 +14,16 @@ class MDFmanager:
     """
 
     def __init__(self):
-        self.output_dir = None
+        self.output_dir = os.environ.get('MERMOZ_PATH')
         self.trajs_filename = 'trajectories.h5'
         self.wind_filename = 'wind.h5'
+        self.case_name = None
+
+    def set_case(self, case_name):
+        self.case_name = case_name
+        if self.output_dir is None:
+            raise Exception('Output directory not specified yet')
+        self.set_output_dir(os.path.join(self.output_dir, 'output', case_name))
 
     def set_output_dir(self, output_dir):
         if not os.path.exists(output_dir):
@@ -29,7 +36,7 @@ class MDFmanager:
                     (not (keep_wind and filename.endswith('wind.h5'))):
                 os.remove(os.path.join(self.output_dir, filename))
 
-    def dump_trajs(self, traj_list, filename=None):
+    def dump_trajs(self, traj_list, filename=None, no_relabel=False):
         filename = self.trajs_filename if filename is None else filename
         filepath = os.path.join(self.output_dir, filename)
         with h5py.File(filepath, "a") as f:
@@ -42,7 +49,10 @@ class MDFmanager:
                 trajgroup.attrs['coords'] = traj.coords
                 trajgroup.attrs['interrupted'] = traj.interrupted
                 trajgroup.attrs['last_index'] = traj.last_index
-                trajgroup.attrs['label'] = traj.label
+                if not no_relabel:
+                    trajgroup.attrs['label'] = index + i
+                else:
+                    trajgroup.attrs['label'] = traj.label
                 trajgroup.attrs['info'] = traj.info
                 n = traj.last_index + 1
                 dset = trajgroup.create_dataset('data', (n, 2), dtype='f8')
@@ -61,6 +71,14 @@ class MDFmanager:
                 if hasattr(traj, 'transver'):
                     dset = trajgroup.create_dataset('transver', n, dtype='f8', fillvalue=0.)
                     dset[:] = traj.transver[:n]
+
+                if hasattr(traj, 'airspeed'):
+                    dset = trajgroup.create_dataset('airspeed', n, dtype='f8', fillvalue=0.)
+                    dset[:] = traj.airspeed[:n]
+
+                if hasattr(traj, 'energy'):
+                    dset = trajgroup.create_dataset('energy', n - 1, dtype='f8', fillvalue=0.)
+                    dset[:] = traj.energy[:n - 1]
 
     def _grib_date_to_unix(self, grib_filename):
         date, hm = grib_filename.split('_')[2:4]

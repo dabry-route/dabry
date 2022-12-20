@@ -177,7 +177,7 @@ def norm_grad(field, delta_x, delta_y, method='central'):
 
 class RFT:
     """
-    Reachability front tracker
+    Python interface for reachability front tracker
     """
 
     def __init__(self, bl, tr, max_time, nx, ny, nt, mp: MermozProblem, kernel='matlab', method='sethian'):
@@ -249,7 +249,7 @@ class RFT:
 
         self.method = method
 
-        self.matlabLS_path = '/home/bastien/Documents/work/level-set/'
+        self.matlabLS_path = '/home/bastien/Documents/work/mermoz/rft'
 
         self.t = 0
         self.kernel = kernel
@@ -600,6 +600,9 @@ class RFT:
         d_phi_kp1 = np.array((d_phi__d_x, d_phi__d_y))
         d_phi = lam * d_phi_k / np.linalg.norm(d_phi_k) + (1 - lam) * d_phi_kp1 / np.linalg.norm(d_phi_kp1)
         return d_phi / np.linalg.norm(d_phi), self.max_time * (k + 1) / self.nt, k + 1
+
+    def has_reached(self):
+        return self.value(self.ts[-1], self.mp.x_target) < 0.
 
     def get_time(self, x):
         """
