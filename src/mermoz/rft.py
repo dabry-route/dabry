@@ -249,13 +249,19 @@ class RFT:
 
         self.method = method
 
-        self.matlabLS_path = '/home/bastien/Documents/work/mermoz/rft'
+        self.matlabLS_path = None
 
         self.t = 0
         self.kernel = kernel
         if self.kernel not in ['base', 'matlab']:
             print(f'Unknown kernel : {self.kernel}')
             exit(1)
+
+    def setup_matlab(self):
+        path = os.environ.get('MERMOZ_PATH')
+        if path is None:
+            raise Exception('Unable to locate matlab script. Please set MERMOZ_PATH variable.')
+        self.matlabLS_path = os.path.join(path, 'rft')
 
     def compute(self):
         if self.kernel == 'base':
@@ -293,7 +299,7 @@ class RFT:
                 "t_end": self.mp.model.wind.t_start + self.max_time,
                 "nt_rft": self.nt
             }
-            with open(os.path.join(self.matlabLS_path, 'args.json'), 'w') as f:
+            with open(os.path.join(self.matlabLS_path, 'input', 'args.json'), 'w') as f:
                 json.dump(args, f)
 
             # Give also the wind to the matlab script

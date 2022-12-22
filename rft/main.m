@@ -1,5 +1,5 @@
 function main()
-    fname = 'args.json'; 
+    fname = 'input/args.json';
     fid = fopen(fname); 
     raw = fread(fid,inf); 
     str = char(raw'); 

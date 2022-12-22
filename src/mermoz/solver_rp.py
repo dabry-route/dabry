@@ -55,6 +55,7 @@ class SolverRP:
         tr_rft[:] = mp.tr  # (self.x_init + self.x_target) / 2. + np.array((l / 2., l / 2.))
 
         self.rft = RFT(bl_rft, tr_rft, self.T, nx_rft, ny_rft, nt_rft, mp, kernel='matlab')
+        self.rft.setup_matlab()
 
     def control(self, x, backward=False):
         return self.rft.control(x, backward)
