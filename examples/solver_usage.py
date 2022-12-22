@@ -9,7 +9,7 @@ from mermoz.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 0
+    pb_id = 19
     # Or choose database problem. If empty, will use previous ID
     dbpb = '37W_8S_16W_17S_20220301_12'
     # When running several times, wind data or reachability fronts data can be cached
@@ -71,6 +71,7 @@ if __name__ == '__main__':
     if cache_rff:
         solver_rp.rft.load_cache(os.path.join(mdfm.case_dir, 'rff.h5'))
 
+    """
     chrono.start('Solving problem using reachability front tracking (RFT)')
     res_rp = solver_rp.solve()
     chrono.stop()
@@ -82,6 +83,7 @@ if __name__ == '__main__':
     # Save fronts for display purposes
     if not cache_rff:
         solver_rp.rft.dump_rff(mdfm.case_dir)
+    """
 
     # Extract information for display and write it to output
     mdfm.ps.load_from_problem(pb)

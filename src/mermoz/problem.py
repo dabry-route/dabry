@@ -11,6 +11,7 @@ from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind
 from mermoz.model import Model, ZermeloGeneralModel
 from mermoz.stoppingcond import StoppingCond, TimedSC
 from mermoz.misc import *
+from mermoz.obstacle import CircleObs, FrameObs
 
 """
 problem.py
@@ -50,11 +51,13 @@ class MermozProblem:
                  x_target,
                  coords,
                  domain=None,
-                 phi_obs=None,
+                 obstacles=[],
                  bl=None,
                  tr=None,
                  autodomain=True,
-                 mask_land=True, **kwargs):
+                 mask_land=True,
+                 autoframe=False,
+                 **kwargs):
         self.model = model
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
@@ -119,24 +122,16 @@ class MermozProblem:
 
         self.l_ref = self.distance(self.bl, self.tr)
 
-        if phi_obs is not None:
-            self.phi_obs = phi_obs
-            dx = self.geod_l / 1e6
-            self.grad_phi_obs = {}
-            for k, phi in self.phi_obs.items():
-                self.grad_phi_obs[k] = \
-                    lambda t, x: np.array((1 / dx * (phi(t, x + np.array((dx, 0.))) - phi(t, x)),
-                                           1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
+        self.obstacles = obstacles
+        if len(self.obstacles) > 0:
+            for obs in self.obstacles:
+                obs.update_lref(self.l_ref)
 
-            def _in_obs(t, x):
-                for k, phi in enumerate(self.phi_obs.values()):
-                    if phi(t, x) < 0.:
-                        return k
-                return -1
-
-            self.in_obs = _in_obs
-        else:
-            self.in_obs = lambda t, x: -1
+        self.frame_offset = 0.05
+        if autoframe:
+            bl_frame = self.bl + (self.tr - self.bl) * self.frame_offset / 2.
+            tr_frame = self.tr - (self.tr - self.bl) * self.frame_offset / 2.
+            self.obstacles.append(FrameObs(bl_frame, tr_frame))
 
         self._feedback = None
         self._mfb = None
@@ -249,6 +244,21 @@ class MermozProblem:
         for index in sorted(delete_index, reverse=True):
             del self.trajs[index]
 
+    def in_obs(self, x):
+        obs_list = []
+        res = False
+        for i, obs in enumerate(self.obstacles):
+            val = obs.value(x)
+            if val < 0.:
+                res = True
+                obs_list.append((i, val))
+        # Return index of colliding obstacle if any, else -1
+        if not res:
+            return -1
+        else:
+            # Consider within most violated obstacle
+            return sorted(obs_list, key=lambda a: a[1])[0][0]
+
 
 class DatabaseProblem(MermozProblem):
 
@@ -295,7 +305,8 @@ class IndexedProblem(MermozProblem):
         18: ['Linearly varying wind', 'lva'],
         19: ['Double gyre scaled', 'double-gyre-scaled'],
         20: ['Trap wind', 'trap'],
-        21: ['San Juan Dublin Flattened Time varying', 'sanjuan-dublin-ortho-tv']
+        21: ['San Juan Dublin Flattened Time varying', 'sanjuan-dublin-ortho-tv'],
+        22: ['Obstacle', 'obs']
     }
 
     def __init__(self, i, seed=0):
@@ -912,7 +923,7 @@ class IndexedProblem(MermozProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=True)
 
         elif i == 20:
             v_a = 23.
@@ -955,6 +966,24 @@ class IndexedProblem(MermozProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  autodomain=False)
+
+        elif i == 22:
+            v_a = 23.
+
+            sf = 3e6
+            x_init = sf * np.array((0.1, 0.))
+            x_target = sf * np.array((0.9, 0.))
+            wind = UniformWind(np.array((5., 5.)))
+            coords = COORD_CARTESIAN
+            zermelo_model = ZermeloGeneralModel(v_a, coords)
+            zermelo_model.update_wind(wind)
+
+            obstacles = []
+            obstacles.append(CircleObs(sf * np.array((0.4, 0.1)), sf * 0.1))
+            obstacles.append(CircleObs(sf * np.array((0.5, 0.)), sf * 0.1))
+            obstacles.append(FrameObs(sf * np.array((0.05, -0.45)), sf * np.array((0.95, 0.45))))
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles)
 
         else:
             raise IndexError(f'No problem with index {i}')

@@ -38,9 +38,13 @@ class MDFmanager:
         if self.module_dir is None:
             raise Exception('Output directory not specified yet')
         self.case_dir = os.path.join(self.module_dir, 'output', case_name)
+        if not os.path.exists(self.case_dir):
+            os.mkdir(self.case_dir)
         self.ps.setup(self.case_dir)
 
     def clean_output_dir(self, keep_rff=False, keep_wind=False):
+        if not os.path.exists(self.case_dir):
+            return
         for filename in os.listdir(self.case_dir):
             if (not (keep_rff and filename.endswith('rff.h5'))) and \
                     (not (keep_wind and filename.endswith('wind.h5'))):

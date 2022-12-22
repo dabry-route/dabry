@@ -1,5 +1,8 @@
 # from heapq import heappush, heappop
 import os
+from math import asin
+
+import numpy as np
 from shapely.geometry import Polygon
 import csv
 
@@ -18,7 +21,7 @@ def heappop(a):
 
 class FrontPoint:
 
-    def __init__(self, identifier, tsa, i_obs=-1, ccw=True):
+    def __init__(self, identifier, tsa, i_obs=-1, ccw=True, rot=0.):
         """
         :param identifier: The front point unique identifier
         :param tsa: The point in (id_time, time, state, adjoint, cost) form
@@ -29,6 +32,7 @@ class FrontPoint:
         self.tsa[3][:] = tsa[3]
         self.i_obs = i_obs
         self.ccw = ccw
+        self.rot = rot
 
 
 class Pareto:
@@ -336,7 +340,7 @@ class SolverEF:
 
         # This group shall be reinitialized before new resolution
         # Contains augmented state points (id, time, state, adjoint) used to expand extremal field
-        self.active = []
+        self.active = {}
         self.new_points = {}
         self.p_inits = {}
         self.lsets = []
@@ -383,6 +387,8 @@ class SolverEF:
         self.quick_solve = False
         self.quick_traj_idx = -1
         self.best_distances = [self.mp.geod_l]
+
+        self.any_out_obs = False
 
         self.pareto = pareto
 
@@ -442,6 +448,7 @@ class SolverEF:
         self.rel = None
         self.it = 0
         self.n_points = 0
+        self.any_out_obs = True
         t_start = self.mp_primal.model.wind.t_start + time_offset
         self.collbuf = CollisionBuffer(*self.collbuf_shape, self.mp.bl, self.mp.tr)
         for k in range(self.N_disc_init):
@@ -479,6 +486,7 @@ class SolverEF:
     def step_global(self):
 
         # Step the entire active list, look for domain violation
+        self.any_out_obs = False
         active_list = []
         obstacle_list = []
         front_list = []
@@ -486,7 +494,9 @@ class SolverEF:
         for i_a, a in self.active.items():
             active_list.append(a.i)
             it = a.tsa[0]
-            t, x, p, status, i_obs, ccw = self.step_single(a.tsa[1:], a.i_obs, a.ccw)
+            t, x, p, status, i_obs, ccw, rot = self.step_single(a.tsa[1:], a.i_obs, a.ccw, a.rot)
+            if i_obs == -1:
+                self.any_out_obs = True
             dist = self.mp.distance(x, self.mp.x_target)
             self.best_distances.append(dist)
             if self.quick_solve and dist < self.abs_nb_ceil:
@@ -506,13 +516,15 @@ class SolverEF:
             if not status and self.rel.is_active(a.i):
                 self.rel.deactivate(a.i)
                 obstacle_list.append(a.i)
+            elif abs(rot) > 2 * np.pi:
+                self.rel.deactivate(a.i)
             elif self.cost_ceil is not None and c > self.cost_ceil:
                 self.rel.deactivate(a.i)
             elif self.pareto is not None and self.pareto.dominated((t - self.mp_primal.model.wind.t_start, c)):
                 self.rel.deactivate(a.i)
             else:
                 if it == 0 or True:  # or not polyfront.contains(Point(*x)):
-                    na = FrontPoint(a.i, (it + 1,) + self.trajs[a.i][it + 1], i_obs, ccw)
+                    na = FrontPoint(a.i, (it + 1,) + self.trajs[a.i][it + 1], i_obs, ccw, rot)
                     self.new_points[a.i] = na
                 else:
                     self.rel.remove(a.i)
@@ -524,6 +536,10 @@ class SolverEF:
 
         if not self.no_coll_filtering:
             for i_na, na in self.new_points.items():
+                # Deactivate new active points which fall inside front
+                if self.active[i_na].i_obs >= 0:
+                    # Skip active points inside obstacles
+                    continue
                 it = self.active[i_na].tsa[0]
                 x_it = self.active[i_na].tsa[2]
                 x_itp1 = na.tsa[2]
@@ -572,6 +588,9 @@ class SolverEF:
                         break
 
             for i_na, na in self.new_points.items():
+                if self.active[i_na].i_obs >= 0:
+                    # Points in obstacles do not contribute to collision buffer
+                    continue
                 self.collbuf.add(na.tsa[2], i_na, na.tsa[0])
 
         # Fill in holes when extremals get too far from one another
@@ -662,7 +681,7 @@ class SolverEF:
             ccw = True
             while iit <= self.it:
                 iit += 1
-                t, x, p, status, i_obs, ccw = self.step_single(self.trajs[i][iit - 1], i_obs, ccw)
+                t, x, p, status, i_obs, ccw, rot = self.step_single(self.trajs[i][iit - 1], i_obs, ccw)
                 dist = self.mp.distance(x, self.mp.x_target)
                 self.best_distances.append(dist)
                 if self.quick_solve and dist < self.abs_nb_ceil:
@@ -690,13 +709,16 @@ class SolverEF:
                 self.rel.deactivate(i)
             self.new_points[i] = na
 
-    def step_single(self, ap, i_obs=-1, ccw=True):
-        obs_fllw_strategy = False
+    def step_single(self, ap, i_obs=-1, ccw=True, rot=0.):
+        obs_fllw_strategy = True
         x = np.zeros(2)
+        x_prev = np.zeros(2)
         p = np.zeros(2)
         x[:] = ap[1]
+        x_prev[:] = ap[1]
         p[:] = ap[2]
         t = ap[0]
+        u = None
         if i_obs == -1 or not self.hard_obstacles:
             # For the moment, simple Euler scheme
             u = heading_opti(x, p, t, self.mp.coords)
@@ -710,36 +732,69 @@ class SolverEF:
             p += self.dt * dyn_p
             t += self.dt
             a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
+            # For compatibility with other case
+            status = True
         else:
             if obs_fllw_strategy:
                 # Obstacle mode. Follow the obstacle boundary as fast as possible
-                dx = self.mp.geod_l / 1e6
-                phi = self.mp.phi_obs[i_obs]
-                grad = np.array((1 / dx * (phi(t, x + np.array((dx, 0.))) - phi(t, x)),
-                                 1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
-                n = grad / np.linalg.norm(grad)
-                # n = self.mp.grad_phi_obs[i_obs](x) / np.linalg.norm(self.mp.grad_phi_obs[i_obs](x))
-                # TODO : clarify angle definition for cartesian AND gcs
-                theta = atan2(*n[::-1])
-                u = theta + (-1. if not ccw else 1.) * acos(-self.mp.model.wind.value(t, x) @ n / self.mp.model.v_a)
-                dyn_x = self.mp.model.dyn.value(x, u, t)
-                x += self.dt * dyn_x
-                p[:] = - np.array((np.cos(u), np.sin(u)))
-                t += self.dt
+                obs_grad = self.mp.obstacles[i_obs].d_value(x)
+
+                obs_tgt = (-1. if not ccw else 1.) * np.array(((0, -1), (1, 0))) @ obs_grad
+
+                v_a = self.mp.model.v_a
+
+                arg_ot = atan2(*obs_tgt[::-1])
+                w = self.mp.model.wind.value(t, x)
+                arg_w = atan2(*w[::-1])
+                norm_w = np.linalg.norm(w)
+                r = norm_w / v_a * sin(arg_w - arg_ot)
+                if np.abs(r) >= 1.:
+                    # Impossible to follow obstacle
+                    status = False
+                else:
+                    def gs_f(uu, va, w, reference):
+                        # Ground speed projected to reference
+                        return (np.array((cos(uu), sin(uu))) * va + w) @ reference
+
+                    # Select heading that maximizes ground speed along obstacle
+                    u = max([arg_ot - asin(r), arg_ot + asin(r) - pi], key=lambda uu: gs_f(uu, v_a, w, obs_tgt))
+                    if self.mp.coords == COORD_GCS:
+                        u = np.pi/2. - u
+                    dyn_x = self.mp.model.dyn.value(x, u, t)
+                    x_prev = np.zeros(x.shape)
+                    x_prev[:] = x
+                    x += self.dt * dyn_x
+                    p[:] = - np.array((np.cos(u), np.sin(u)))
+                    t += self.dt
+                    arg_ref_x = atan2(*(x - self.mp.obstacles[i_obs].ref_point)[::-1])
+                    arg_ref_x_prev = atan2(*(x_prev - self.mp.obstacles[i_obs].ref_point)[::-1])
+                    d_arg = arg_ref_x - arg_ref_x_prev
+                    if d_arg >= 0.95 * 2 * np.pi:
+                        d_arg -= 2 * np.pi
+                    if d_arg <= -2 * np.pi * 0.95:
+                        d_arg += 2 * np.pi
+                    rot += d_arg
+                    status = True
             else:
                 pass
 
-        status = self.mp.domain(x)
-        if status and i_obs < 0:
-            i_obs = self.mp.in_obs(t, x)
-            if i_obs >= 0:
-                dx = self.mp.geod_l / 1e6
-                phi = self.mp.phi_obs[i_obs]
-                grad = np.array((1 / dx * (phi(t, x + np.array((dx, 0.))) - phi(t, x)),
-                                 1 / dx * (phi(t, x + np.array((0., dx))) - phi(t, x))))
-                # ccw = np.cross(self.mp.grad_phi_obs[i_obs](x), dyn_x) > 0.
-                ccw = np.cross(grad, dyn_x) > 0.
-        return t, x, p, status, i_obs, ccw
+        status = status and self.mp.domain(x)
+        i_obs_new = i_obs
+        if status:
+            i_obs_new = self.mp.in_obs(x)
+            if i_obs_new != i_obs:
+                if i_obs_new == -1:
+                    # Keep moving in obstacle, no points leaving
+                    i_obs_new = i_obs
+                else:
+                    if self.mp.coords == COORD_GCS:
+                        u = np.pi/2 - u
+                    s = np.array((np.cos(u), np.sin(u)))
+                    obs_grad = self.mp.obstacles[i_obs_new].d_value(x)
+                    obs_tgt = np.array(((0, -1), (1, 0))) @ obs_grad
+                    ccw = s @ obs_tgt > 0.
+                    rot = 0.
+        return t, x, p, status, i_obs_new, ccw, rot
 
     def propagate(self, time_offset=0.):
         self.setup(time_offset=time_offset)
@@ -748,7 +803,8 @@ class SolverEF:
         while len(self.active) != 0 \
                 and i < self.max_steps \
                 and len(self.trajs) < self.max_extremals \
-                and ((not self.quick_solve) or self.quick_traj_idx == -1):
+                and ((not self.quick_solve) or self.quick_traj_idx == -1)\
+                and self.any_out_obs:
             i += 1
             if self.debug:
                 print(i)
