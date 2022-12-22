@@ -14,7 +14,7 @@ from mermoz.solver_rp import SolverRP
 
 class ParamsSummary:
 
-    def __init__(self, params=None, output_dir='', style='params.css'):
+    def __init__(self, params=None, style='params.css'):
         self.coords_units = None
         self.x_name = None
         self.y_name = None
@@ -34,15 +34,21 @@ class ParamsSummary:
         self.rft_time = None
 
         self.params_ss_fname = style
-        self.output_dir = output_dir
+        self.module_dir = None
+        self.output_dir = None
         self.params_fname = 'params.json'
-        self.params_ss_path = '/home/bastien/Documents/work/mermoz/docs'
+        self.params_ss_path = None
         self.params_fname_formatted = 'params.html'
 
         self.params = params if params is not None else {}
         self.md = None
 
-    def set_output_dir(self, output_dir):
+    def setup(self, output_dir):
+        path = os.environ.get('MERMOZ_PATH')
+        if path is None:
+            raise Exception('Unable to set output dir automatically. Please set MERMOZ_PATH variable.')
+        self.module_dir = path
+        self.params_ss_path = os.path.join(self.module_dir, 'docs')
         self.output_dir = output_dir
 
     def add_param(self, k, v):

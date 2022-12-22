@@ -21,6 +21,7 @@ if __name__ == '__main__':
 
     # Create a file manager to dump problem data
     mdfm = MDFmanager()
+    mdfm.setup()
     if len(dbpb) > 0:
         case_name = f'example_solver-ef_{dbpb}'
     else:
@@ -68,7 +69,7 @@ if __name__ == '__main__':
     # Setting the front tracking solver
     solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft)
     if cache_rff:
-        solver_rp.rft.load_cache(os.path.join(mdfm.output_dir, 'rff.h5'))
+        solver_rp.rft.load_cache(os.path.join(mdfm.case_dir, 'rff.h5'))
 
     chrono.start('Solving problem using reachability front tracking (RFT)')
     res_rp = solver_rp.solve()
@@ -80,12 +81,12 @@ if __name__ == '__main__':
 
     # Save fronts for display purposes
     if not cache_rff:
-        solver_rp.rft.dump_rff(mdfm.output_dir)
+        solver_rp.rft.dump_rff(mdfm.case_dir)
 
     # Extract information for display and write it to output
-    ps = ParamsSummary()
-    ps.set_output_dir(mdfm.output_dir)
-    ps.load_from_problem(pb)
-    ps.dump()
+    mdfm.ps.load_from_problem(pb)
+    mdfm.ps.dump()
+    # Also copy the script that produced the result to output dir for later reproduction
+    mdfm.save_script(__file__)
 
-    print(f'Results saved to {mdfm.output_dir}')
+    print(f'Results saved to {mdfm.case_dir}')

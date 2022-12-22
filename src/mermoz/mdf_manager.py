@@ -1,10 +1,13 @@
 import datetime
 import os
+import shutil
+
 import pygrib
 
 import h5py
 
 from mermoz.misc import *
+from mermoz.params_summary import ParamsSummary
 from mermoz.wind import Wind, DiscreteWind
 
 
@@ -14,31 +17,41 @@ class MDFmanager:
     """
 
     def __init__(self):
-        self.output_dir = os.environ.get('MERMOZ_PATH')
+        self.module_dir = None
+        self.case_dir = None
         self.trajs_filename = 'trajectories.h5'
         self.wind_filename = 'wind.h5'
         self.case_name = None
+        self.ps = ParamsSummary()
+
+    def setup(self, module_dir=None):
+        if module_dir is not None:
+            self.module_dir = module_dir
+        else:
+            path = os.environ.get('MERMOZ_PATH')
+            if path is None:
+                raise Exception('Unable to set output dir automatically. Please set MERMOZ_PATH variable.')
+            self.module_dir = path
 
     def set_case(self, case_name):
         self.case_name = case_name
-        if self.output_dir is None:
+        if self.module_dir is None:
             raise Exception('Output directory not specified yet')
-        self.set_output_dir(os.path.join(self.output_dir, 'output', case_name))
-
-    def set_output_dir(self, output_dir):
-        if not os.path.exists(output_dir):
-            os.mkdir(output_dir)
-        self.output_dir = output_dir
+        self.case_dir = os.path.join(self.module_dir, 'output', case_name)
+        self.ps.setup(self.case_dir)
 
     def clean_output_dir(self, keep_rff=False, keep_wind=False):
-        for filename in os.listdir(self.output_dir):
-            if (not (keep_rff and filename.endswith('rff.h5'))) and\
+        for filename in os.listdir(self.case_dir):
+            if (not (keep_rff and filename.endswith('rff.h5'))) and \
                     (not (keep_wind and filename.endswith('wind.h5'))):
-                os.remove(os.path.join(self.output_dir, filename))
+                os.remove(os.path.join(self.case_dir, filename))
+
+    def save_script(self, script_path):
+        shutil.copy(script_path, self.case_dir)
 
     def dump_trajs(self, traj_list, filename=None, no_relabel=False):
         filename = self.trajs_filename if filename is None else filename
-        filepath = os.path.join(self.output_dir, filename)
+        filepath = os.path.join(self.case_dir, filename)
         with h5py.File(filepath, "a") as f:
             index = 0
             if len(f.keys()) != 0:
@@ -97,12 +110,13 @@ class MDFmanager:
                 for attr, val in traj.attrs.items():
                     print(f'{attr} : {val}')
 
-    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None, coords=COORD_CARTESIAN, force_analytical=False):
+    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None, coords=COORD_CARTESIAN,
+                  force_analytical=False):
         if wind.is_dumpable == 0:
             print('Error : Wind is not dumpable to file', file=sys.stderr)
             exit(1)
         filename = self.wind_filename if filename is None else filename
-        filepath = os.path.join(self.output_dir, filename)
+        filepath = os.path.join(self.case_dir, filename)
         if wind.is_dumpable == 1:
             if nx is None or ny is None:
                 print(f'Please provide grid shape "nx=..., ny=..." to sample analytical wind "{wind}"')
@@ -137,7 +151,7 @@ class MDFmanager:
         if type(srcfiles) == str:
             srcfiles = [srcfiles]
         filename = self.wind_filename if dstname is None else dstname
-        filepath = os.path.join(self.output_dir, filename)
+        filepath = os.path.join(self.case_dir, filename)
 
         def process(grbfile, setup=False, nx=None, ny=None):
             grbs = pygrib.open(grbfile)
@@ -196,7 +210,7 @@ class MDFmanager:
 if __name__ == '__main__':
     mdfm = MDFmanager()
     # mdfm.print_trajs('/home/bastien/Documents/work/mermoz/output/example_front_tracking2/trajectories.h5')
-    mdfm.set_output_dir('/home/bastien/Documents/work/test')
+    mdfm.setup('/home/bastien/Documents/work/test')
     data_dir = '/home/bastien/Documents/data/other'
     # data_filepath = os.path.join(data_dir, 'gfs_3_20090823_0600_000.grb2')
     data_filepath = os.path.join(data_dir, 'gfs_4_20220324_1200_000.grb2')
