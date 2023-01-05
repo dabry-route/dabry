@@ -9,9 +9,9 @@ from mermoz.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 19
+    pb_id = 22
     # Or choose database problem. If empty, will use previous ID
-    dbpb = '37W_8S_16W_17S_20220301_12'
+    dbpb = '72W_15S_0W_57S_20220301_12'
     # When running several times, wind data or reachability fronts data can be cached
     cache_wind = False
     cache_rff = False
@@ -25,7 +25,7 @@ if __name__ == '__main__':
     if len(dbpb) > 0:
         case_name = f'example_solver-ef_{dbpb}'
     else:
-        case_name = f'example_solver-ef_{IndexedProblem.problems[pb_id][1]}'
+        case_name = f'example_solver-ef_{IndexedProblem.problems[pb_id][1]}_other'
     mdfm.set_case(case_name)
     mdfm.clean_output_dir(keep_rff=cache_rff, keep_wind=cache_wind)
 
@@ -41,6 +41,8 @@ if __name__ == '__main__':
         pb = DatabaseProblem(os.path.join(os.environ.get('MERMOZ_WIND_PATH'), dbpb, 'wind.h5'), airspeed=23.)
     else:
         pb = IndexedProblem(pb_id)
+
+    #pb.flatten()
 
     if not cache_wind:
         chrono.start('Dumping windfield to file')
@@ -66,12 +68,12 @@ if __name__ == '__main__':
     extremals = solver_ef.get_trajs()
     mdfm.dump_trajs(extremals)
 
+    """
     # Setting the front tracking solver
     solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft)
     if cache_rff:
         solver_rp.rft.load_cache(os.path.join(mdfm.case_dir, 'rff.h5'))
 
-    """
     chrono.start('Solving problem using reachability front tracking (RFT)')
     res_rp = solver_rp.solve()
     chrono.stop()

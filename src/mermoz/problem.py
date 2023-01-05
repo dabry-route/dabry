@@ -211,6 +211,24 @@ class MermozProblem:
 
         return MermozProblem(**kwargs)
 
+    def flatten(self):
+        if self.coords != COORD_GCS:
+            raise Exception('Flattening only available in GCS mode')
+        self.coords = COORD_CARTESIAN
+        new_model = ZermeloGeneralModel(self.model.v_a, coords=COORD_CARTESIAN)
+        lon_0, lat_0 = middle(self.x_init, self.x_target, coords=COORD_GCS)
+        self.model.wind.flatten(proj='ortho', lon_0=lon_0, lat_0=lat_0)
+        proj = Proj(proj='ortho', lon_0=RAD_TO_DEG * lon_0, lat_0=RAD_TO_DEG * lat_0)
+        self.x_init = np.array(proj(*(RAD_TO_DEG * self.x_init)))
+        self.x_target = np.array(proj(*(RAD_TO_DEG * self.x_target)))
+        self.bl = np.array(proj(*(RAD_TO_DEG * self.bl)))
+        self.tr = np.array(proj(*(RAD_TO_DEG * self.tr)))
+        new_model.update_wind(self.model.wind)
+        self.model = new_model
+        self.geod_l = self.distance(self.x_init, self.x_target)
+        self.l_ref = self.distance(self.bl, self.tr)
+        self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
+
     def distance(self, x1, x2):
         return distance(x1, x2, self.coords)
 
