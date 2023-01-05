@@ -280,7 +280,7 @@ class MermozProblem:
 
 class DatabaseProblem(MermozProblem):
 
-    def __init__(self, wind_fpath, x_init=None, x_target=None, airspeed=AIRSPEED_DEFAULT):
+    def __init__(self, wind_fpath, x_init=None, x_target=None, airspeed=AIRSPEED_DEFAULT, obstacles=None):
         total_wind = DiscreteWind(interp='linear')
         total_wind.load(wind_fpath)
         print(f'Problem from database : {wind_fpath}')
@@ -297,7 +297,7 @@ class DatabaseProblem(MermozProblem):
 
         zermelo_model = ZermeloGeneralModel(airspeed, coords=coords)
         zermelo_model.update_wind(total_wind)
-        super().__init__(zermelo_model, x_init, x_target, coords)
+        super().__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles)
 
 
 class IndexedProblem(MermozProblem):

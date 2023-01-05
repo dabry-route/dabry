@@ -1,6 +1,7 @@
 import os
 
 from mermoz.mdf_manager import MDFmanager
+from mermoz.obstacle import GreatCircleObs, ParallelObs
 from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *
 from mermoz.problem import IndexedProblem, DatabaseProblem
@@ -38,11 +39,16 @@ if __name__ == '__main__':
 
     # Create problem
     if len(dbpb) > 0:
-        pb = DatabaseProblem(os.path.join(os.environ.get('MERMOZ_WIND_PATH'), dbpb, 'wind.h5'), airspeed=23.)
+        obs = []
+        obs.append(GreatCircleObs(np.array((-70 * DEG_TO_RAD, 30 * DEG_TO_RAD)),
+                                  np.array((20 * DEG_TO_RAD, 60 * DEG_TO_RAD))))
+        obs.append(ParallelObs(18 * DEG_TO_RAD, True))
+        pb = DatabaseProblem(os.path.join(os.environ.get('MERMOZ_WIND_PATH'), dbpb, 'wind.h5'), airspeed=23.,
+                             obstacles=obs)
     else:
         pb = IndexedProblem(pb_id)
 
-    #pb.flatten()
+    # pb.flatten()
 
     if not cache_wind:
         chrono.start('Dumping windfield to file')
@@ -51,7 +57,7 @@ if __name__ == '__main__':
 
     # Setting the extremal solver
     t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.v_a
-    solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=500, rel_nb_ceil=0.02)
+    solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=100, rel_nb_ceil=0.02)
 
     chrono.start('Solving problem using extremal field (EF)')
     res_ef = solver_ef.solve()

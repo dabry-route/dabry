@@ -1,5 +1,6 @@
 from abc import ABC
 import numpy as np
+from mermoz.misc import *
 
 
 class Obstacle(ABC):
@@ -92,3 +93,56 @@ class FrameObs(Obstacle):
             return np.array((-1., 0.))
         else:
             return np.array((0., 1.))
+
+
+class GreatCircleObs(Obstacle):
+
+    def __init__(self, p1, p2):
+        X1 = np.array((EARTH_RADIUS * np.cos(p1[0]) * np.cos(p1[1]),
+                       EARTH_RADIUS * np.sin(p1[0]) * np.cos(p1[1]),
+                       EARTH_RADIUS * np.sin(p1[1])))
+        X2 = np.array((EARTH_RADIUS * np.cos(p2[0]) * np.cos(p2[1]),
+                       EARTH_RADIUS * np.sin(p2[0]) * np.cos(p2[1]),
+                       EARTH_RADIUS * np.sin(p2[1])))
+        self.dir_vect = -np.cross(X1, X2)
+        self.dir_vect /= np.linalg.norm(self.dir_vect)
+        super().__init__(self.value, np.zeros(2), self.d_value)
+
+    def value(self, x):
+        X = np.array((EARTH_RADIUS * np.cos(x[0]) * np.cos(x[1]),
+                      EARTH_RADIUS * np.sin(x[0]) * np.cos(x[1]),
+                      EARTH_RADIUS * np.sin(x[1])))
+        return X @ self.dir_vect
+
+    def d_value(self, x):
+        d_dphi = np.array((-EARTH_RADIUS * np.sin(x[0]) * np.cos(x[1]),
+                           EARTH_RADIUS * np.cos(x[0]) * np.cos(x[1]),
+                           0))
+        d_dlam = np.array((-EARTH_RADIUS * np.cos(x[0]) * np.sin(x[1]),
+                           -EARTH_RADIUS * np.sin(x[0]) * np.sin(x[1]),
+                           EARTH_RADIUS * np.cos(x[1])))
+        return np.array((self.dir_vect @ d_dphi, self.dir_vect @ d_dlam))
+
+
+class ParallelObs(Obstacle):
+
+    def __init__(self, lat, up):
+        """
+        :param lat: Latitude in radians
+        :param up: True if accessible domain is above latitude, False else
+        """
+        self.lat = lat
+        self.up = up
+        super().__init__(self.value, np.zeros(2), self.d_value)
+
+    def value(self, x):
+        if self.up:
+            return x[1] - self.lat
+        else:
+            return self.lat - x[1]
+
+    def d_value(self, x):
+        if self.up:
+            return np.array((0, 1))
+        else:
+            return np.array((0, -1))
