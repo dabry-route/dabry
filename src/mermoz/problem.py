@@ -1,17 +1,16 @@
 import h5py
-from mdisplay.geodata import GeoData
 from mpl_toolkits.basemap import Basemap
 from pyproj import Proj
 
 from mermoz.aero import LLAero
-from mermoz.feedback import Feedback, AirspeedLaw, MultiFeedback
+from mermoz.feedback import Feedback, AirspeedLaw, MultiFeedback, GSTargetFB
 from mermoz.integration import IntEulerExpl
 from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
-    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind, LVWind, TrapWind
+    PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind, LVWind, TrapWind, ChertovskihWind
 from mermoz.model import Model, ZermeloGeneralModel
-from mermoz.stoppingcond import StoppingCond, TimedSC
+from mermoz.stoppingcond import StoppingCond, TimedSC, DistanceSC
 from mermoz.misc import *
-from mermoz.obstacle import CircleObs, FrameObs
+from mermoz.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, LSEMaxiObs, MeanObs
 
 """
 problem.py
@@ -35,15 +34,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 class MermozProblem:
-    """
-    The Mermoz problem class defines the whole optimal control problem.
-
-            min T
-        x(0) = x_init
-        x(T) = x_target
-        x_dot(t) = v_a * s(t) + v_w(x(t))
-        where s(t) is a control vector of unit norm
-    """
 
     def __init__(self,
                  model: Model,
@@ -51,12 +41,14 @@ class MermozProblem:
                  x_target,
                  coords,
                  domain=None,
-                 obstacles=[],
+                 obstacles=None,
                  bl=None,
                  tr=None,
                  autodomain=True,
                  mask_land=True,
                  autoframe=False,
+                 descr=None,
+                 time_scale=None,
                  **kwargs):
         self.model = model
         self.x_init = np.zeros(2)
@@ -81,12 +73,12 @@ class MermozProblem:
         self.geod_l = distance(self.x_init, self.x_target, coords=self.coords)
 
         # It is usually sufficient to scale time on geodesic / airspeed
-        # but for some problems not
-        self.time_scale = None
+        # but for some problems it isn't
+        self.time_scale = self.geod_l / self.model.v_a if time_scale is None else time_scale
 
         self.bm = None
 
-        self.descr = 'Problem'
+        self.descr = 'Problem' if descr is None else descr
 
         if not domain:
             if not autodomain:
@@ -120,9 +112,12 @@ class MermozProblem:
             else:
                 self.domain = domain
 
-        self.l_ref = self.distance(self.bl, self.tr)
+        if self.bl is not None and self.tr is not None:
+            self.l_ref = self.distance(self.bl, self.tr)
+        else:
+            self.l_ref = self.geod_l
 
-        self.obstacles = obstacles
+        self.obstacles = obstacles if obstacles is not None else []
         if len(self.obstacles) > 0:
             for obs in self.obstacles:
                 obs.update_lref(self.l_ref)
@@ -269,13 +264,21 @@ class MermozProblem:
             val = obs.value(x)
             if val < 0.:
                 res = True
-                obs_list.append((i, val))
-        # Return index of colliding obstacle if any, else -1
+                obs_list.append(i)
         if not res:
-            return -1
+            return [-1]
         else:
-            # Consider within most violated obstacle
-            return sorted(obs_list, key=lambda a: a[1])[0][0]
+            return obs_list
+
+    def orthodromic(self):
+        fb = GSTargetFB(self.model.wind, self.model.v_a, self.x_target, self.coords)
+        self.load_feedback(fb)
+        sc = DistanceSC(lambda x: self.distance(x, self.x_target), self.geod_l * 0.02)
+        traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale/1000, max_iter=3000)
+        if sc.value(0, traj.points[traj.last_index]):
+            return traj.timestamps[traj.last_index]
+        else:
+            return -1
 
 
 class DatabaseProblem(MermozProblem):
@@ -294,6 +297,28 @@ class DatabaseProblem(MermozProblem):
                 offset = (tr - bl) * 0.1
                 x_init = bl + offset
                 x_target = tr - offset
+
+        if obstacles is None:
+            obstacles = []
+
+        offset = (tr - bl) * 0.02
+        bl_obs = bl + offset
+        tr_obs = tr - offset
+
+        obstacles.append(MeridianObs(bl_obs[0], True))
+        obstacles.append(MeridianObs(tr_obs[0], False))
+        obstacles.append(ParallelObs(bl_obs[1], True))
+        obstacles.append(ParallelObs(tr_obs[1], False))
+        eps_lon = (tr_obs[0] - bl_obs[0]) / 30
+        eps_lat = (tr_obs[1] - bl_obs[1]) / 30
+        obstacles.append(GreatCircleObs(np.array((bl_obs[0], bl_obs[1])) + np.array((eps_lon, 0)),
+                                        np.array((bl_obs[0], bl_obs[1])) + np.array((0, eps_lat))))
+        obstacles.append(GreatCircleObs(np.array((tr_obs[0], bl_obs[1])) + np.array((0, eps_lat)),
+                                        np.array((tr_obs[0], bl_obs[1])) + np.array((-eps_lon, 0))))
+        obstacles.append(GreatCircleObs(np.array((tr_obs[0], tr_obs[1])) + np.array((-eps_lon, 0)),
+                                        np.array((tr_obs[0], tr_obs[1])) + np.array((0, -eps_lat))))
+        obstacles.append(GreatCircleObs(np.array((bl_obs[0], tr_obs[1])) + np.array((0, -eps_lat)),
+                                        np.array((bl_obs[0], tr_obs[1])) + np.array((eps_lon, 0))))
 
         zermelo_model = ZermeloGeneralModel(airspeed, coords=coords)
         zermelo_model.update_wind(total_wind)
@@ -324,8 +349,10 @@ class IndexedProblem(MermozProblem):
         19: ['Double gyre scaled', 'double-gyre-scaled'],
         20: ['Trap wind', 'trap'],
         21: ['San Juan Dublin Flattened Time varying', 'sanjuan-dublin-ortho-tv'],
-        22: ['Obstacle', 'obs']
+        22: ['Obstacle', 'obs'],
+        23: ['Chertovskih', 'chertov']
     }
+    exclude_from_test = [12]
 
     def __init__(self, i, seed=0):
         if i == 0:
@@ -410,7 +437,7 @@ class IndexedProblem(MermozProblem):
             v_a = 23.
             coords = COORD_GCS
 
-            total_wind = DiscreteWind(interp='linear')
+            total_wind = DiscreteWind(interp='pwc')
             total_wind.load('/home/bastien/Documents/data/wind/windy/Vancouver-Honolulu-0.5.mz/data2.h5')
 
             # Creates the cinematic model
@@ -424,10 +451,9 @@ class IndexedProblem(MermozProblem):
             tr[:] = total_wind.grid[-2, -2]
 
             # Initial point
-            gd = GeoData()
             offset = np.array([5., 5.])  # Degrees
-            x_init = DEG_TO_RAD * (np.array(gd.get_coords('honolulu')) + offset)
-            x_target = DEG_TO_RAD * (np.array(gd.get_coords('vancouver')) - offset)
+            x_init = DEG_TO_RAD * (np.array([-157.855676, 21.304547]) + offset)
+            x_target = DEG_TO_RAD * (np.array([-123.113952, 49.2608724]) - offset)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
 
@@ -537,13 +563,12 @@ class IndexedProblem(MermozProblem):
             bl = total_wind.grid[0, 0]
             tr = total_wind.grid[-1, -1]
 
-            gd = GeoData()
             proj = Proj(proj='ortho', lon_0=total_wind.lon_0, lat_0=total_wind.lat_0)
 
-            point = np.array(gd.get_coords('San Juan', units='deg'))
+            point = np.array([-66.116666, 18.465299])
             x_init = np.array(proj(*point)) + 500e3 * np.ones(2)
 
-            point = np.array(gd.get_coords('Dublin', units='deg'))
+            point = np.array([-6.2602732, 53.3497645])
             x_target = np.array(proj(*point)) - 500e3 * np.ones(2)
 
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
@@ -997,14 +1022,31 @@ class IndexedProblem(MermozProblem):
             zermelo_model.update_wind(wind)
 
             obstacles = []
-            obstacles.append(CircleObs(sf * np.array((0.4, 0.1)), sf * 0.1))
-            obstacles.append(CircleObs(sf * np.array((0.5, 0.)), sf * 0.1))
+            # obstacles.append(CircleObs(sf * np.array((0.4, 0.1)), sf * 0.1))
+            # obstacles.append(CircleObs(sf * np.array((0.5, 0.)), sf * 0.1))
+            obstacles.append(MeanObs([CircleObs(sf * np.array((0.4, 0.1)), sf * 0.1),
+                                         CircleObs(sf * np.array((0.5, 0.)), sf * 0.1)]))
             obstacles.append(FrameObs(sf * np.array((0.05, -0.45)), sf * np.array((0.95, 0.45))))
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles)
+        elif i == 23:
+            v_a = 1
+            x_init = np.array((0.5, 0))
+            x_target = np.array((-0.7, -6))
+            coords = COORD_CARTESIAN
+            wind = ChertovskihWind()
+            zermelo_model = ZermeloGeneralModel(v_a, coords)
+            zermelo_model.update_wind(wind)
+
+            obstacles = []
+            obstacles.append(FrameObs(np.array((-1, -6.01)), np.array((1, 0.01))))
+
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles,
+                                                 bl=np.array((-1.5, -6.05)),
+                                                 tr=np.array((1.5, 0.05)), autodomain=False)
+
 
         else:
             raise IndexError(f'No problem with index {i}')
 
         self.descr = IndexedProblem.problems[i][0]
-        print(self.descr)

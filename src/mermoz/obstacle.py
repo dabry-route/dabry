@@ -76,13 +76,14 @@ class FrameObs(Obstacle):
         self.tr = np.zeros(tr.shape)
         self.tr[:] = tr
         self.center = 0.5 * (bl + tr)
+        self.factor = np.diag((1 / (self.tr[0] - self.bl[0]), 1 / (self.tr[1] - self.bl[1])))
         super().__init__(self.value, self.center, self.d_value)
 
     def value(self, x):
         return min(x[0] - self.bl[0], self.tr[0] - x[0], x[1] - self.bl[1], self.tr[1] - x[1])
 
     def d_value(self, x):
-        xx = x - self.center
+        xx = self.factor @ (x - self.center)
         a, b = xx[0], xx[1]
         # Going clockwise through cases
         if a > b and a > -b:
@@ -146,3 +147,87 @@ class ParallelObs(Obstacle):
             return np.array((0, 1))
         else:
             return np.array((0, -1))
+
+
+class MeridianObs(Obstacle):
+
+    def __init__(self, lon, right):
+        """
+        :param lon: Longitude in radians
+        :param right: True if accessible domain is the half sphere in Earth's rotation direction from given longitude,
+        False if it is the contrary (i.e. lon = 0, right = True then Paris is accessible but New York is not)
+        """
+        self.lon = lon
+        self.right = right
+        self.z = np.cos(lon) + 1j * np.sin(lon)
+        super().__init__(self.value, np.zeros(2), self.d_value)
+
+    def value(self, x):
+        zx = np.cos(x[0]) + 1j * np.sin(x[0])
+        # Cross product
+        cp = (self.z.conjugate() * zx).imag
+        return cp if self.right else -cp
+
+    def d_value(self, x):
+        zx = np.cos(x[0]) + 1j * np.sin(x[0])
+        # Dot product
+        dp = (self.z * zx.conjugate()).real
+        return np.array((dp, 0)) if self.right else -np.array((dp, 0))
+
+
+class MaxiObs(Obstacle):
+
+    def __init__(self, l_obs):
+        """
+        Obstacle defined as intersection of obstacles
+        :param l_obs: list of Obstacles
+        """
+        self.l_obs = l_obs
+        ref_point = 1 / len(self.l_obs) * sum([obs.ref_point for obs in self.l_obs])
+        super().__init__(self.value, ref_point, d_value_func=self.d_value)
+
+    def value(self, x):
+        return max([obs.value(x) for obs in self.l_obs])
+
+    def d_value(self, x):
+        i_max = max(range(len(self.l_obs)), key=lambda i: self.l_obs[i].value(x))
+        return self.l_obs[i_max].d_value(x)
+
+
+class LSEMaxiObs(Obstacle):
+
+    def __init__(self, l_obs):
+        """
+        Obstacle defined as Log Sum Exp of obstacles
+        :param l_obs: list of Obstacles
+        """
+        self.l_obs = l_obs
+        ref_point = 1 / len(self.l_obs) * sum([obs.ref_point for obs in self.l_obs])
+        self.factor = 1e5
+        super().__init__(self.value, ref_point, d_value_func=self.d_value)
+
+    def value(self, x):
+        return self.factor * np.log(sum([np.exp(obs.value(x) / self.factor) for obs in self.l_obs]))
+
+    def d_value(self, x):
+        s = sum([np.exp(obs.value(x) / self.factor) for obs in self.l_obs])
+        weights = [np.exp(obs.value(x) / self.factor) / s for obs in self.l_obs]
+        return self.factor * sum([obs.d_value(x) * weights[i] for i, obs in enumerate(self.l_obs)])
+
+
+class MeanObs(Obstacle):
+
+    def __init__(self, l_obs):
+        """
+        Obstacle defined as mean of obstacles
+        :param l_obs: list of Obstacles
+        """
+        self.l_obs = l_obs
+        ref_point = 1 / len(self.l_obs) * sum([obs.ref_point for obs in self.l_obs])
+        super().__init__(self.value, ref_point, d_value_func=self.d_value)
+
+    def value(self, x):
+        return 1 / len(self.l_obs) * sum([obs.value(x) for obs in self.l_obs])
+
+    def d_value(self, x):
+        return 1 / len(self.l_obs) * sum([obs.d_value(x) for obs in self.l_obs])

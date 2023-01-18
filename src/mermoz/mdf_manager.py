@@ -8,6 +8,7 @@ import h5py
 
 from mermoz.misc import *
 from mermoz.params_summary import ParamsSummary
+from mermoz.problem import MermozProblem
 from mermoz.wind import Wind, DiscreteWind
 
 
@@ -21,6 +22,7 @@ class MDFmanager:
         self.case_dir = None
         self.trajs_filename = 'trajectories.h5'
         self.wind_filename = 'wind.h5'
+        self.obs_filename = 'obs.h5'
         self.case_name = None
         self.ps = ParamsSummary()
 
@@ -96,6 +98,31 @@ class MDFmanager:
                 if hasattr(traj, 'energy'):
                     dset = trajgroup.create_dataset('energy', n - 1, dtype='f8', fillvalue=0.)
                     dset[:] = traj.energy[:n - 1]
+
+    def dump_obs(self, pb: MermozProblem, nx=100, ny=100):
+        filepath = os.path.join(self.case_dir, self.obs_filename)
+        with h5py.File(os.path.join(filepath), 'w') as f:
+            f.attrs['coords'] = pb.coords
+            delta_x = (pb.tr[0] - pb.bl[0]) / (nx - 1)
+            delta_y = (pb.tr[1] - pb.bl[1]) / (ny - 1)
+            dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
+            X, Y = np.meshgrid(pb.bl[0] + delta_x * np.arange(nx),
+                               pb.bl[1] + delta_y * np.arange(ny), indexing='ij')
+            dset[:, :, 0] = X
+            dset[:, :, 1] = Y
+
+            obs_val = np.infty * np.ones((nx, ny))
+            obs_id = -1 * np.ones((nx, ny))
+            for k, obs in enumerate(pb.obstacles):
+                for i in range(nx):
+                    for j in range(ny):
+                        point = np.array((pb.bl[0] + delta_x * i, pb.bl[1] + delta_y * j))
+                        val = obs.value(point)
+                        if val < 0. and val < obs_val[i, j]:
+                            obs_val[i, j] = val
+                            obs_id[i, j] = k
+            dset = f.create_dataset('data', (nx, ny), dtype='f8')
+            dset[:, :] = obs_id
 
     def _grib_date_to_unix(self, grib_filename):
         date, hm = grib_filename.split('_')[2:4]

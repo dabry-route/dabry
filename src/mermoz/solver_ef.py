@@ -10,13 +10,27 @@ from mermoz.misc import *
 from mermoz.problem import MermozProblem
 from mermoz.trajectory import AugmentedTraj
 
+"""
+solver_ef.py
+Solver for time-optimal or energy-optimal path planning problems
+in a flow field using an extremal-based method (shooting method
+over Pontryagin's Maximum Principle)
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
 
-def heappush(a, b):
-    a.append(b[1])
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
 
-def heappop(a):
-    return 0, a.pop()
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class FrontPoint:
@@ -30,6 +44,32 @@ class FrontPoint:
         self.tsa = (tsa[0], tsa[1], np.zeros(2), np.zeros(2), tsa[4])
         self.tsa[2][:] = tsa[2]
         self.tsa[3][:] = tsa[3]
+        self.i_obs = i_obs
+        self.ccw = ccw
+        self.rot = rot
+
+
+class FrontPoint2:
+
+    def __init__(self, idf, idt, timestamp, state, adjoint, cost, i_obs=-1, ccw=True, rot=0.):
+        """
+        Langrangian particle evolving through dynamics of extremals
+        :param idf: Unique identifier of the trajectory to which the point belongs
+        :param idt: Unique identifier of current time step
+        :param timestamp: Point's timestamp
+        :param state: State vector
+        :param adjoint: Adjoint state vector
+        :param cost: Cost of trajectory up to current point
+        :param i_obs: If within an obstacle, the obstacle id (-1 if no obstacle)
+        :param ccw: True if going counter clock wise wrt obstacle, False else
+        :param rot: A real number capturing number of rotations around obstacle
+        """
+        self.idf = idf
+        self.idt = idt
+        self.t = timestamp
+        self.state = np.array(state)
+        self.adjoint = np.array(adjoint)
+        self.cost = cost
         self.i_obs = i_obs
         self.ccw = ccw
         self.rot = rot
@@ -316,9 +356,21 @@ class SolverEF:
     MODE_TIME = 0
     MODE_ENERGY = 1
 
-    def __init__(self, mp: MermozProblem, max_time, mode=0, N_disc_init=20, rel_nb_ceil=0.05, dt=None,
-                 max_steps=None, hard_obstacles=True, collbuf_shape=None, cost_ceil=None, asp_offset=0., asp_init=None,
-                 no_coll_filtering=False, pareto=None):
+    def __init__(self,
+                 mp: MermozProblem,
+                 max_time,
+                 mode=0,
+                 N_disc_init=20,
+                 rel_nb_ceil=0.05,
+                 dt=None,
+                 max_steps=None,
+                 hard_obstacles=True,
+                 collbuf_shape=None,
+                 cost_ceil=None,
+                 asp_offset=0.,
+                 asp_init=None,
+                 no_coll_filtering=False,
+                 pareto=None):
         self.mp_primal = mp
         self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
@@ -450,7 +502,8 @@ class SolverEF:
         self.n_points = 0
         self.any_out_obs = True
         t_start = self.mp_primal.model.wind.t_start + time_offset
-        self.collbuf = CollisionBuffer(*self.collbuf_shape, self.mp.bl, self.mp.tr)
+        if not self.no_coll_filtering:
+            self.collbuf = CollisionBuffer(*self.collbuf_shape, self.mp.bl, self.mp.tr)
         for k in range(self.N_disc_init):
             theta = 2 * np.pi * k / self.N_disc_init
             pd = np.array((np.cos(theta), np.sin(theta)))
@@ -668,7 +721,8 @@ class SolverEF:
             self.child_order[i] = k
             t = pl[0]
             tsa = (t, points[k], adjoints[k], costs[k])
-            self.collbuf.add(points[k], i, it)
+            if not self.no_coll_filtering:
+                self.collbuf.add(points[k], i, it)
             # if self.mp.in_obs(points[k]):
             #     continue
             self.trajs[i] = {}
@@ -750,6 +804,7 @@ class SolverEF:
                 r = norm_w / v_a * sin(arg_w - arg_ot)
                 if np.abs(r) >= 1.:
                     # Impossible to follow obstacle
+                    # print('Impossible !')
                     status = False
                 else:
                     def gs_f(uu, va, w, reference):
@@ -759,7 +814,7 @@ class SolverEF:
                     # Select heading that maximizes ground speed along obstacle
                     u = max([arg_ot - asin(r), arg_ot + asin(r) - pi], key=lambda uu: gs_f(uu, v_a, w, obs_tgt))
                     if self.mp.coords == COORD_GCS:
-                        u = np.pi/2. - u
+                        u = np.pi / 2. - u
                     dyn_x = self.mp.model.dyn.value(x, u, t)
                     x_prev = np.zeros(x.shape)
                     x_prev[:] = x
@@ -781,14 +836,20 @@ class SolverEF:
         status = status and self.mp.domain(x)
         i_obs_new = i_obs
         if status:
-            i_obs_new = self.mp.in_obs(x)
+            obstacles = self.mp.in_obs(x)
+            if i_obs in obstacles:
+                obstacles.remove(i_obs)
+            if len(obstacles) > 0:
+                i_obs_new = obstacles.pop()
+            else:
+                i_obs_new = -1
             if i_obs_new != i_obs:
                 if i_obs_new == -1:
                     # Keep moving in obstacle, no points leaving
                     i_obs_new = i_obs
                 else:
                     if self.mp.coords == COORD_GCS:
-                        u = np.pi/2 - u
+                        u = np.pi / 2 - u
                     s = np.array((np.cos(u), np.sin(u)))
                     obs_grad = self.mp.obstacles[i_obs_new].d_value(x)
                     obs_tgt = np.array(((0, -1), (1, 0))) @ obs_grad
@@ -803,7 +864,7 @@ class SolverEF:
         while len(self.active) != 0 \
                 and i < self.max_steps \
                 and len(self.trajs) < self.max_extremals \
-                and ((not self.quick_solve) or self.quick_traj_idx == -1)\
+                and ((not self.quick_solve) or self.quick_traj_idx == -1) \
                 and self.any_out_obs:
             i += 1
             if self.debug:
@@ -854,13 +915,22 @@ class SolverEF:
 
         self.quick_solve = quick_solve
 
+        hello = f'{self.mp_primal.descr}'
+        hello += f' | {"TIMEOPT" if self.mode == SolverEF.MODE_TIME else "ENEROPT"}'
+        if self.mode == SolverEF.MODE_TIME:
+            hello += f' | {self.mp_primal.model.v_a:.2f} m/s'
+        hello += f' | {self.mp_primal.geod_l:.2e} m'
+        nowind_time = self.mp_primal.geod_l/self.mp_primal.model.v_a
+        hello += f' | scale {time_fmt(nowind_time)}'
+        ortho_time = self.mp_primal.orthodromic()
+        hello += f' | orthodromic {time_fmt(ortho_time) if ortho_time >= 0 else "DNR"}'
+        print(hello)
+
         if not backward:
             # Only compute forward front
             self.set_primal(True)
             self.propagate()
             res = self.build_opti_traj()
-            return res
-
         else:
             # First propagate forward extremals
             # Then compute backward extremals initialized at correct time
@@ -870,7 +940,16 @@ class SolverEF:
             self.set_primal(False)
             self.propagate(time_offset=self.reach_time)
             res = self.build_opti_traj()
-            return res
+
+        if res.status:
+            goodbye = f'Target reached in {time_fmt(res.duration)}'
+            goodbye += f' | {int(100*(res.duration/nowind_time - 1)):+d}% no wind'
+            if ortho_time >= 0:
+                goodbye += f' | {int(100 * (res.duration / ortho_time - 1)):+d}% orthodromic'
+        else:
+            goodbye = f'No solution found in time < {time_fmt(self.max_steps * abs(self.dt))}'
+        print(goodbye)
+        return res
 
     def control(self, t, x):
         m = None
@@ -952,7 +1031,7 @@ class SolverEF:
         rel_idx_list = []
         status = 1 if self.quick_solve else 2
         if len(bests) == 0:
-            print('Warning: Target not reached', file=sys.stderr)
+            #print('Warning: Target not reached', file=sys.stderr)
             traj_idx_list.append(traj_idx_closest)
             time_idx_list.append(time_idx_closest)
             rel_idx_list.append(rel_idx_closest)
