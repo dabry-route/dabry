@@ -351,7 +351,7 @@ def ccw(a, b, c):
     return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
 
 
-def collision(a, b, c, d):
+def has_intersec(a, b, c, d):
     return ccw(a, c, d) != ccw(b, c, d) and ccw(a, b, c) != ccw(a, b, d)
 
 

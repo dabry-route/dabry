@@ -5,6 +5,7 @@ from math import asin
 import numpy as np
 from shapely.geometry import Polygon
 import csv
+import scipy.integrate
 
 from mermoz.misc import *
 from mermoz.problem import MermozProblem
@@ -49,7 +50,7 @@ class FrontPoint:
         self.rot = rot
 
 
-class FrontPoint2:
+class Particle:
 
     def __init__(self, idf, idt, timestamp, state, adjoint, cost, i_obs=-1, ccw=True, rot=0.):
         """
@@ -73,6 +74,39 @@ class FrontPoint2:
         self.i_obs = i_obs
         self.ccw = ccw
         self.rot = rot
+
+
+class PartialTraj:
+
+    def __init__(self, id_start, particles):
+        self.id_traj = particles[0].idf
+        if len(particles) > 0:
+            # Check consistency
+            assert (particles[0].idt == id_start)
+            for i in range(len(particles) - 1):
+                assert (particles[i + 1].idt - particles[i].idt == 1)
+                assert (particles[i + 1].idf == self.id_traj)
+        self.id_start = id_start
+        self.particles = particles
+
+    def append(self, p: Particle):
+        # assert (p.idt - self.points[-1].idt == 1)
+        assert (p.idf == self.id_traj)
+        self.particles.append(p)
+
+    def to_traj(self, coords):
+        n = len(self.particles)
+        ts = np.zeros(n)
+        states = np.zeros((n, 2))
+        adjoints = np.zeros((n, 2))
+        for i, pcl in enumerate(self.particles):
+            ts[i] = pcl.t
+            states[i, :] = pcl.state
+            adjoints[i, :] = pcl.adjoint
+        return AugmentedTraj(ts, states, adjoints, np.zeros(n), n - 1, coords)
+
+    def __getitem__(self, item):
+        return self.particles[item - self.id_start]
 
 
 class Pareto:
@@ -177,35 +211,31 @@ class Pareto:
 
 class EFOptRes:
 
-    def __init__(self, status, bests):
+    def __init__(self, status, bests, trajs, mp):
         """
         :param status: If problem was solved to optimality
             0: not solved, information is relative to closest trajectory
             1: solved in fast mode
             2: global optimum
-        :param bests: Dictionary with keys being trajectory indexes and values containing at least the fields
-            'cost': cost to reach target
-            'duration': duration to reach target
-            'traj': the associated trajectory
-            'adjoint': the initial adjoint state that led the trajectory
+        :param bests: Dictionary with keys being trajectory indexes and values being Particles reaching target
+        with optimal cost
+        :param trajs: Dictionary with keys being trajectory indexes and values being optimal trajectories to
+        which optimal particles belong
+        :param mp: MermozProblem
         """
         self.status = status
         self.bests = bests
-        self.min_cost_idx = None
-        min_cost = None
-        for k, v in bests.items():
-            cost = v['cost']
-            if min_cost is None or cost < min_cost:
-                self.min_cost_idx = k
-                min_cost = cost
+        self.trajs = trajs
+        self.mp = mp
+        self.min_cost_idx = sorted(bests, key=lambda k: bests[k].cost)[0]
 
     @property
     def cost(self):
-        return self.bests[self.min_cost_idx]['cost']
+        return self.bests[self.min_cost_idx].cost
 
     @property
     def duration(self):
-        return self.bests[self.min_cost_idx]['duration']
+        return self.bests[self.min_cost_idx].t - self.mp.model.wind.t_start
 
     @property
     def index(self):
@@ -214,12 +244,12 @@ class EFOptRes:
     @property
     def adjoint(self):
         res = np.zeros(2)
-        res[:] = self.bests[self.min_cost_idx]['adjoint']
+        res[:] = self.bests[self.min_cost_idx].adjoint
         return res
 
     @property
     def traj(self):
-        return self.bests[self.min_cost_idx]['traj']
+        return self.trajs[self.min_cost_idx]
 
 
 class Relations:
@@ -233,6 +263,7 @@ class Relations:
         for k, m in enumerate(members):
             self.rel[m] = (members[(k - 1) % len(members)], members[(k + 1) % len(members)])
         self.active = [m for m in members]
+        self.deact_reason = {}
 
     def linked(self, i1, i2):
         if i2 in self.rel[i1]:
@@ -267,9 +298,10 @@ class Relations:
     def get_index(self):
         return list(self.rel.keys())[0]
 
-    def deactivate(self, i):
+    def deactivate(self, i, reason=''):
         if i in self.active:
             self.active.remove(i)
+            self.deact_reason[i] = reason
 
     def is_active(self, i):
         return i in self.active
@@ -280,7 +312,12 @@ class CollisionBuffer:
     Discretize space and keep trace of trajectories to compute collisions efficiently
     """
 
-    def __init__(self, nx, ny, bl, tr):
+    def __init__(self):
+        self._collbuf = [[]]
+        self.bl = np.zeros(2)
+        self.tr = np.zeros(2)
+
+    def init(self, nx, ny, bl, tr):
         self._collbuf = [[{} for _ in range(ny)] for _ in range(nx)]
         self.bl = np.zeros(2)
         self.bl[:] = bl
@@ -311,6 +348,9 @@ class CollisionBuffer:
             elif idt > imax:
                 imax = idt
             d[id] = (imin, imax)
+
+    def add_particle(self, p: Particle):
+        self.add(p.state, p.idf, p.idt)
 
     def get_inter(self, *pos):
         """
@@ -364,7 +404,6 @@ class SolverEF:
                  rel_nb_ceil=0.05,
                  dt=None,
                  max_steps=None,
-                 hard_obstacles=True,
                  collbuf_shape=None,
                  cost_ceil=None,
                  asp_offset=0.,
@@ -391,18 +430,14 @@ class SolverEF:
                 self.dt = -.005 * mp.l_ref / mp.aero.v_minp
 
         # This group shall be reinitialized before new resolution
-        # Contains augmented state points (id, time, state, adjoint) used to expand extremal field
-        self.active = {}
-        self.new_points = {}
+        self.active = []
+        self.new_points = []
         self.p_inits = {}
         self.lsets = []
         self.rel = None
         self.n_points = 0
         self.parents_primal = {}
         self.parents_dual = {}
-        self.child_order_primal = {}
-        self.child_order_dual = {}
-        self.child_order = None
 
         self.trajs_primal = {}
         self.trajs_dual = {}
@@ -421,7 +456,7 @@ class SolverEF:
         self.it = 0
 
         self.collbuf_shape = (50, 50) if collbuf_shape is None else collbuf_shape
-        self.collbuf = None
+        self.collbuf = CollisionBuffer()
 
         self.reach_time = None
         self.reach_cost = None
@@ -432,7 +467,6 @@ class SolverEF:
         self.max_steps = max_steps if max_steps is not None else int(max_time / abs(dt))
 
         self.N_filling_steps = 1
-        self.hard_obstacles = hard_obstacles
 
         # Base collision filtering scheme only for steady problems
         self.no_coll_filtering = no_coll_filtering or self.mp.model.wind.t_end is not None
@@ -441,6 +475,8 @@ class SolverEF:
         self.best_distances = [self.mp.geod_l]
 
         self.any_out_obs = False
+
+        self.manual_integration = True
 
         self.pareto = pareto
 
@@ -478,13 +514,11 @@ class SolverEF:
         if b:
             self.mp = self.mp_primal
             self.trajs = self.trajs_primal
-            self.child_order = self.child_order_primal
             if self.dt < 0:
                 self.dt *= -1
         else:
             self.mp = self.mp_dual
             self.trajs = self.trajs_dual
-            self.child_order = self.child_order_dual
             if self.dt > 0:
                 self.dt *= -1
 
@@ -493,8 +527,8 @@ class SolverEF:
         Push all possible angles to active list from init point
         :return: None
         """
-        self.active = {}
-        self.new_points = {}
+        self.active = []
+        self.new_points = []
         self.p_inits = {}
         self.lsets = []
         self.rel = None
@@ -503,7 +537,7 @@ class SolverEF:
         self.any_out_obs = True
         t_start = self.mp_primal.model.wind.t_start + time_offset
         if not self.no_coll_filtering:
-            self.collbuf = CollisionBuffer(*self.collbuf_shape, self.mp.bl, self.mp.tr)
+            self.collbuf.init(*self.collbuf_shape, self.mp.bl, self.mp.tr)
         for k in range(self.N_disc_init):
             theta = 2 * np.pi * k / self.N_disc_init
             pd = np.array((np.cos(theta), np.sin(theta)))
@@ -519,12 +553,19 @@ class SolverEF:
             i = self.new_traj_index()
             self.p_inits[i] = np.zeros(2)
             self.p_inits[i][:] = p
-            self.collbuf.add(self.mp.x_init, i, 0)
-            a = FrontPoint(i, (0, t_start, self.mp.x_init, p, 0.))
-            self.active[i] = a
-            self.trajs[k] = {}
-            self.trajs[k][a.tsa[0]] = a.tsa[1:]
+            pcl = Particle(i, 0, t_start, self.mp.x_init, p, 0.)
+            if not self.no_coll_filtering:
+                self.collbuf.add_particle(pcl)
+            self.active.append(pcl)
+            self.save(pcl)
         self.rel = Relations(list(np.arange(self.N_disc_init)))
+
+    def save(self, p: Particle):
+        id_traj = p.idf
+        if id_traj not in self.trajs.keys():
+            self.trajs[id_traj] = PartialTraj(p.idt, [p])
+        else:
+            self.trajs[id_traj].append(p)
 
     def build_cfront(self):
         # Build current front
@@ -538,315 +579,230 @@ class SolverEF:
 
     def step_global(self):
 
-        # Step the entire active list, look for domain violation
         self.any_out_obs = False
         active_list = []
         obstacle_list = []
         front_list = []
         self.best_distances = [self.mp.geod_l]
-        for i_a, a in self.active.items():
-            active_list.append(a.i)
-            it = a.tsa[0]
-            t, x, p, status, i_obs, ccw, rot = self.step_single(a.tsa[1:], a.i_obs, a.ccw, a.rot)
-            if i_obs == -1:
+
+        # Evolve active particles
+        for pcl in self.active:
+            idf = pcl.idf
+            active_list.append(pcl.idf)
+
+            pcl_new, status = self.step_single(pcl)
+
+            if pcl_new.i_obs == -1:
                 self.any_out_obs = True
-            dist = self.mp.distance(x, self.mp.x_target)
+            dist = self.mp.distance(pcl_new.state, self.mp.x_target)
             self.best_distances.append(dist)
             if self.quick_solve and dist < self.abs_nb_ceil:
-                self.quick_traj_idx = i_a
-            self.n_points += 1
-            # Cost computation
-            dt = t - a.tsa[1]
-            if self.mode == self.MODE_TIME:
-                power = self.mp.aero.power(self.mp.model.v_a)
+                self.quick_traj_idx = idf
+            if not status and self.rel.is_active(idf):
+                self.rel.deactivate(idf, 'domain')
+                obstacle_list.append(idf)
+            elif abs(pcl_new.rot) > 2 * np.pi:
+                self.rel.deactivate(idf, 'roundabout')
+            elif self.cost_ceil is not None and pcl_new.cost > self.cost_ceil:
+                self.rel.deactivate(idf, 'cost')
+            elif self.pareto is not None and \
+                    self.pareto.dominated((pcl_new.t - self.mp_primal.model.wind.t_start, pcl_new.cost)):
+                self.rel.deactivate(idf, 'pareto')
             else:
-                power = self.mp.aero.power(self.mp.aero.asp_opti(p))
-            c = power * dt + a.tsa[4]
-            tsa = (t, np.zeros(2), np.zeros(2), c)
-            tsa[1][:] = x
-            tsa[2][:] = p
-            self.trajs[a.i][it + 1] = tsa
-            if not status and self.rel.is_active(a.i):
-                self.rel.deactivate(a.i)
-                obstacle_list.append(a.i)
-            elif abs(rot) > 2 * np.pi:
-                self.rel.deactivate(a.i)
-            elif self.cost_ceil is not None and c > self.cost_ceil:
-                self.rel.deactivate(a.i)
-            elif self.pareto is not None and self.pareto.dominated((t - self.mp_primal.model.wind.t_start, c)):
-                self.rel.deactivate(a.i)
-            else:
-                if it == 0 or True:  # or not polyfront.contains(Point(*x)):
-                    na = FrontPoint(a.i, (it + 1,) + self.trajs[a.i][it + 1], i_obs, ccw, rot)
-                    self.new_points[a.i] = na
-                else:
-                    self.rel.remove(a.i)
-                    front_list.append(a.i)
+                self.new_points.append(pcl_new)
+                self.save(pcl_new)
+                self.n_points += 1
+
         if self.debug:
             print(f'     Active : {tuple(active_list)}')
             print(f'   Obstacle : {tuple(obstacle_list)}')
             print(f'      Front : {tuple(front_list)}')
 
+        # Collision filtering if needed
         if not self.no_coll_filtering:
-            for i_na, na in self.new_points.items():
-                # Deactivate new active points which fall inside front
-                if self.active[i_na].i_obs >= 0:
-                    # Skip active points inside obstacles
-                    continue
-                it = self.active[i_na].tsa[0]
-                x_it = self.active[i_na].tsa[2]
-                x_itp1 = na.tsa[2]
-                interactions = self.collbuf.get_inter(x_it, x_itp1)
-                stop = False
-                for k, l in interactions.items():
-                    if k == i_na:
-                        continue
-                    for itt in range(l[0] - 1, l[1] + 1):
-                        if stop:
-                            break
-                        try:
-                            points = x_it, x_itp1, self.trajs[k][itt][1], self.trajs[k][itt + 1][1]
-                            if collision(*points):
-                                _, alpha1, alpha2 = intersection(*points)
-                                cost1 = (1 - alpha1) * self.active[i_na].tsa[4] + alpha1 * na.tsa[4]
-                                cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[k][itt + 1][3]
-                                if cost2 < cost1:
-                                    self.rel.deactivate(i_na)
-                                    stop = True
-                        except KeyError:
-                            pass
-                    if stop:
-                        break
-                    p1, p2 = self.get_parents(k)
-                    for p in (p1, p2):
-                        if p in interactions.keys():
-                            l1 = interactions[k]
-                            l2 = interactions[p]
-                            l3 = (max(l1[0], l2[0]), min(l1[1], l2[1]))
-                            for itt in range(l3[0] - 1, l3[1] + 1):
-                                try:
-                                    if itt + 1 < it:
-                                        points = x_it, x_itp1, self.trajs[k][itt][1], self.trajs[p][itt][1]
-                                        if collision(*points):
-                                            _, alpha1, alpha2 = intersection(*points)
-                                            cost1 = (1 - alpha1) * self.active[i_na].tsa[4] + alpha1 * na.tsa[4]
-                                            cost2 = (1 - alpha2) * self.trajs[k][itt][3] + alpha2 * self.trajs[p][itt][
-                                                3]
-                                            if cost2 < cost1:
-                                                self.rel.deactivate(i_na)
-                                                stop = True
-                                except KeyError:
-                                    pass
-                    if stop:
-                        break
+            self.collision_filter()
 
-            for i_na, na in self.new_points.items():
-                if self.active[i_na].i_obs >= 0:
-                    # Points in obstacles do not contribute to collision buffer
-                    continue
-                self.collbuf.add(na.tsa[2], i_na, na.tsa[0])
+        for pcl in self.new_points:
+            if pcl.i_obs >= 0:
+                # Points in obstacles do not contribute to collision buffer
+                continue
+            self.collbuf.add_particle(pcl)
 
-        # Fill in holes when extremals get too far from one another
+        # Resampling of the front
+        for pcl in self.new_points:
+            idf = pcl.idf
+            _, iu = self.rel.get(idf)
+            # Resample only between two active trajectories
+            if not (self.rel.is_active(idf) and self.rel.is_active(iu)):
+                continue
 
-        for i_na in list(self.new_points.keys()):
-            na = self.new_points[i_na]
-            _, iu = self.rel.get(na.i)
-            if self.rel.is_active(i_na) and self.rel.is_active(iu):
-                # Case 1, both points are active and at least one lies out of an obstacle
-                if self.mp.distance(na.tsa[2], self.new_points[iu].tsa[2]) > self.abs_nb_ceil \
-                        and (na.i_obs < 0 or self.new_points[iu].i_obs < 0):
-                    if self.debug:
-                        print(f'Stepping between {na.i}, {iu}')
-                    p1i, p2i = self.get_parents(na.i)
-                    p1u, p2u = self.get_parents(iu)
-                    same_parents = (p1i == p1u and p2i == p2u) or (p1i == p2u and p2i == p1u)
-                    no_parents = same_parents and p1i is None
-                    between_cond = na.i in (p1u, p2u) or iu in (p1i, p2i) or (same_parents and no_parents) or \
-                                   (same_parents and abs(self.child_order[na.i] - self.child_order[iu]) == 1)
-                    if between_cond:
-                        self.step_between(na.i, iu)
-            else:
-                pass
-                """
-                # Case 2, one point was inactivated. It lies on the boundary whereas its neighbour is moving.
-                # Try to fill in the gap up to the moving nb's timestep
-                last_it = list(self.trajs[iu].keys())[-1]
-                if np.linalg.norm(na.tsa[2] - self.trajs[iu][last_it][2]) > self.abs_nb_ceil:
-                    self.step_between(na.i, iu, self.it - last_it)
-                """
+            pcl_other = self.trajs[iu][pcl.idt]
+            # Resample when precision is lost
+            if self.mp.distance(pcl.state, pcl_other.state) <= self.abs_nb_ceil:
+                continue
+            # Resample when at least one point lies outside of an obstacle
+            if pcl.i_obs >= 0 and pcl_other.i_obs >= 0:
+                continue
+
+            if self.debug:
+                print(f'Stepping between {idf}, {iu}')
+            p1i, p2i = self.get_parents(idf)
+            p1u, p2u = self.get_parents(iu)
+            same_parents = (p1i == p1u and p2i == p2u) or (p1i == p2u and p2i == p1u)
+            no_parents = same_parents and p1i is None
+            between_cond = idf in (p1u, p2u) or iu in (p1i, p2i) or (same_parents and no_parents) or same_parents
+            if not between_cond:
+                continue
+
+            # Resampling needed
+            self.create_between(idf, iu, pcl.idt)
 
         self.active.clear()
-        for i_na, na in self.new_points.items():
-            if self.rel.is_active(i_na):
-                self.active[i_na] = na
+        for pcl in self.new_points:
+            if self.rel.is_active(pcl.idf):
+                self.active.append(pcl)
         self.new_points.clear()
         self.it += 1
 
-    def step_between(self, ill, iuu, bckw_it=0):
-        it = self.it - bckw_it
-        # Get samples for the adjoints as linear interpolation of angles and modulus
-        pl = self.trajs[ill][it]
-        pu = self.trajs[iuu][it]
+    def create_between(self, i1, i2, idt):
+        """
+        Creates new trajectory between given ones at given time index
+        :param i1: First traj. index
+        :param i2: Second traj. index
+        :param idt: Time index
+        :return: a new Particle
+        """
+        pcl1 = self.trajs[i1][idt]
+        pcl2 = self.trajs[i2][idt]
 
-        thetal = np.arctan2(*pl[2][::-1])
-        thetau = np.arctan2(*pu[2][::-1])
+        thetal = np.arctan2(*pcl1.adjoint[::-1])
+        thetau = np.arctan2(*pcl2.adjoint[::-1])
         # thetal, thetau = DEG_TO_RAD * np.array(rectify(RAD_TO_DEG * thetal, RAD_TO_DEG * thetau))
-        rhol = np.linalg.norm(pl[2])
-        rhou = np.linalg.norm(pu[2])
-        angles = linspace_sph(thetal, thetau, self.N_filling_steps + 2)[1:-1]
+        rhol = np.linalg.norm(pcl1.adjoint)
+        rhou = np.linalg.norm(pcl2.adjoint)
+        angles = linspace_sph(thetal, thetau, 3)
         f = 1.
         if angles.shape[0] > 1:
             if angles[1] < angles[0]:
                 f = -1.
-        hdgs = np.array(list(map(lambda theta: np.array((np.cos(theta), np.sin(theta))), angles)))
-        rhos = f * np.linspace(rhol, rhou, self.N_filling_steps + 2)[1:-1]
-        adjoints = np.einsum('i,ij->ij', rhos, hdgs)
-        # TODO : write this scheme
-        # Get samples for states as circle passing through borders
-        # and orthogonal to lower normal
+        theta = angles[1]
+        hdg = np.array((np.cos(theta), np.sin(theta)))
+        rho = f * 0.5 * (rhol + rhou)
+        adjoint = rho * hdg
 
-        # Get samples from linear interpolation for the states
-        alpha = np.linspace(0., 1., self.N_filling_steps + 2)[1:-1]
-        points = np.zeros((self.N_filling_steps, 2))
-        points[:] = np.einsum('i,j->ij', 1 - alpha, pl[1]) \
-                    + np.einsum('i,j->ij', alpha, pu[1])
-        costs = (1 - alpha) * pl[3] + alpha * pu[3]
-        new_p_inits = np.einsum('i,j->ij', 1 - alpha, self.p_inits[ill]) \
-                      + np.einsum('i,j->ij', alpha, self.p_inits[iuu])
-        new_indexes = [self.new_traj_index(ill, iuu) for _ in range(self.N_filling_steps)]
-        for k in range(self.N_filling_steps):
-            if not self.mp.domain(points[k]):
-                continue
-            i = new_indexes[k]
-            self.child_order[i] = k
-            t = pl[0]
-            tsa = (t, points[k], adjoints[k], costs[k])
-            if not self.no_coll_filtering:
-                self.collbuf.add(points[k], i, it)
-            # if self.mp.in_obs(points[k]):
-            #     continue
-            self.trajs[i] = {}
-            self.trajs[i][it] = tsa
-            self.p_inits[i] = np.zeros(2)
-            self.p_inits[i][:] = new_p_inits[k]
-            iit = it
-            status = True
-            i_obs = -1
-            ccw = True
-            while iit <= self.it:
-                iit += 1
-                t, x, p, status, i_obs, ccw, rot = self.step_single(self.trajs[i][iit - 1], i_obs, ccw)
-                dist = self.mp.distance(x, self.mp.x_target)
-                self.best_distances.append(dist)
-                if self.quick_solve and dist < self.abs_nb_ceil:
-                    self.quick_traj_idx = i
-                if not self.no_coll_filtering:
-                    self.collbuf.add(x, i, iit)
-                if not status:
-                    iit -= 1
-                    break
-                self.n_points += 1
-                dt = t - self.trajs[i][iit - 1][0]
-                if self.mode == self.MODE_TIME:
-                    power = self.mp.aero.power(self.mp.model.v_a)
-                else:
-                    power = self.mp.aero.power(self.mp.aero.asp_opti(p))
-                c = power * dt + self.trajs[i][iit - 1][3]
-                tsa = (t, np.zeros(2), np.zeros(2), c)
-                tsa[1][:] = x
-                tsa[2][:] = p
-                self.trajs[i][iit] = tsa
+        state = 0.5 * (pcl1.state + pcl2.state)
+        cost = 0.5 * (pcl1.cost + pcl2.cost)
+        new_p_init = 0.5 * (self.p_inits[i1] + self.p_inits[i2])
+        i_new = self.new_traj_index(i1, i2)
+        self.p_inits[i_new] = np.zeros(2)
+        self.p_inits[i_new][:] = new_p_init
 
-            na = FrontPoint(i, (iit,) + self.trajs[i][iit])
-            self.rel.add(i, ill if k == 0 else new_indexes[k - 1], iuu)
-            if not status:
-                self.rel.deactivate(i)
-            self.new_points[i] = na
+        pcl_new = Particle(i_new, idt, pcl1.t, state, adjoint, cost)
+        self.new_points.append(pcl_new)
+        if not self.no_coll_filtering:
+            self.collbuf.add_particle(pcl_new)
+        self.rel.add(i_new, i1, i2)
+        self.save(pcl_new)
 
-    def step_single(self, ap, i_obs=-1, ccw=True, rot=0.):
-        obs_fllw_strategy = True
+    def step_single(self, pcl: Particle):
         x = np.zeros(2)
         x_prev = np.zeros(2)
         p = np.zeros(2)
-        x[:] = ap[1]
-        x_prev[:] = ap[1]
-        p[:] = ap[2]
-        t = ap[0]
+        x[:] = pcl.state
+        x_prev[:] = pcl.state
+        p[:] = pcl.adjoint
+        t = pcl.t
         u = None
-        if i_obs == -1 or not self.hard_obstacles:
-            # For the moment, simple Euler scheme
-            u = heading_opti(x, p, t, self.mp.coords)
-            kw = {}
-            if self.mode == self.MODE_ENERGY:
-                kw['v_a'] = self.mp.aero.asp_opti(p)
-            dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
-            A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
-            dyn_p = A.dot(p)
-            x += self.dt * dyn_x
-            p += self.dt * dyn_p
-            t += self.dt
-            a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
-            # For compatibility with other case
-            status = True
-        else:
-            if obs_fllw_strategy:
-                # Obstacle mode. Follow the obstacle boundary as fast as possible
-                obs_grad = self.mp.obstacles[i_obs].d_value(x)
-
-                obs_tgt = (-1. if not ccw else 1.) * np.array(((0, -1), (1, 0))) @ obs_grad
-
-                v_a = self.mp.model.v_a
-
-                arg_ot = atan2(*obs_tgt[::-1])
-                w = self.mp.model.wind.value(t, x)
-                arg_w = atan2(*w[::-1])
-                norm_w = np.linalg.norm(w)
-                r = norm_w / v_a * sin(arg_w - arg_ot)
-                if np.abs(r) >= 1.:
-                    # Impossible to follow obstacle
-                    # print('Impossible !')
-                    status = False
-                else:
-                    def gs_f(uu, va, w, reference):
-                        # Ground speed projected to reference
-                        return (np.array((cos(uu), sin(uu))) * va + w) @ reference
-
-                    # Select heading that maximizes ground speed along obstacle
-                    u = max([arg_ot - asin(r), arg_ot + asin(r) - pi], key=lambda uu: gs_f(uu, v_a, w, obs_tgt))
-                    if self.mp.coords == COORD_GCS:
-                        u = np.pi / 2. - u
-                    dyn_x = self.mp.model.dyn.value(x, u, t)
-                    x_prev = np.zeros(x.shape)
-                    x_prev[:] = x
-                    x += self.dt * dyn_x
-                    p[:] = - np.array((np.cos(u), np.sin(u)))
-                    t += self.dt
-                    arg_ref_x = atan2(*(x - self.mp.obstacles[i_obs].ref_point)[::-1])
-                    arg_ref_x_prev = atan2(*(x_prev - self.mp.obstacles[i_obs].ref_point)[::-1])
-                    d_arg = arg_ref_x - arg_ref_x_prev
-                    if d_arg >= 0.95 * 2 * np.pi:
-                        d_arg -= 2 * np.pi
-                    if d_arg <= -2 * np.pi * 0.95:
-                        d_arg += 2 * np.pi
-                    rot += d_arg
-                    status = True
+        ccw = pcl.ccw
+        rot = pcl.rot
+        if pcl.i_obs == -1:
+            if self.manual_integration:
+                # For the moment, simple Euler scheme
+                u = self.mp.control_angle(p, x)
+                kw = {}
+                if self.mode == self.MODE_ENERGY:
+                    kw['v_a'] = self.mp.aero.asp_opti(p)
+                dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
+                A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
+                dyn_p = A.dot(p)
+                x += self.dt * dyn_x
+                p += self.dt * dyn_p
+                t += self.dt
+                # Transversality condition for debug purposes
+                a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
+                # For compatibility with other case
+                status = True
             else:
-                pass
+                def f(t, z):
+                    x = z[:2]
+                    p = z[2:]
+                    u = self.mp.control_angle(p, x)
+                    dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
+                    A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
+                    dyn_p = A.dot(p)
+                    return np.hstack((dyn_x, dyn_p))
+
+                sol = scipy.integrate.solve_ivp(f, [pcl.t, pcl.t + self.dt], np.hstack((x, p)))
+                x = sol.y[:2, -1]
+                p = sol.y[2:, -1]
+                t += self.dt
+                status = True
+        else:
+            # Obstacle mode. Follow the obstacle boundary as fast as possible
+            obs_grad = self.mp.obstacles[pcl.i_obs].d_value(x)
+
+            obs_tgt = (-1. if not pcl.ccw else 1.) * np.array(((0, -1), (1, 0))) @ obs_grad
+
+            v_a = self.mp.model.v_a
+
+            arg_ot = atan2(*obs_tgt[::-1])
+            w = self.mp.model.wind.value(t, x)
+            arg_w = atan2(*w[::-1])
+            norm_w = np.linalg.norm(w)
+            r = norm_w / v_a * sin(arg_w - arg_ot)
+            if np.abs(r) >= 1.:
+                # Impossible to follow obstacle
+                # print('Impossible !')
+                status = False
+            else:
+                def gs_f(uu, va, w, reference):
+                    # Ground speed projected to reference
+                    return (np.array((cos(uu), sin(uu))) * va + w) @ reference
+
+                # Select heading that maximizes ground speed along obstacle
+                u = max([arg_ot - asin(r), arg_ot + asin(r) - pi], key=lambda uu: gs_f(uu, v_a, w, obs_tgt))
+                if self.mp.coords == COORD_GCS:
+                    u = np.pi / 2. - u
+                dyn_x = self.mp.model.dyn.value(x, u, t)
+                x_prev = np.zeros(x.shape)
+                x_prev[:] = x
+                x += self.dt * dyn_x
+                p[:] = - np.array((np.cos(u), np.sin(u)))
+                t += self.dt
+                arg_ref_x = atan2(*(x - self.mp.obstacles[pcl.i_obs].ref_point)[::-1])
+                arg_ref_x_prev = atan2(*(x_prev - self.mp.obstacles[pcl.i_obs].ref_point)[::-1])
+                d_arg = arg_ref_x - arg_ref_x_prev
+                if d_arg >= 0.95 * 2 * np.pi:
+                    d_arg -= 2 * np.pi
+                if d_arg <= -2 * np.pi * 0.95:
+                    d_arg += 2 * np.pi
+                pcl.rot += d_arg
+                status = True
 
         status = status and self.mp.domain(x)
-        i_obs_new = i_obs
+        i_obs_new = pcl.i_obs
         if status:
             obstacles = self.mp.in_obs(x)
-            if i_obs in obstacles:
-                obstacles.remove(i_obs)
+            if pcl.i_obs in obstacles:
+                obstacles.remove(pcl.i_obs)
             if len(obstacles) > 0:
                 i_obs_new = obstacles.pop()
             else:
                 i_obs_new = -1
-            if i_obs_new != i_obs:
+            if i_obs_new != pcl.i_obs:
                 if i_obs_new == -1:
                     # Keep moving in obstacle, no points leaving
-                    i_obs_new = i_obs
+                    i_obs_new = pcl.i_obs
                 else:
                     if self.mp.coords == COORD_GCS:
                         u = np.pi / 2 - u
@@ -855,7 +811,69 @@ class SolverEF:
                     obs_tgt = np.array(((0, -1), (1, 0))) @ obs_grad
                     ccw = s @ obs_tgt > 0.
                     rot = 0.
-        return t, x, p, status, i_obs_new, ccw, rot
+        if self.mode == self.MODE_TIME:
+            power = self.mp.aero.power(self.mp.model.v_a)
+        else:
+            power = self.mp.aero.power(self.mp.aero.asp_opti(p))
+        cost = power * abs(self.dt) + pcl.cost
+        new_pcl = Particle(pcl.idf, pcl.idt + 1, t, x, p, cost, i_obs_new, ccw, rot)
+        return new_pcl, status
+
+    def collision_filter(self):
+        for pcl in self.new_points:
+            idf = pcl.idf
+            # Deactivate new active points which fall inside front
+            if pcl.i_obs >= 0:
+                # Skip active points inside obstacles
+                continue
+            it = pcl.idt
+            pcl_prev = self.trajs[idf][pcl.idt - 1]
+            x_it = pcl_prev.state
+            x_itp1 = pcl.state
+            interactions = self.collbuf.get_inter(x_it, x_itp1)
+            stop = False
+            for k, l in interactions.items():
+                if k == idf:
+                    continue
+                for itt in range(l[0], l[1]):
+                    if stop:
+                        break
+                    pcl1 = self.trajs[k][itt]
+                    pcl2 = self.trajs[k][itt + 1]
+                    points = x_it, x_itp1, pcl1.state, pcl2.state
+                    if has_intersec(*points):
+                        _, alpha1, alpha2 = intersection(*points)
+                        cost1 = (1 - alpha1) * pcl_prev.cost + alpha1 * pcl.cost
+                        cost2 = (1 - alpha2) * pcl1.cost + alpha2 * pcl2.cost
+                        if cost2 < cost1:
+                            self.rel.deactivate(idf, 'collbuf')
+                            stop = True
+                if stop:
+                    break
+                p1, p2 = self.get_parents(k)
+                for p in (p1, p2):
+                    if p not in interactions.keys():
+                        continue
+                    if p == idf:
+                        continue
+                    l1 = interactions[k]
+                    l2 = interactions[p]
+                    l3 = (max(l1[0], l2[0]), min(l1[1], l2[1]))
+                    for itt in range(l3[0], l3[1] + 1):
+                        if itt + 1 >= it:
+                            break
+                        pcl1 = self.trajs[k][itt]
+                        pcl2 = self.trajs[p][itt]
+                        points = x_it, x_itp1, pcl1.state, pcl2.state
+                        if has_intersec(*points):
+                            _, alpha1, alpha2 = intersection(*points)
+                            cost1 = (1 - alpha1) * pcl_prev.cost + alpha1 * pcl.cost
+                            cost2 = (1 - alpha2) * pcl1.cost + alpha2 * pcl2.cost
+                            if cost2 < cost1:
+                                self.rel.deactivate(idf, 'collbuf_par')
+                                stop = True
+                if stop:
+                    break
 
     def propagate(self, time_offset=0.):
         self.setup(time_offset=time_offset)
@@ -920,7 +938,7 @@ class SolverEF:
         if self.mode == SolverEF.MODE_TIME:
             hello += f' | {self.mp_primal.model.v_a:.2f} m/s'
         hello += f' | {self.mp_primal.geod_l:.2e} m'
-        nowind_time = self.mp_primal.geod_l/self.mp_primal.model.v_a
+        nowind_time = self.mp_primal.geod_l / self.mp_primal.model.v_a
         hello += f' | scale {time_fmt(nowind_time)}'
         ortho_time = self.mp_primal.orthodromic()
         hello += f' | orthodromic {time_fmt(ortho_time) if ortho_time >= 0 else "DNR"}'
@@ -943,7 +961,7 @@ class SolverEF:
 
         if res.status:
             goodbye = f'Target reached in {time_fmt(res.duration)}'
-            goodbye += f' | {int(100*(res.duration/nowind_time - 1)):+d}% no wind'
+            goodbye += f' | {int(100 * (res.duration / nowind_time - 1)):+d}% no wind'
             if ortho_time >= 0:
                 goodbye += f' | {int(100 * (res.duration / ortho_time - 1)):+d}% orthodromic'
         else:
@@ -983,141 +1001,114 @@ class SolverEF:
             trajs = self.trajs_primal
             mp = self.mp_primal
             parents = self.parents_primal
-            child_order = self.child_order_primal
             using_primal = True
         else:
             trajs = self.trajs_dual
             mp = self.mp_dual
             parents = self.parents_dual
-            child_order = self.child_order_dual
             using_primal = False
 
         bests = {}
+        btrajs = {}
         closest = None
         dist = None
         best_cost = None
-        traj_idx_closest, time_idx_closest, rel_idx_closest = 0, 0, 0
-        for k, v in trajs.items():
-            for s, kl in enumerate(v.keys()):
-                i = kl
-                duration = v[kl][0] - self.mp_primal.model.wind.t_start
-                point = v[kl][1]
-                cost = v[kl][3]
-                cur_dist = mp.distance(point, mp.x_target)
+        for k, ptraj in trajs.items():
+            for pcl in ptraj.particles:
+                duration = pcl.t - self.mp_primal.model.wind.t_start
+                cur_dist = mp.distance(pcl.state, mp.x_target)
                 if dist is None or cur_dist < dist:
                     dist = cur_dist
-                    traj_idx_closest = k
-                    time_idx_closest = i
-                    rel_idx_closest = s
-                    closest = {
-                        'cost': cost,
-                        'duration': duration,
-                        'time_idx': i,
-                        'rel_idx': s,
-                        'adjoint': self.p_inits[k]
-                    }
+                    closest = pcl
                 if cur_dist < self.abs_nb_ceil:
-                    if best_cost is None or cost < best_cost:
-                        if k not in bests.keys() or duration < bests[k]['duration']:
-                            bests[k] = {
-                                'cost': cost,
-                                'duration': duration,
-                                'time_idx': i,
-                                'rel_idx': s,
-                                'adjoint': self.p_inits[k]
-                            }
-        traj_idx_list = []
-        time_idx_list = []
-        rel_idx_list = []
+                    if best_cost is None or pcl.cost < best_cost:
+                        if k not in list(map(lambda x: x.idf, bests.values())) or \
+                                duration < bests[k].t - self.mp_primal.model.wind.t_start:
+                            best_cost = pcl.cost
+                            bests[k] = pcl
+
         status = 1 if self.quick_solve else 2
         if len(bests) == 0:
-            #print('Warning: Target not reached', file=sys.stderr)
-            traj_idx_list.append(traj_idx_closest)
-            time_idx_list.append(time_idx_closest)
-            rel_idx_list.append(rel_idx_closest)
-            bests = {traj_idx_closest: closest}
+            # print('Warning: Target not reached', file=sys.stderr)
+            bests = {closest.idf: closest}
             status = 0
         else:
             # Filter out Pareto-dominated optima
-            to_delete = []
-            for a, b in bests.items():
-                for aa, bb in bests.items():
-                    if a == aa:
+            dominated = []
+            for k1, b1 in bests.items():
+                if k1 in dominated:
+                    continue
+                for k2 in range(k1 + 1, len(bests.keys())):
+                    if k2 in dominated:
                         continue
-                    if bb['cost'] < b['cost'] and bb['duration'] < b['duration']:
-                        to_delete.append(a)
+                    b2 = bests[k2]
+                    if b2.cost < b1.cost and b2.t < b1.t:
+                        dominated.append(k1)
                         break
-            for a in to_delete:
-                del bests[a]
-            a0 = None
-            min_cost = None
-            for a, b in bests.items():
-                cost = b['cost']
-                if min_cost is None or cost < min_cost:
-                    a0 = a
-                    min_cost = cost
-            for a in bests.keys():
-                traj_idx_list.append(a)
-                time_idx_list.append(bests[a]['time_idx'])
-                rel_idx_list.append(bests[a]['rel_idx'])
+                    if b1.cost < b2.cost and b1.t < b2.t:
+                        dominated.append(k2)
+            for k in dominated:
+                del bests[k]
 
-        for k in range(len(traj_idx_list)):
-            k0 = traj_idx_list[k]
-            nt = time_idx_list[k]
-            s0 = rel_idx_list[k]
+        # Build optimal trajectories
+        for pcl in bests.values():
+            nt = pcl.idt + 1
+            k0 = pcl.idf
+            p_traj = self.trajs[k0]
             points = np.zeros((nt, 2))
             adjoints = np.zeros((nt, 2))
+            controls = np.zeros(nt)
             ts = np.zeros(nt)
-            data = list(trajs[k0].values())
-            it = 0
-            s = s0
-            if k0 in range(self.N_disc_init):
-                cond = lambda s: s > 0
-            else:
-                cond = lambda s: s >= 0
-            while cond(s):
-                points[it] = data[s][1]
-                adjoints[it] = data[s][2]
-                ts[it] = data[s][0]
-                it += 1
-                s -= 1
+            for s in range(p_traj.id_start, pcl.idt + 1):
+                ts[s] = p_traj[s].t
+                points[s] = p_traj[s].state
+                adjoints[s] = p_traj[s].adjoint
+                controls[s] = self.mp.control_angle(p_traj[s].adjoint, p_traj[s].state)
+
+            sm = p_traj.id_start - 1
 
             if k0 not in range(self.N_disc_init):
                 kl, ku = parents[k0]
-                a = (child_order[k0] + 1) / (self.N_filling_steps + 1)
-                while it < nt:
-                    endl = (nt - 1 - it) not in trajs[kl].keys()
-                    endu = (nt - 1 - it) not in trajs[ku].keys()
+                a = 0.5
+                while sm >= 0:
+                    endl = sm < trajs[kl].id_start
+                    endu = sm < trajs[ku].id_start
                     if endl and not endu:
-                        b = (child_order[kl] + 1) / (self.N_filling_steps + 1)
+                        b = 0.5
                         kl, _ = parents[kl]
                         a = a + b * (1 - a)
                     if endu and not endl:
-                        b = (child_order[ku] + 1) / (self.N_filling_steps + 1)
+                        b = 0.5
                         _, ku = parents[ku]
                         a = a * b
                     if endl and endu:
-                        b = (child_order[kl] + 1) / (self.N_filling_steps + 1)
-                        c = (child_order[ku] + 1) / (self.N_filling_steps + 1)
+                        b = 0.5
+                        c = 0.5
                         kl, _ = parents[kl]
                         _, ku = parents[ku]
                         a = a * c + b * (1 - a)
-                    datal = [v for j, v in trajs[kl].items() if j <= (nt - 1 - it)]
-                    datau = [v for j, v in trajs[ku].items() if j <= (nt - 1 - it)]
-                    ib = min(len(datal), len(datau))
-                    for i in range(ib):
-                        points[it] = (1 - a) * datal[-1 - i][1] + a * datau[-1 - i][1]
-                        adjoints[it] = (1 - a) * datal[-1 - i][2] + a * datau[-1 - i][2]
-                        ts[it] = datal[- 1 - i][0]
-                        it += 1
-            if using_primal:
+                    ptraj_l = self.trajs[kl]
+                    ptraj_u = self.trajs[ku]
+                    # Position cursor to lowest common instant
+                    sb = max(ptraj_l.id_start, ptraj_u.id_start)
+                    # Create interpolated traj
+                    for s in range(sb, sm + 1):
+                        ts[s] = ptraj_l[s].t
+                        state = (1 - a) * ptraj_l[s].state + a * ptraj_u[s].state
+                        adjoint = (1 - a) * ptraj_l[s].adjoint + a * ptraj_u[s].adjoint
+                        points[s] = state
+                        adjoints[s] = adjoint
+                        controls[s] = self.mp.control_angle(adjoint, state)
+                    sm = sb - 1
+            if not using_primal:
                 ts = ts[::-1]
                 points = points[::-1]
                 adjoints = adjoints[::-1]
-            traj = AugmentedTraj(ts, points, adjoints, np.zeros(nt), nt - 1, mp.coords,
+                controls = controls[::-1]
+            traj = AugmentedTraj(ts, points, adjoints, controls, nt - 1, mp.coords,
                                  info=f'opt_m{self.mode}_{self.asp_init:.0f}')
-            bests[k0]['traj'] = traj
-        res = EFOptRes(status, bests)
+            btrajs[k0] = traj
+        res = EFOptRes(status, bests, btrajs)
         return res
 
     def get_trajs(self, primal_only=False, dual_only=False):
@@ -1128,8 +1119,8 @@ class SolverEF:
         if not dual_only:
             trajgroups.append(self.trajs_primal)
         for i, trajs in enumerate(trajgroups):
-            for it, t in trajs.items():
-                n = len(t)
+            for k, p_traj in trajs.items():
+                n = len(p_traj.particles)
                 timestamps = np.zeros(n)
                 points = np.zeros((n, 2))
                 adjoints = np.zeros((n, 2))
@@ -1141,23 +1132,23 @@ class SolverEF:
                     # If wind is steady, offset timestamps to have a <self.reach_time>-long window
                     # For dual trajectories
                     offset = 0.  # self.reach_time  # - self.max_time
-                for k, e in enumerate(list(t.values())):
-                    timestamps[k] = e[0] + offset
-                    points[k, :] = e[1]
-                    adjoints[k, :] = e[2]
-                    controls[k] = self.mp.control_angle(e[2], e[1])
-                    transver[k] = 1 - self.mp.model.v_a * np.linalg.norm(e[2]) + e[2] @ self.mp.model.wind.value(e[0],
-                                                                                                                 e[1])
-                    energy[k] = e[3]
+                for it, pcl in enumerate(p_traj.particles):
+                    timestamps[it] = pcl.t + offset
+                    points[it, :] = pcl.state
+                    adjoints[it, :] = pcl.adjoint
+                    controls[it] = self.mp.control_angle(pcl.adjoint, pcl.state)
+                    transver[it] = 1 - self.mp.model.v_a * np.linalg.norm(pcl.adjoint) \
+                                  + pcl.adjoint @ self.mp.model.wind.value(pcl.t, pcl.state)
+                    energy[it] = pcl.cost
                 add_info = ''
                 if i == 0:
                     try:
-                        add_info = '_' + self.trajs_add_info[it]
+                        add_info = '_' + self.trajs_add_info[k]
                     except KeyError:
                         pass
                 res.append(
                     AugmentedTraj(timestamps, points, adjoints, controls, last_index=n - 1, coords=self.mp.coords,
-                                  label=it,
+                                  label=k,
                                   type=TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver, energy=energy))
 
         return res
