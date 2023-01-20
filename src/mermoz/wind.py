@@ -258,7 +258,7 @@ class DiscreteWind(Wind):
         """
 
         # Fill the wind data array
-        print(f'{"Loading wind values...":<30}', end='')
+        # print(f'{"Loading wind values...":<30}', end='')
         with h5py.File(filepath, 'r') as wind_data:
             self.coords = wind_data.attrs['coords']
             self.units_grid = wind_data.attrs['units_grid']
@@ -314,7 +314,6 @@ class DiscreteWind(Wind):
                 grid_wind_rshp = grid_wind.reshape((nx_wind * ny_wind, 2))
                 self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
                 for kt in range(self.nt):
-
                     u_wind = np.zeros((nx_wind, ny_wind))
                     v_wind = np.zeros((nx_wind, ny_wind))
                     u_wind[:] = np.array(wind_data['data'][kt, :, :, 0])
@@ -359,7 +358,7 @@ class DiscreteWind(Wind):
         if not nodiff:
             self.compute_derivatives()
 
-        print('Done')
+        # print('Done')
 
     def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, nt=1, fd=False):
         self.coords = coords
@@ -1292,7 +1291,24 @@ class TrapWind(Wind):
             e_r = (x - center) / r
             P = np.array(((e_r[0], e_r[1]), (-e_r[1] / r, e_r[0] / r)))
             return -wind_value * (P.transpose() @ np.diag((TrapWind.d_sigmoid(r - radius, radius * self.rel_wid),
-                                          TrapWind.sigmoid(r - radius, radius * self.rel_wid))) @ P)
+                                                           TrapWind.sigmoid(r - radius, radius * self.rel_wid))) @ P)
+
+
+class ChertovskihWind(Wind):
+
+    def __init__(self):
+        self.t_start = 0.
+        self.t_end = None
+        nt = 1
+        super().__init__(value_func=self.value, d_value_func=self.d_value, nt=nt, t_start=self.t_start,
+                         t_end=self.t_end)
+
+    def value(self, t, x):
+        return np.array((x[0] * (x[1] + 3) / 4, -x[0] * x[0]))
+
+    def d_value(self, t, x):
+        return np.array((((x[1] + 3) / 4, x[0] / 4),
+                         (-2 * x[0], 0)))
 
 
 if __name__ == '__main__':

@@ -116,13 +116,13 @@ def ensure_compatible(coords, units):
             exit(1)
 
 
-def geodesic_distance(*args, mode='rad'):
+def central_angle(*args, mode='rad'):
     """
-    Computes the great circle distance between two points on the earth surface
-    Arguments may be given in (lon1, lat1, lon2, lat2)
+    Computes the central angle between given points
+    :param args: May be given in (lon1, lat1, lon2, lat2)
     or in (ndarray(lon1, lat1), ndarray(lon2, lat2))
     :param mode: Whether lon/lat given in degrees or radians
-    :return: Great circle distance in meters
+    :return: Central angle in radians
     """
     if len(args) == 4:
         lon1 = args[0]
@@ -135,8 +135,8 @@ def geodesic_distance(*args, mode='rad'):
         lon2 = args[1][0]
         lat2 = args[1][1]
     else:
-        print('Incorrect argument format', file=sys.stderr)
-        exit(1)
+        raise Exception('Incorrect argument format')
+
     factor = DEG_TO_RAD if mode == 'deg' else 1.
     phi1 = lon1 * factor
     phi2 = lon2 * factor
@@ -154,8 +154,19 @@ def geodesic_distance(*args, mode='rad'):
         return 0.
     if arg < -1. and -(arg + 1.) < tol:
         return pi * EARTH_RADIUS
-    res = acos(sin(lambda1) * sin(lambda2) + cos(lambda1) * cos(lambda2) * cos(delta_phi)) * EARTH_RADIUS
-    return res
+    return arg
+
+
+def geodesic_distance(*args, mode='rad'):
+    """
+    Computes the great circle distance between two points on the earth surface
+    :param args: May be given in (lon1, lat1, lon2, lat2)
+    or in (ndarray(lon1, lat1), ndarray(lon2, lat2))
+    :param mode: Whether lon/lat given in degrees or radians
+    :return: Great circle distance in meters
+    """
+    c_angle = central_angle(*args, mode=mode)
+    return acos(c_angle) * EARTH_RADIUS
 
 
 def proj_ortho(lon, lat, lon0, lat0):
@@ -340,7 +351,7 @@ def ccw(a, b, c):
     return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
 
 
-def collision(a, b, c, d):
+def has_intersec(a, b, c, d):
     return ccw(a, c, d) != ccw(b, c, d) and ccw(a, b, c) != ccw(a, b, d)
 
 
@@ -379,9 +390,13 @@ def time_fmt(duration):
     if duration < 200:
         return f'{duration:.2f}s'
     elif duration < 60 * 200:
-        return f'{duration / 60:.2f}min'
+        minutes = int(duration / 60)
+        seconds = int(duration - 60 * int(duration / 60))
+        return f'{minutes}m{seconds}s'
     else:
-        return f'{duration / 3600:.2f}h'
+        hours = int(duration / 3600)
+        minutes = int(60 * (duration / 3600 - hours))
+        return f'{hours}h{minutes}m'
 
 
 class Chrono:
@@ -399,5 +414,8 @@ class Chrono:
         self.t_end = time.time()
         diff = self.t_end - self.t_start
         if self.verbose:
-            print(f'[*] Done ({diff:.3f}s)')
+            print(f'[*] Done ({self})')
         return diff
+
+    def __str__(self):
+        return time_fmt(self.t_end - self.t_start)

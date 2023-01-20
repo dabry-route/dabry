@@ -1,7 +1,7 @@
 import os
 
 from mermoz.mdf_manager import MDFmanager
-from mermoz.obstacle import GreatCircleObs, ParallelObs
+from mermoz.obstacle import GreatCircleObs, ParallelObs, MaxiObs, LSEMaxiObs
 from mermoz.params_summary import ParamsSummary
 from mermoz.misc import *
 from mermoz.problem import IndexedProblem, DatabaseProblem
@@ -10,11 +10,12 @@ from mermoz.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 22
+    pb_id = 10
     # Or choose database problem. If empty, will use previous ID
-    dbpb = '72W_15S_0W_57S_20220301_12'
+    dbpb = ''  # '37W_8S_16W_17S_20220301_12'
+    suffix = 'constrained2'
     # When running several times, wind data or reachability fronts data can be cached
-    cache_wind = False
+    cache_wind = True
     cache_rff = False
 
     # This instance prints absolute elapsed time between operations
@@ -24,9 +25,9 @@ if __name__ == '__main__':
     mdfm = MDFmanager()
     mdfm.setup()
     if len(dbpb) > 0:
-        case_name = f'example_solver-ef_{dbpb}'
+        case_name = f'example_solver-ef_{dbpb}' + f'_{suffix}' if len(suffix) > 0 else ''
     else:
-        case_name = f'example_solver-ef_{IndexedProblem.problems[pb_id][1]}_other'
+        case_name = f'example_solver-ef_{IndexedProblem.problems[pb_id][1]}' + f'_{suffix}' if len(suffix) > 0 else ''
     mdfm.set_case(case_name)
     mdfm.clean_output_dir(keep_rff=cache_rff, keep_wind=cache_wind)
 
@@ -40,9 +41,16 @@ if __name__ == '__main__':
     # Create problem
     if len(dbpb) > 0:
         obs = []
-        obs.append(GreatCircleObs(np.array((-70 * DEG_TO_RAD, 30 * DEG_TO_RAD)),
-                                  np.array((20 * DEG_TO_RAD, 60 * DEG_TO_RAD))))
-        obs.append(ParallelObs(18 * DEG_TO_RAD, True))
+        # obs.append(GreatCircleObs(np.array((-17 * DEG_TO_RAD, 0 * DEG_TO_RAD)),
+        #                           np.array((-17 * DEG_TO_RAD, 10 * DEG_TO_RAD))))
+        # obs.append(GreatCircleObs(np.array((-17 * DEG_TO_RAD, 0 * DEG_TO_RAD)),
+        #                           np.array((-17 * DEG_TO_RAD, 10 * DEG_TO_RAD))))
+        # obs.append(ParallelObs(18 * DEG_TO_RAD, True))
+        obs1 = GreatCircleObs(np.array((-30 * DEG_TO_RAD, 0 * DEG_TO_RAD)),
+                                  np.array((-30 * DEG_TO_RAD, -1 * DEG_TO_RAD)))
+        obs2 = GreatCircleObs(np.array((-30 * DEG_TO_RAD, 10 * DEG_TO_RAD)),
+                                  np.array((-31 * DEG_TO_RAD, 10 * DEG_TO_RAD)))
+        obs.append(LSEMaxiObs([obs1, obs2]))
         pb = DatabaseProblem(os.path.join(os.environ.get('MERMOZ_WIND_PATH'), dbpb, 'wind.h5'), airspeed=23.,
                              obstacles=obs)
     else:
@@ -55,8 +63,11 @@ if __name__ == '__main__':
         mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
         chrono.stop()
 
+    mdfm.dump_obs(pb)
+
     # Setting the extremal solver
-    solver_ef = solver = SolverEF(pb, pb.time_scale, max_steps=100, rel_nb_ceil=0.02)
+    t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.v_a
+    solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, dt=.0025 * pb.l_ref / pb.model.v_a)
 
     chrono.start('Solving problem using extremal field (EF)')
     res_ef = solver_ef.solve()
@@ -65,7 +76,7 @@ if __name__ == '__main__':
         # Solution found
         # Save optimal trajectory
         mdfm.dump_trajs([res_ef.traj])
-        print(f'Target reached in : {time_fmt(res_ef.duration)}')
+
     else:
         print('No solution found')
 
