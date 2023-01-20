@@ -10,7 +10,7 @@ from mermoz.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 0
+    pb_id = 10
     # Or choose database problem. If empty, will use previous ID
     dbpb = ''  # '37W_8S_16W_17S_20220301_12'
     suffix = 'constrained2'

@@ -165,7 +165,7 @@ def geodesic_distance(*args, mode='rad'):
     :param mode: Whether lon/lat given in degrees or radians
     :return: Great circle distance in meters
     """
-    c_angle = central_angle(args, mode=mode)
+    c_angle = central_angle(*args, mode=mode)
     return acos(c_angle) * EARTH_RADIUS
 
 
@@ -390,9 +390,13 @@ def time_fmt(duration):
     if duration < 200:
         return f'{duration:.2f}s'
     elif duration < 60 * 200:
-        return f'{duration / 60:.2f}min'
+        minutes = int(duration / 60)
+        seconds = int(duration - 60 * int(duration / 60))
+        return f'{minutes}m{seconds}s'
     else:
-        return f'{duration / 3600:.2f}h'
+        hours = int(duration / 3600)
+        minutes = int(60 * (duration / 3600 - hours))
+        return f'{hours}h{minutes}m'
 
 
 class Chrono:
@@ -410,5 +414,8 @@ class Chrono:
         self.t_end = time.time()
         diff = self.t_end - self.t_start
         if self.verbose:
-            print(f'[*] Done ({diff:.3f}s)')
+            print(f'[*] Done ({self})')
         return diff
+
+    def __str__(self):
+        return time_fmt(self.t_end - self.t_start)

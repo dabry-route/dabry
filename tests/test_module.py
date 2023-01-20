@@ -23,7 +23,7 @@ if __name__ == '__main__':
     def solve(pb_id):
         pb = IndexedProblem(pb_id)
         t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.v_a
-        solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02)
+        solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=False)
         solver_ef.solve()
 
     if unit_pb >= 0:

@@ -1,5 +1,6 @@
 # from heapq import heappush, heappop
 import os
+import threading
 from math import asin
 
 import numpy as np
@@ -52,12 +53,12 @@ class FrontPoint:
 
 class Particle:
 
-    def __init__(self, idf, idt, timestamp, state, adjoint, cost, i_obs=-1, ccw=True, rot=0.):
+    def __init__(self, idf, idt, t, state, adjoint, cost, i_obs=-1, ccw=True, rot=0.):
         """
         Langrangian particle evolving through dynamics of extremals
         :param idf: Unique identifier of the trajectory to which the point belongs
         :param idt: Unique identifier of current time step
-        :param timestamp: Point's timestamp
+        :param t: Point's timestamp
         :param state: State vector
         :param adjoint: Adjoint state vector
         :param cost: Cost of trajectory up to current point
@@ -67,7 +68,7 @@ class Particle:
         """
         self.idf = idf
         self.idt = idt
-        self.t = timestamp
+        self.t = t
         self.state = np.array(state)
         self.adjoint = np.array(adjoint)
         self.cost = cost
@@ -409,6 +410,7 @@ class SolverEF:
                  asp_offset=0.,
                  asp_init=None,
                  no_coll_filtering=False,
+                 quick_solve=False,
                  pareto=None):
         self.mp_primal = mp
         self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
@@ -470,13 +472,15 @@ class SolverEF:
 
         # Base collision filtering scheme only for steady problems
         self.no_coll_filtering = no_coll_filtering or self.mp.model.wind.t_end is not None
-        self.quick_solve = False
+        self.quick_solve = quick_solve
         self.quick_traj_idx = -1
         self.best_distances = [self.mp.geod_l]
 
         self.any_out_obs = False
 
         self.manual_integration = True
+
+        self.step_algo = 0
 
         self.pareto = pareto
 
@@ -580,15 +584,11 @@ class SolverEF:
     def step_global(self):
 
         self.any_out_obs = False
-        active_list = []
-        obstacle_list = []
-        front_list = []
         self.best_distances = [self.mp.geod_l]
 
         # Evolve active particles
         for pcl in self.active:
             idf = pcl.idf
-            active_list.append(pcl.idf)
 
             pcl_new, status = self.step_single(pcl)
 
@@ -598,9 +598,8 @@ class SolverEF:
             self.best_distances.append(dist)
             if self.quick_solve and dist < self.abs_nb_ceil:
                 self.quick_traj_idx = idf
-            if not status and self.rel.is_active(idf):
+            if not status:
                 self.rel.deactivate(idf, 'domain')
-                obstacle_list.append(idf)
             elif abs(pcl_new.rot) > 2 * np.pi:
                 self.rel.deactivate(idf, 'roundabout')
             elif self.cost_ceil is not None and pcl_new.cost > self.cost_ceil:
@@ -613,20 +612,15 @@ class SolverEF:
                 self.save(pcl_new)
                 self.n_points += 1
 
-        if self.debug:
-            print(f'     Active : {tuple(active_list)}')
-            print(f'   Obstacle : {tuple(obstacle_list)}')
-            print(f'      Front : {tuple(front_list)}')
-
         # Collision filtering if needed
         if not self.no_coll_filtering:
             self.collision_filter()
 
-        for pcl in self.new_points:
-            if pcl.i_obs >= 0:
-                # Points in obstacles do not contribute to collision buffer
-                continue
-            self.collbuf.add_particle(pcl)
+            for pcl in self.new_points:
+                if pcl.i_obs >= 0:
+                    # Points in obstacles do not contribute to collision buffer
+                    continue
+                self.collbuf.add_particle(pcl)
 
         # Resampling of the front
         for pcl in self.new_points:
@@ -737,6 +731,9 @@ class SolverEF:
                     x = z[:2]
                     p = z[2:]
                     u = self.mp.control_angle(p, x)
+                    kw = {}
+                    if self.mode == self.MODE_ENERGY:
+                        kw['v_a'] = self.mp.aero.asp_opti(p)
                     dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
                     A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
                     dyn_p = A.dot(p)
@@ -875,23 +872,27 @@ class SolverEF:
                 if stop:
                     break
 
+    def exit_cond(self):
+        return len(self.active) == 0 or \
+               self.step_algo >= self.max_steps or \
+               len(self.trajs) >= self.max_extremals or \
+               (self.quick_solve and self.quick_traj_idx != -1) or \
+               (not self.any_out_obs)
+
     def propagate(self, time_offset=0.):
         self.setup(time_offset=time_offset)
-        i = 0
+        self.step_algo = 0
         print('', end='')
-        while len(self.active) != 0 \
-                and i < self.max_steps \
-                and len(self.trajs) < self.max_extremals \
-                and ((not self.quick_solve) or self.quick_traj_idx == -1) \
-                and self.any_out_obs:
-            i += 1
+
+        while not self.exit_cond():
+            self.step_algo += 1
             if self.debug:
-                print(i)
+                print(self.step_algo)
             self.step_global()
             print(
-                f'\rSteps : {i:>6}/{self.max_steps}, Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
+                f'\rSteps : {self.step_algo:>6}/{self.max_steps}, Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
                 f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} ', end='', flush=True)
-        if i == self.max_steps:
+        if self.step_algo == self.max_steps:
             msg = f'Stopped on iteration limit {self.max_steps}'
         elif len(self.trajs) == self.max_extremals:
             msg = f'Stopped on extremals limit {self.max_extremals}'
@@ -920,9 +921,8 @@ class SolverEF:
             self.trajs_control[kp] = self.trajs_dual[kp]
             self.trajs_add_info[kp] = 'control'
 
-    def solve(self, quick_solve=False, verbose=False, backward=False):
+    def solve(self, verbose=False, backward=False):
         """
-        :param quick_solve: Whether to stop solving when at least one extremal is sufficiently close to target
         :param verbose: To print steps
         :param backward: To run forward and backward extremal computation
         :return: Minimum time to reach destination, corresponding global time index,
@@ -930,8 +930,6 @@ class SolverEF:
         """
         if verbose:
             self.debug = True
-
-        self.quick_solve = quick_solve
 
         hello = f'{self.mp_primal.descr}'
         hello += f' | {"TIMEOPT" if self.mode == SolverEF.MODE_TIME else "ENEROPT"}'
@@ -943,6 +941,9 @@ class SolverEF:
         ortho_time = self.mp_primal.orthodromic()
         hello += f' | orthodromic {time_fmt(ortho_time) if ortho_time >= 0 else "DNR"}'
         print(hello)
+
+        chrono = Chrono(no_verbose=True)
+        chrono.start()
 
         if not backward:
             # Only compute forward front
@@ -959,11 +960,14 @@ class SolverEF:
             self.propagate(time_offset=self.reach_time)
             res = self.build_opti_traj()
 
+        chrono.stop()
+
         if res.status:
             goodbye = f'Target reached in {time_fmt(res.duration)}'
             goodbye += f' | {int(100 * (res.duration / nowind_time - 1)):+d}% no wind'
             if ortho_time >= 0:
                 goodbye += f' | {int(100 * (res.duration / ortho_time - 1)):+d}% orthodromic'
+            goodbye += f' | cpu time {chrono}'
         else:
             goodbye = f'No solution found in time < {time_fmt(self.max_steps * abs(self.dt))}'
         print(goodbye)
@@ -1108,7 +1112,7 @@ class SolverEF:
             traj = AugmentedTraj(ts, points, adjoints, controls, nt - 1, mp.coords,
                                  info=f'opt_m{self.mode}_{self.asp_init:.0f}')
             btrajs[k0] = traj
-        res = EFOptRes(status, bests, btrajs)
+        res = EFOptRes(status, bests, btrajs, self.mp_primal)
         return res
 
     def get_trajs(self, primal_only=False, dual_only=False):
@@ -1138,7 +1142,7 @@ class SolverEF:
                     adjoints[it, :] = pcl.adjoint
                     controls[it] = self.mp.control_angle(pcl.adjoint, pcl.state)
                     transver[it] = 1 - self.mp.model.v_a * np.linalg.norm(pcl.adjoint) \
-                                  + pcl.adjoint @ self.mp.model.wind.value(pcl.t, pcl.state)
+                                   + pcl.adjoint @ self.mp.model.wind.value(pcl.t, pcl.state)
                     energy[it] = pcl.cost
                 add_info = ''
                 if i == 0:
