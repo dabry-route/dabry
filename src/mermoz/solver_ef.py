@@ -484,8 +484,6 @@ class SolverEF:
 
         self.pareto = pareto
 
-        self.debug = False
-
     def new_traj_index(self, par1=None, par2=None):
         if sum((par1 is None, par2 is None)) == 1:
             print('Error in new index creation : one of the two parents is None', file=sys.stderr)
@@ -638,8 +636,6 @@ class SolverEF:
             if pcl.i_obs >= 0 and pcl_other.i_obs >= 0:
                 continue
 
-            if self.debug:
-                print(f'Stepping between {idf}, {iu}')
             p1i, p2i = self.get_parents(idf)
             p1u, p2u = self.get_parents(iu)
             same_parents = (p1i == p1u and p2i == p2u) or (p1i == p2u and p2i == p1u)
@@ -879,19 +875,19 @@ class SolverEF:
                (self.quick_solve and self.quick_traj_idx != -1) or \
                (not self.any_out_obs)
 
-    def propagate(self, time_offset=0.):
+    def propagate(self, time_offset=0., verbose=2):
         self.setup(time_offset=time_offset)
         self.step_algo = 0
         print('', end='')
 
         while not self.exit_cond():
             self.step_algo += 1
-            if self.debug:
-                print(self.step_algo)
             self.step_global()
-            print(
-                f'\rSteps : {self.step_algo:>6}/{self.max_steps}, Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
-                f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} ', end='', flush=True)
+            if verbose == 2:
+                print(
+                    f'\rSteps : {self.step_algo:>6}/{self.max_steps}, '''
+                    f'Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
+                    f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} ', end='', flush=True)
         if self.step_algo == self.max_steps:
             msg = f'Stopped on iteration limit {self.max_steps}'
         elif len(self.trajs) == self.max_extremals:
@@ -900,7 +896,8 @@ class SolverEF:
             msg = 'Stopped quick solve'
         else:
             msg = f'Stopped empty active list'
-        print(msg)
+        if verbose == 2:
+            print(msg)
 
     def prepare_control_law(self):
         # For the control law, keep only trajectories close to the goal
@@ -921,15 +918,13 @@ class SolverEF:
             self.trajs_control[kp] = self.trajs_dual[kp]
             self.trajs_add_info[kp] = 'control'
 
-    def solve(self, verbose=False, backward=False):
+    def solve(self, verbose=2, backward=False):
         """
-        :param verbose: To print steps
+        :param verbose: Verbosity level. 2 is common, 1 for multithread, 0 for none.
         :param backward: To run forward and backward extremal computation
         :return: Minimum time to reach destination, corresponding global time index,
         corresponding initial adjoint state
         """
-        if verbose:
-            self.debug = True
 
         hello = f'{self.mp_primal.descr}'
         hello += f' | {"TIMEOPT" if self.mode == SolverEF.MODE_TIME else "ENEROPT"}'
@@ -940,7 +935,8 @@ class SolverEF:
         hello += f' | scale {time_fmt(nowind_time)}'
         ortho_time = self.mp_primal.orthodromic()
         hello += f' | orthodromic {time_fmt(ortho_time) if ortho_time >= 0 else "DNR"}'
-        print(hello)
+        if verbose == 2:
+            print(hello)
 
         chrono = Chrono(no_verbose=True)
         chrono.start()
@@ -948,7 +944,7 @@ class SolverEF:
         if not backward:
             # Only compute forward front
             self.set_primal(True)
-            self.propagate()
+            self.propagate(verbose=verbose)
             res = self.build_opti_traj()
         else:
             # First propagate forward extremals
@@ -957,7 +953,7 @@ class SolverEF:
             self.propagate()
             # Now than forward pass is completed, run the backward pass with correct start time
             self.set_primal(False)
-            self.propagate(time_offset=self.reach_time)
+            self.propagate(time_offset=self.reach_time, verbose=verbose)
             res = self.build_opti_traj()
 
         chrono.stop()
@@ -970,7 +966,10 @@ class SolverEF:
             goodbye += f' | cpu time {chrono}'
         else:
             goodbye = f'No solution found in time < {time_fmt(self.max_steps * abs(self.dt))}'
-        print(goodbye)
+        if verbose == 2:
+            print(goodbye)
+        elif verbose == 1:
+            print(hello + '\n ↳ ' + goodbye)
         return res
 
     def control(self, t, x):
