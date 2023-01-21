@@ -3,7 +3,9 @@ import time
 
 import numpy as np
 from math import pi, acos, cos, sin, floor, atan2
-
+# from shapely.ops import unary_union
+# from shapely.geometry import Point, MultiPoint
+# from collections import Counter
 from numpy import ndarray
 
 COORD_CARTESIAN = 'cartesian'
@@ -419,3 +421,16 @@ class Chrono:
 
     def __str__(self):
         return time_fmt(self.t_end - self.t_start)
+
+
+# From https://gis.stackexchange.com/questions/416120/importerror-when-importing-linestring-from-shapely-geometry
+def find_self_intersection(line):
+    intersection = None
+    if not line.is_simple:
+        intersection = unary_union(line)
+        seg_coordinates = []
+        for seg in intersection.geoms:
+            seg_coordinates.extend(list(seg.coords))
+        intersection = [Point(p) for p, c in Counter(seg_coordinates).items() if c > 1]
+        intersection = MultiPoint(intersection)
+    return intersection

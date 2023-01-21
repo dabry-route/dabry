@@ -9,6 +9,8 @@ if __name__ == '__main__':
     parser.add_argument('idtest', nargs='?', default=-1)
     parser.add_argument('-m', '--multithreaded', help='Run script with adapted verbosity', action='store_const',
                         const=True, default=False)
+    parser.add_argument('-q', '--quicksolve', help='Use quick solve mode', action='store_const',
+                        const=True, default=False)
     args = parser.parse_args(sys.argv[1:])
     unit_pb = -1
     pb_ok = []
@@ -24,7 +26,7 @@ if __name__ == '__main__':
     def solve(pb_id):
         pb = IndexedProblem(pb_id)
         t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.v_a
-        solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=False)
+        solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=args.quicksolve)
         solver_ef.solve(verbose=1 if args.multithreaded else 2)
 
     if unit_pb >= 0:

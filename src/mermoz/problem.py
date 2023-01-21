@@ -322,7 +322,7 @@ class DatabaseProblem(MermozProblem):
 
         zermelo_model = ZermeloGeneralModel(airspeed, coords=coords)
         zermelo_model.update_wind(total_wind)
-        super().__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles)
+        super().__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles, mask_land=False)
 
 
 class IndexedProblem(MermozProblem):

@@ -4,7 +4,7 @@ import threading
 from math import asin
 
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, Point, LineString
 import csv
 import scipy.integrate
 
@@ -108,6 +108,9 @@ class PartialTraj:
 
     def __getitem__(self, item):
         return self.particles[item - self.id_start]
+
+    def get_last(self):
+        return self.particles[-1]
 
 
 class Pareto:
@@ -255,16 +258,23 @@ class EFOptRes:
 
 class Relations:
 
-    def __init__(self, members):
+    def __init__(self):
+
+        self.rel = {}
+        self.active = []
+        self.captive = []
+        self.deact_reason = {}
+        # Store only index of left-hand member of dead relation
+        self.dead_links = set()
+
+    def fill(self, members):
         """
         :param members: List of sorted int ids representing the initial cycle.
         Relationships go like 0 <-> 1 <-> 2 <-> ... <-> n-1 and n-1 <-> 0
         """
-        self.rel = {}
         for k, m in enumerate(members):
             self.rel[m] = (members[(k - 1) % len(members)], members[(k + 1) % len(members)])
         self.active = [m for m in members]
-        self.deact_reason = {}
 
     def linked(self, i1, i2):
         if i2 in self.rel[i1]:
@@ -272,8 +282,8 @@ class Relations:
         else:
             return False
 
-    def add(self, i, il, iu):
-        if not self.linked(il, iu):
+    def add(self, i, il, iu, force=False):
+        if not self.linked(il, iu) and not force:
             print('Trying to add member between non-linked members', file=sys.stderr)
             exit(1)
         o_ill, _ = self.rel[il]
@@ -304,8 +314,49 @@ class Relations:
             self.active.remove(i)
             self.deact_reason[i] = reason
 
+    def set_captive(self, i):
+        self.captive.append(i)
+
+    def deact_link(self, i1, i2):
+        i1l, i1u = self.get(i1)
+        if i2 == i1u:
+            self.dead_links.add(i1)
+        else:
+            self.dead_links.add(i2)
+
     def is_active(self, i):
         return i in self.active
+
+    def components(self, free_only=False):
+        comp = [[]]
+        icomp = 0
+        if len(self.active) == 0:
+            return []
+        i = i0 = self.active[0]
+        i_active = True
+        i_captive = False
+        comp[icomp].append(i)
+        _, j = self.get(i)
+        in_comp = True
+        start = True
+        while i != i0 or start:
+            start = False
+            j_active = j in self.active
+            j_captive = j in self.captive
+            if i_active and j_active and (i not in self.dead_links) and \
+                    ((not free_only) or (not i_captive and not j_captive)):
+                if not in_comp:
+                    icomp += 1
+                    comp.append([])
+                comp[icomp].append(j)
+                in_comp = True
+            else:
+                in_comp = False
+            i_active = j_active
+            i_captive = j_captive
+            i = j
+            _, j = self.get(i)
+        return comp
 
 
 class CollisionBuffer:
@@ -436,7 +487,7 @@ class SolverEF:
         self.new_points = []
         self.p_inits = {}
         self.lsets = []
-        self.rel = None
+        self.rel = Relations()
         self.n_points = 0
         self.parents_primal = {}
         self.parents_dual = {}
@@ -483,6 +534,8 @@ class SolverEF:
         self.step_algo = 0
 
         self.pareto = pareto
+
+        self.trimming_rate = 10
 
     def new_traj_index(self, par1=None, par2=None):
         if sum((par1 is None, par2 is None)) == 1:
@@ -533,7 +586,7 @@ class SolverEF:
         self.new_points = []
         self.p_inits = {}
         self.lsets = []
-        self.rel = None
+        self.rel = Relations()
         self.it = 0
         self.n_points = 0
         self.any_out_obs = True
@@ -560,7 +613,7 @@ class SolverEF:
                 self.collbuf.add_particle(pcl)
             self.active.append(pcl)
             self.save(pcl)
-        self.rel = Relations(list(np.arange(self.N_disc_init)))
+        self.rel.fill(list(np.arange(self.N_disc_init)))
 
     def save(self, p: Particle):
         id_traj = p.idf
@@ -592,6 +645,9 @@ class SolverEF:
 
             if pcl_new.i_obs == -1:
                 self.any_out_obs = True
+            elif pcl.i_obs == -1:
+                self.rel.set_captive(idf)
+
             dist = self.mp.distance(pcl_new.state, self.mp.x_target)
             self.best_distances.append(dist)
             if self.quick_solve and dist < self.abs_nb_ceil:
@@ -634,6 +690,7 @@ class SolverEF:
                 continue
             # Resample when at least one point lies outside of an obstacle
             if pcl.i_obs >= 0 and pcl_other.i_obs >= 0:
+                self.rel.deact_link(pcl.idf, pcl_other.idf)
                 continue
 
             p1i, p2i = self.get_parents(idf)
@@ -646,6 +703,11 @@ class SolverEF:
 
             # Resampling needed
             self.create_between(idf, iu, pcl.idt)
+
+        # Trimming procedure
+        if self.no_coll_filtering:
+            if self.it % self.trimming_rate == 0:
+                self.trim()
 
         self.active.clear()
         for pcl in self.new_points:
@@ -868,6 +930,45 @@ class SolverEF:
                 if stop:
                     break
 
+    def trim(self):
+        comps = self.rel.components(free_only=True)
+        for comp in comps:
+            if len(comp) == 0:
+                continue
+            cyclic = comp[0] == comp[-1]
+            n_edges = len(comp) - 1
+            intersec = []
+            for i in range(n_edges):
+                for j in range(i + 2, n_edges):
+                    if cyclic and i == 0 and j == n_edges - 1:
+                        continue
+                    pcl1 = self.trajs[comp[i]].get_last()
+                    pcl2 = self.trajs[comp[i + 1]].get_last()
+                    pcl3 = self.trajs[comp[j]].get_last()
+                    pcl4 = self.trajs[comp[j + 1]].get_last()
+                    if has_intersec(pcl1.state, pcl2.state, pcl3.state, pcl4.state):
+                        s, _, _ = intersection(pcl1.state, pcl2.state, pcl3.state, pcl4.state)
+                        v1 = 1 / self.mp.distance(pcl1.state, s)
+                        v2 = 1 / self.mp.distance(pcl4.state, s)
+                        alpha = v1 / (v1 + v2)
+                        state = alpha * pcl1.state + (1 - alpha) * pcl4.state
+                        adjoint = alpha * pcl1.adjoint + (1 - alpha) * pcl4.adjoint
+                        cost = alpha * pcl1.cost + (1 - alpha) * pcl4.cost
+
+                        idf = self.new_traj_index(comp[i], comp[j + 1])
+                        new_p_init = 0.5 * (self.p_inits[comp[i]] + self.p_inits[comp[j + 1]])
+                        self.p_inits[idf] = np.zeros(2)
+                        self.p_inits[idf][:] = new_p_init
+                        pcl = Particle(idf, pcl1.idt, pcl1.t, state, adjoint, cost)
+                        intersec.append((i, j, pcl))
+
+            for i, j, pcl in intersec:
+                for k in range(i + 1, j + 1):
+                    self.rel.deactivate(comp[k], reason='trimming')
+                self.new_points.append(pcl)
+                self.rel.add(pcl.idf, comp[i], comp[j + 1], force=True)
+                self.save(pcl)
+
     def exit_cond(self):
         return len(self.active) == 0 or \
                self.step_algo >= self.max_steps or \
@@ -887,7 +988,8 @@ class SolverEF:
                 print(
                     f'\rSteps : {self.step_algo:>6}/{self.max_steps}, '''
                     f'Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
-                    f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} ', end='', flush=True)
+                    f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} '
+                    f'Comp : {len(self.rel.components(free_only=True))} ', end='', flush=True)
         if self.step_algo == self.max_steps:
             msg = f'Stopped on iteration limit {self.max_steps}'
         elif len(self.trajs) == self.max_extremals:

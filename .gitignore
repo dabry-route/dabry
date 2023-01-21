@@ -160,7 +160,6 @@ cython_debug/
 .idea/
 
 output/*
-/utils/test.py
 /rft/html/
 /rft/input/
 /rft/dev/
