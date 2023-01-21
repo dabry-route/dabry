@@ -290,10 +290,10 @@ class DatabaseProblem(MermozProblem):
 
         with h5py.File(wind_fpath, 'r') as f:
             coords = f.attrs['coords']
+            bl = np.array((f['grid'][0, 0, 0], f['grid'][0, 0, 1]))
+            tr = np.array((f['grid'][-1, -1, 0], f['grid'][-1, -1, 1]))
             if x_init is None:
                 print('Automatic parameters')
-                bl = np.array((f['grid'][0, 0, 0], f['grid'][0, 0, 1]))
-                tr = np.array((f['grid'][-1, -1, 0], f['grid'][-1, -1, 1]))
                 offset = (tr - bl) * 0.1
                 x_init = bl + offset
                 x_target = tr - offset

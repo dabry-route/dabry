@@ -517,7 +517,7 @@ class SolverEF:
         self._index_p = 0
         self._index_d = 0
 
-        self.max_steps = max_steps if max_steps is not None else int(max_time / abs(dt))
+        self.max_steps = max_steps if max_steps is not None else int(max_time / abs(self.dt))
 
         self.N_filling_steps = 1
 
@@ -961,7 +961,12 @@ class SolverEF:
                         self.p_inits[idf][:] = new_p_init
                         pcl = Particle(idf, pcl1.idt, pcl1.t, state, adjoint, cost)
                         intersec.append((i, j, pcl))
-
+            def clen(i, j):
+                if j < i:
+                    j += n_edges
+                return j - i
+            if len(comps) == 1:
+                intersec = sorted(intersec, key=lambda e: clen(e[0], e[1]))[:-1]
             for i, j, pcl in intersec:
                 for k in range(i + 1, j + 1):
                     self.rel.deactivate(comp[k], reason='trimming')
