@@ -13,7 +13,7 @@ from numpy import sin, pi, cos
 from math import atan2, asin
 import matplotlib.pyplot as plt
 
-from mermoz.aero import LLAero, Aero
+from mermoz.aero import LLAero, Aero, MermozAero
 
 sys.path.extend('/home/bastien/Documents/work/mdisplay/src/mdisplay/')
 from mdisplay.misc import windy_cm
@@ -108,7 +108,12 @@ class PostProcessing:
             except KeyError:
                 self.aero_mode = 'dobro'
 
-        self.aero = LLAero(mode=self.aero_mode)
+        if self.aero_mode in ['dobro', 'mermoz']:
+            self.aero = LLAero(mode=self.aero_mode)
+        elif self.aero_mode == 'mermoz_fitted':
+            self.aero = MermozAero()
+        else:
+            raise Exception(f'Unknown aero {self.aero_mode}')
 
         wind_fp = os.path.join(self.output_dir, self.wind_fn)
         self.wind = DiscreteWind(interp='pwc')
@@ -275,18 +280,20 @@ class PostProcessing:
         y = np.linspace(0.5, 1.15 * max(energies), 100)
         x, y = np.meshgrid(x, y, indexing='ij')
         points = zip(x, y)
-        levels = p_min*(1 + np.arange(13)/4)
+        levels = p_min * (1 + np.arange(13) / 4)
         labels = {}
         for l in levels:
-            labels[l] = f'{l/p_min:.2f}'+'$P_{min}$'
+            labels[l] = f'{l / p_min:.2f}' + '$P_{min}$'
         cont = ax.contour(x, y, list(map(lambda p: 1e3 * p[1] / p[0], points)), levels=levels, alpha=0.5)
+
         def constant_asp_energy(l, t):
-            return t * self.aero.power(l/t)
+            return t * self.aero.power(l / t)
+
         ax.clabel(cont, fontsize=12, fmt=labels)
         tts = np.linspace(4, 100., 100)
         tts = tts[tts < (self.geod_l / self.aero.v_minp / 3.6e3)]
         ax.plot(tts, list(
-            map(lambda t: constant_asp_energy(self.geod_l, t*3.6e3)/3.6e6,
+            map(lambda t: constant_asp_energy(self.geod_l, t * 3.6e3) / 3.6e6,
                 tts)), color='gray', alpha=0.5, linestyle='--')
         ax.set_xlim((0, 1.15 * max(times)))
         ax.set_ylim((0, 1.15 * max(energies)))

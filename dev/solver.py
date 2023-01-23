@@ -65,12 +65,12 @@ if __name__ == '__main__':
     chrono.stop()
 
     mdfm.dump_obs(pb)
-    pb.update_airspeed(11.)
+    pb.update_airspeed(20.)
 
     # Setting the extremal solver
     t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.v_a
-    solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02,
-                                  quick_solve=True)
+    solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=200, rel_nb_ceil=0.02,
+                                  quick_solve=True, mode=1)
 
     chrono.start('Solving problem using extremal field (EF)')
     res_ef = solver_ef.solve()

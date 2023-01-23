@@ -2,7 +2,7 @@ import h5py
 from mpl_toolkits.basemap import Basemap
 from pyproj import Proj
 
-from mermoz.aero import LLAero
+from mermoz.aero import LLAero, MermozAero
 from mermoz.feedback import Feedback, AirspeedLaw, MultiFeedback, GSTargetFB
 from mermoz.integration import IntEulerExpl
 from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
@@ -56,7 +56,8 @@ class MermozProblem:
         self.x_target = np.zeros(2)
         self.x_target[:] = x_target
         self.coords = coords
-        self.aero = LLAero()
+        # self.aero = LLAero(mode='mermoz')
+        self.aero = MermozAero()
 
         # Domain bounding box corners
         if bl is not None:

@@ -705,7 +705,7 @@ class SolverEF:
             self.create_between(idf, iu, pcl.idt)
 
         # Trimming procedure
-        if self.no_coll_filtering:
+        if self.no_coll_filtering and self.mode == 0:
             if self.it % self.trimming_rate == 0:
                 self.trim()
 

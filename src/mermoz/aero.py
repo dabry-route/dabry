@@ -72,7 +72,7 @@ class LLAero(Aero):
             self.kp2 = 500
         else:
             raise Exception(f'Unknown mode {mode}')
-        self.v_minp = (self.kp2 / (3 * self.kp1)) ** (1/4)
+        self.v_minp = (self.kp2 / (3 * self.kp1)) ** (1 / 4)
 
     def power(self, airspeed):
         return self.kp1 * airspeed ** 3 + self.kp2 / airspeed
@@ -83,3 +83,30 @@ class LLAero(Aero):
     def asp_opti(self, adjoint):
         pn = self._vec_or_float_to_norm(adjoint)
         return np.sqrt(pn / (6 * self.kp1) + np.sqrt(self.kp2 / (3 * self.kp1) + pn ** 2 / (36 * self.kp1 ** 2)))
+
+
+class MermozAero(Aero):
+    """
+    Model P_req = A0 V ^ 3 + A1 V + A2 1 / V from fitting CD = a0 CL ^ 2 + a1 CL + a2 to real polar
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.A0 = 0.0152
+        self.A1 = -6.1139
+        self.A2 = 1782
+        self._B0 = 12 * self.A2 / self.A0
+        self.v_minp = np.sqrt(1/(6 * self.A0) * (-self.A1 + np.sqrt(self.A1 ** 2 + 12 * self.A0 * self.A2)))
+        self.v_fmax = (self.A2 / self.A0) ** (1 / 4)
+        self.mode = 'mermoz_fitted'
+
+    def power(self, asp):
+        return self.A0 * asp ** 3 + self.A1 * asp + self.A2 / asp
+
+    def d_power(self, asp):
+        return 3 * self.A0 * asp ** 2 + self.A1 - self.A2 / (asp ** 2)
+
+    def asp_opti(self, adjoint):
+        pn = self._vec_or_float_to_norm(adjoint)
+        a = (pn - self.A1) / self.A0
+        return np.sqrt(1 / 6 * (a + np.sqrt(a ** 2 + self._B0)))
