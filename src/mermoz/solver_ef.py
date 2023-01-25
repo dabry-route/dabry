@@ -333,13 +333,30 @@ class Relations:
         if len(self.active) == 0:
             return []
         i = i0 = self.active[0]
+        k = 1
+        # while i in self.dead_links:
+        #     i = i0 = self.active[k]
+        #     k += 1
         i_active = True
         i_captive = False
         comp[icomp].append(i)
         _, j = self.get(i)
         in_comp = True
         start = True
+        #print(f'\n{i0}')
+        i1, i2 = self.get(i0)
+        # print(i1, i2)
+        # print(self.get(i1))
+        # print(self.get(i2))
+        s = set()
+        s2 = set()
         while i != i0 or start:
+            s.add(j)
+            if s == s2:
+                # print(s)
+                # print(j)
+                # print(self.get(j))
+                raise Exception('')
             start = False
             j_active = j in self.active
             j_captive = j in self.captive
@@ -355,6 +372,7 @@ class Relations:
             i_active = j_active
             i_captive = j_captive
             i = j
+            s2.add(j)
             _, j = self.get(i)
         return comp
 
@@ -961,10 +979,12 @@ class SolverEF:
                         self.p_inits[idf][:] = new_p_init
                         pcl = Particle(idf, pcl1.idt, pcl1.t, state, adjoint, cost)
                         intersec.append((i, j, pcl))
+
             def clen(i, j):
                 if j < i:
                     j += n_edges
                 return j - i
+
             if len(comps) == 1:
                 intersec = sorted(intersec, key=lambda e: clen(e[0], e[1]))[:-1]
             for i, j, pcl in intersec:

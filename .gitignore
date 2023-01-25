@@ -167,3 +167,4 @@ output/*
 /rft/main/
 /rft/main.prj
 /LICENSE_HEADER
+/tests/out

@@ -9,7 +9,7 @@ from mermoz.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 0
+    pb_id = 21
     # Or choose database problem. If empty, will use previous ID
     dbpb = '44W_16S_9W_25S_20220301_12'
     suffix = ''
@@ -69,8 +69,8 @@ if __name__ == '__main__':
 
     # Setting the extremal solver
     t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.v_a
-    solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=200, rel_nb_ceil=0.02,
-                                  quick_solve=True, mode=1)
+    solver_ef = solver = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02,
+                                  quick_solve=True, mode=0)
 
     chrono.start('Solving problem using extremal field (EF)')
     res_ef = solver_ef.solve()
