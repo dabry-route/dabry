@@ -17,7 +17,7 @@ class MDFmanager:
     This class handles the writing and reading of Mermoz Data Format (MDF) files
     """
 
-    def __init__(self):
+    def __init__(self, cache_wind=False, cache_rff=False):
         self.module_dir = None
         self.case_dir = None
         self.trajs_filename = 'trajectories.h5'
@@ -25,6 +25,8 @@ class MDFmanager:
         self.obs_filename = 'obs.h5'
         self.case_name = None
         self.ps = ParamsSummary()
+        self.cache_wind = cache_wind
+        self.cache_rff = cache_rff
 
     def setup(self, module_dir=None):
         if module_dir is not None:
@@ -44,13 +46,15 @@ class MDFmanager:
             os.mkdir(self.case_dir)
         self.ps.setup(self.case_dir)
 
-    def clean_output_dir(self, keep_rff=False, keep_wind=False):
+    def clean_output_dir(self):
         if not os.path.exists(self.case_dir):
             return
         for filename in os.listdir(self.case_dir):
-            if (not (keep_rff and filename.endswith('rff.h5'))) and \
-                    (not (keep_wind and filename.endswith('wind.h5'))):
-                os.remove(os.path.join(self.case_dir, filename))
+            if filename.endswith('wind.h5') and self.cache_wind:
+                continue
+            if filename.endswith('rff.h5') and self.cache_rff:
+                continue
+            os.remove(os.path.join(self.case_dir, filename))
 
     def save_script(self, script_path):
         shutil.copy(script_path, self.case_dir)
@@ -148,6 +152,8 @@ class MDFmanager:
             exit(1)
         filename = self.wind_filename if filename is None else filename
         filepath = os.path.join(self.case_dir, filename)
+        if os.path.exists(filepath) and self.cache_wind:
+            return
         if wind.is_dumpable == 1:
             if nx is None or ny is None:
                 print(f'Please provide grid shape "nx=..., ny=..." to sample analytical wind "{wind}"')

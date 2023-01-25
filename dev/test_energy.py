@@ -29,45 +29,48 @@ from mermoz.wind import DiscreteWind
 if __name__ == '__main__':
     # Choose problem ID
     pb_id, seed = 5, 0
-    dbpb = None  # '72W_15S_0W_57S_20220301_12' # '37W_8S_16W_17S_20220301_12'
+    dbpb = '44W_16S_9W_25S_20220301_12'  # '72W_15S_0W_57S_20220301_12' # '37W_8S_16W_17S_20220301_12'
     cache_rff = False
     cache_wind = False
 
     chrono = Chrono()
 
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = MDFmanager(cache_wind=True)
+    mdfm.setup()
     if dbpb is not None:
-        output_dir = f'/home/bastien/Documents/work/mermoz/output/example_energy_{dbpb}'
+        case_name = f'example_energy_{dbpb}'
     else:
-        output_dir = f'/home/bastien/Documents/work/mermoz/output/example_energy_{IndexedProblem.problems[pb_id][1]}'
-    mdfm.set_output_dir(output_dir)
-    #mdfm.clean_output_dir(keep_rff=cache_rff, keep_wind=cache_wind)
+        case_name = f'example_energy_{IndexedProblem.problems[pb_id][1]}'
+    mdfm.set_case(case_name)
+    mdfm.clean_output_dir()
 
     nx_rft, ny_rft, nt_rft = 101, 101, 20
 
-    if dbpb is not None:
-        pb = DatabaseProblem(os.path.join('/home/bastien/Documents/data/wind/ncdc/', dbpb, 'wind.h5'), airspeed=23.)
+    if len(dbpb) > 0:
+        pb = DatabaseProblem(os.path.join('/home/bastien/Documents/data/wind/ncdc/', dbpb, 'wind.h5'),
+                             x_init=DEG_TO_RAD * np.array([-35.2080905, -5.805398]),
+                             x_target=DEG_TO_RAD * np.array([-17.447938, 14.693425]))
     else:
         pb = IndexedProblem(pb_id, seed=seed)
 
-    if not cache_wind:
-        chrono.start('Dumping windfield to file')
-        mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
-        chrono.stop()
+    chrono.start('Dumping windfield to file')
+    mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
+    chrono.stop()
 
     pareto = Pareto()
-    pareto.load(output_dir)
+    pareto.load(mdfm.case_dir)
 
-    asp_inits = [[11.5, 12, 12.5, 14],
-                 []]
+    asp_inits = [[24],
+                 [21]]
 
-    dt = 0.001 * pb.geod_l / pb.model.v_a
+    t_upper_bound = 1.5 * pb.geod_l / min(asp_inits[0] + asp_inits[1])
+    dt = t_upper_bound / 1000
     for mode in [0, 1]:
         for asp_init in asp_inits[mode]:
             chrono.start(f'Computing EF Mode {mode} Airspeed {asp_init:.2f}')
             pb.update_airspeed(asp_init)
-            solver_ef = solver = SolverEF(pb, 100*3.6e3, mode=mode, rel_nb_ceil=0.01,
+            solver_ef = solver = SolverEF(pb, t_upper_bound, mode=mode, rel_nb_ceil=0.02,
                                           dt=dt,
                                           no_coll_filtering=True,
                                           asp_init=asp_init,
@@ -84,16 +87,14 @@ if __name__ == '__main__':
                 if optim_res.status:
                     pareto.add((optim_res.duration, optim_res.cost))
             else:
-                for b in optim_res.bests.values():
-                    mdfm.dump_trajs([b['traj']])
+                for k in optim_res.bests.keys():
+                    mdfm.dump_trajs([optim_res.trajs[k]])
                     if optim_res.status:
-                        pareto.add((b['duration'], b['cost']))
+                        pareto.add((optim_res.bests[k].t - pb.model.wind.t_start, optim_res.bests[k].cost))
             # trajs = solver.get_trajs()
             # mdfm.dump_trajs(trajs)
 
-    pareto.dump(output_dir)
-
-
+    pareto.dump(mdfm.case_dir)
 
     # chrono.start('Computing Energy EF')
     # t_upper_bound = 3 * pb.geod_l / pb.aero.v_minp
@@ -350,9 +351,10 @@ if __name__ == '__main__':
     # mdfm.dump_trajs(pb.trajs)
     # chrono.stop()
 
-    ps = ParamsSummary()
-    ps.set_output_dir(output_dir)
-    ps.load_from_problem(pb)
-    ps.dump()
+    # Extract information for display and write it to output
+    mdfm.ps.load_from_problem(pb)
+    mdfm.ps.dump()
+    # Also copy the script that produced the result to output dir for later reproduction
+    mdfm.save_script(__file__)
 
-    print(f'Results saved to {output_dir}')
+    print(f'Results saved to {mdfm.case_dir}')

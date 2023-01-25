@@ -2,7 +2,7 @@ import h5py
 from mpl_toolkits.basemap import Basemap
 from pyproj import Proj
 
-from mermoz.aero import LLAero
+from mermoz.aero import LLAero, MermozAero
 from mermoz.feedback import Feedback, AirspeedLaw, MultiFeedback, GSTargetFB
 from mermoz.integration import IntEulerExpl
 from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
@@ -56,7 +56,8 @@ class MermozProblem:
         self.x_target = np.zeros(2)
         self.x_target[:] = x_target
         self.coords = coords
-        self.aero = LLAero()
+        # self.aero = LLAero(mode='mermoz')
+        self.aero = MermozAero()
 
         # Domain bounding box corners
         if bl is not None:
@@ -290,10 +291,10 @@ class DatabaseProblem(MermozProblem):
 
         with h5py.File(wind_fpath, 'r') as f:
             coords = f.attrs['coords']
+            bl = np.array((f['grid'][0, 0, 0], f['grid'][0, 0, 1]))
+            tr = np.array((f['grid'][-1, -1, 0], f['grid'][-1, -1, 1]))
             if x_init is None:
                 print('Automatic parameters')
-                bl = np.array((f['grid'][0, 0, 0], f['grid'][0, 0, 1]))
-                tr = np.array((f['grid'][-1, -1, 0], f['grid'][-1, -1, 1]))
                 offset = (tr - bl) * 0.1
                 x_init = bl + offset
                 x_target = tr - offset
@@ -322,7 +323,7 @@ class DatabaseProblem(MermozProblem):
 
         zermelo_model = ZermeloGeneralModel(airspeed, coords=coords)
         zermelo_model.update_wind(total_wind)
-        super().__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles)
+        super().__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles, mask_land=False)
 
 
 class IndexedProblem(MermozProblem):
