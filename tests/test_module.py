@@ -78,10 +78,10 @@ if __name__ == '__main__':
             problems.remove(pb_id)
 
     if unit_pb >= 0:
-        test.solve(unit_pb)
+        test.solve(unit_pb, args.debug)
     else:
         chrono = Chrono()
         chrono.start('Starting test suite')
         for pb_id in problems:
-            test.solve(pb_id)
+            test.solve(pb_id, args.debug)
         test.sumup()
