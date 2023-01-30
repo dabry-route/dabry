@@ -49,12 +49,14 @@ source activate
 2) If you run from IDE, make sure the variables are set appropriately
 
 
-### Running the solver
+## Running the solver
 
-Run the 
-
-1) Set the environment variable `DABRYPATH` to the installation path
-2) Checkout `examples/solver_usage.py` to perform problem solving
+You can run the demo script `examples/double_gyre.py` which provides an example
+of how to run the solver.
 
 Results are saved to the `output` folder. The different output files are
 saved in `.h5` custom formats, which specification can be found in `docs`
+
+### Visualization
+
+Visualize results using the visualisation module `dabry-visu` (https://github.com/bschnitzler/dabry-visu)

@@ -40,7 +40,7 @@ if __name__ == '__main__':
     mdfm.dump_trajs(extremals)
 
     # Change this to allow front tracking
-    front_tracking = True
+    front_tracking = False
     if front_tracking:
         # Setting the front tracking solver
         solver_rp = SolverRP(pb, nx, ny, nt)
