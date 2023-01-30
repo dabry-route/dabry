@@ -1259,13 +1259,13 @@ class TrapWind(Wind):
 
     @staticmethod
     def sigmoid(r, wid):
-        return np.float(1 / (1 + np.exp(-4 / wid * r)))
+        return 1 / (1 + np.exp(-4 / wid * r))
 
     @staticmethod
     def d_sigmoid(r, wid):
         lam = 4 / wid
         s = TrapWind.sigmoid(r, wid)
-        return np.float(lam * s * (1 - s))
+        return lam * s * (1 - s)
 
     def value(self, t, x):
         i, alpha = self._index(t)
