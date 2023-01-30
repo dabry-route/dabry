@@ -5,7 +5,6 @@ import numpy as np
 import scipy.interpolate as itp
 
 import h5py
-from mpl_toolkits.basemap import Basemap
 from math import exp, log
 from pyproj import Proj
 
@@ -636,9 +635,10 @@ class DiscreteWind(Wind):
         self.is_analytical = False
 
     def _rotate_wind(self, u, v, x, y):
-        if self.bm is None:
-            self.bm = Basemap(projection='ortho', lon_0=RAD_TO_DEG * self.lon_0, lat_0=RAD_TO_DEG * self.lat_0)
-        return np.array(self.bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
+        raise Exception('Method not supported anymore')
+        # if self.bm is None:
+        #     self.bm = Basemap(projection='ortho', lon_0=RAD_TO_DEG * self.lon_0, lat_0=RAD_TO_DEG * self.lat_0)
+        # return np.array(self.bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
 
     def dualize(self):
         # Override method so that the dual of a DiscreteWind stays a DiscreteWind and
