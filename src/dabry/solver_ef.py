@@ -474,7 +474,7 @@ class SolverEF:
                  max_time,
                  mode=0,
                  N_disc_init=20,
-                 rel_nb_ceil=0.05,
+                 rel_nb_ceil=0.02,
                  dt=None,
                  max_steps=None,
                  collbuf_shape=None,
@@ -538,7 +538,7 @@ class SolverEF:
         self._index_p = 0
         self._index_d = 0
 
-        self.max_steps = max_steps if max_steps is not None else int(max_time / abs(self.dt))
+        self.max_steps = max_steps if max_steps is not None else min(int(max_time / abs(self.dt)), 1000)
 
         self.N_filling_steps = 1
 

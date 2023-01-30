@@ -3,7 +3,7 @@ import numpy as np
 from dabry.problem import NavigationProblem
 from dabry.rft import RFT
 from dabry.feedback import FunFB
-from dabry.solver_ef import EFOptRes
+from dabry.solver_ef import EFOptRes, Particle
 from dabry.stoppingcond import DistanceSC
 from dabry.misc import Utils
 
@@ -68,15 +68,13 @@ class SolverRP:
         if status:
             self.reach_time = self.rft.get_time(self.mp.x_target) - self.mp.model.wind.t_start
             traj = self.get_opti_traj()
-            bests = {
-                0: {'cost': self.reach_time,
-                    'duration': self.reach_time,
-                    'traj': traj,
-                    'adjoint': None}
-            }
+            fake_pcl = Particle(0, 0, self.reach_time, traj.points[-1], np.zeros(2), self.reach_time)
+            bests = {0: fake_pcl}
+            trajs = {0: traj}
         else:
             bests = {}
-        return EFOptRes(status, bests)
+            trajs = {}
+        return EFOptRes(status, bests, trajs, self.mp)
 
     def get_opti_traj(self, int_step=100):
         self.mp.load_feedback(FunFB(lambda x: self.control(x, backward=True), no_time=True))

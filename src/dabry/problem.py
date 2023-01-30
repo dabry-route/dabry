@@ -1,3 +1,5 @@
+import os
+
 import h5py
 from pyproj import Proj
 import numpy as np
@@ -278,8 +280,9 @@ class NavigationProblem:
 
 class DatabaseProblem(NavigationProblem):
 
-    def __init__(self, wind_fpath, x_init=None, x_target=None, airspeed=Utils.AIRSPEED_DEFAULT, obstacles=None):
+    def __init__(self, problem_name, x_init=None, x_target=None, airspeed=Utils.AIRSPEED_DEFAULT, obstacles=None):
         total_wind = DiscreteWind(interp='linear')
+        wind_fpath = os.path.join(os.environ.get('DABRYPATH'), 'data', problem_name, 'wind.h5')
         total_wind.load(wind_fpath)
         print(f'Problem from database : {wind_fpath}')
 

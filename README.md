@@ -1,6 +1,6 @@
-## Optimal trajectory planning in winds
+# Optimal trajectory planning in winds
 
-### Presentation
+## Presentation
 
 This module tackles trajectory optimization problems in strong,
 non-uniform and unsteady flow fields, in particular wind fields.
@@ -18,9 +18,42 @@ be done using:
 
 The module supports 2D planar environment as well as spherical problems.
 
-### Getting started
+## Installation
 
-1) Set the environment variable `MERMOZ_PATH` to the installation path
+Clone this repo and open a shell in the directory where it has been cloned
+
+### Virtual environment
+
+Create a new virtual environment
+```sh
+python3 -m venv env
+```
+Activate it
+```sh
+source env/bin/activate
+```
+Now install dependencies
+```sh
+python3 -m pip install -r requirements.txt
+```
+
+### Configuration
+
+The variable `DABRYPATH` shall point to the cloned repo root.
+The variable `PYTHONPATH` shall also point to the `src` folder for Python to find the module.
+
+1) If you run the scripts from the shell, first load paths using
+```sh
+source activate
+```
+2) If you run from IDE, make sure the variables are set appropriately
+
+
+### Running the solver
+
+Run the 
+
+1) Set the environment variable `DABRYPATH` to the installation path
 2) Checkout `examples/solver_usage.py` to perform problem solving
 
 Results are saved to the `output` folder. The different output files are

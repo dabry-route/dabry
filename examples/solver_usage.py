@@ -3,7 +3,6 @@ import numpy as np
 
 from dabry.mdf_manager import DDFmanager
 from dabry.obstacle import GreatCircleObs, ParallelObs
-from dabry.params_summary import ParamsSummary
 from dabry.misc import Utils, Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem
 from dabry.solver_ef import SolverEF
@@ -11,9 +10,9 @@ from dabry.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 22
+    pb_id = 19
     # Or choose database problem. If empty, will use previous ID
-    dbpb = '72W_15S_0W_57S_20220301_12'
+    dbpb = ''
     # When running several times, wind data or reachability fronts data can be cached
     cache_wind = False
     cache_rff = False
@@ -22,14 +21,14 @@ if __name__ == '__main__':
     chrono = Chrono()
 
     # Create a file manager to dump problem data
-    mdfm = DDFmanager()
+    mdfm = DDFmanager(cache_wind=cache_wind, cache_rff=cache_rff)
     mdfm.setup()
     if len(dbpb) > 0:
-        case_name = f'example_solver-ef_{dbpb}'
+        case_name = f'example_{dbpb.split("/")[-1]}'
     else:
-        case_name = f'example_solver-ef_{IndexedProblem.problems[pb_id][1]}_other'
+        case_name = f'example_{IndexedProblem.problems[pb_id][1]}'
     mdfm.set_case(case_name)
-    mdfm.clean_output_dir(keep_rff=cache_rff, keep_wind=cache_wind)
+    mdfm.clean_output_dir()
 
     # Space and time discretization
     # Will be used to save wind when wind is analytical and shall be sampled
@@ -40,12 +39,7 @@ if __name__ == '__main__':
 
     # Create problem
     if len(dbpb) > 0:
-        obs = []
-        obs.append(GreatCircleObs(np.array((-70 * Utils.DEG_TO_RAD, 30 * Utils.DEG_TO_RAD)),
-                                  np.array((20 * Utils.DEG_TO_RAD, 60 * Utils.DEG_TO_RAD))))
-        obs.append(ParallelObs(18 * Utils.DEG_TO_RAD, True))
-        pb = DatabaseProblem(os.path.join(os.environ.get('MERMOZ_WIND_PATH'), dbpb, 'wind.h5'), airspeed=23.,
-                             obstacles=obs)
+        pb = DatabaseProblem(dbpb)
     else:
         pb = IndexedProblem(pb_id)
 
@@ -57,7 +51,7 @@ if __name__ == '__main__':
         chrono.stop()
 
     # Setting the extremal solver
-    solver_ef = solver = SolverEF(pb, pb.time_scale, max_steps=100, rel_nb_ceil=0.02)
+    solver_ef = solver = SolverEF(pb, pb.time_scale)
 
     chrono.start('Solving problem using extremal field (EF)')
     res_ef = solver_ef.solve()

@@ -38,10 +38,10 @@ class DDFmanager:
             self.module_dir = path
 
     def set_case(self, case_name):
-        self.case_name = case_name
+        self.case_name = case_name.split('/')[-1]
         if self.module_dir is None:
             raise Exception('Output directory not specified yet')
-        self.case_dir = os.path.join(self.module_dir, 'output', case_name)
+        self.case_dir = os.path.join(self.module_dir, 'output', self.case_name)
         if not os.path.exists(self.case_dir):
             os.mkdir(self.case_dir)
         self.ps.setup(self.case_dir)
