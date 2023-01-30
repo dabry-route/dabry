@@ -13,7 +13,7 @@ class Test:
     def __init__(self, output_dir):
         self.output_dir = output_dir
 
-    def solve(self, pb_id):
+    def solve(self, pb_id, debug=False):
         output_dir = os.path.join(self.output_dir, f'{pb_id}')
         if not os.path.exists(output_dir):
             os.mkdir(output_dir)
@@ -26,8 +26,10 @@ class Test:
             solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=args.quicksolve)
             solver_ef.solve(verbose=1 if args.multithreaded else 2)
             status = 0
-        except Exception:
+        except Exception as e:
             status = 1
+            if debug:
+                raise e
         with open(os.path.join(output_dir, f'{pb_id}'), 'w') as f:
             f.writelines([f'{status}'])
 
@@ -54,6 +56,8 @@ if __name__ == '__main__':
     parser.add_argument('-q', '--quicksolve', help='Use quick solve mode', action='store_const',
                         const=True, default=False)
     parser.add_argument('-s', '--sumup', help='Print test outcome sumup', action='store_const',
+                        const=True, default=False)
+    parser.add_argument('-d', '--debug', help='Debug mode', action='store_const',
                         const=True, default=False)
     args = parser.parse_args(sys.argv[1:])
     unit_pb = -1
