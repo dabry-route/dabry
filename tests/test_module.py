@@ -64,8 +64,10 @@ if __name__ == '__main__':
     pb_ok = []
     pb_nok = []
     problems = []
-    if not os.path.exists('tests/out'):
+    try:
         os.mkdir('tests/out')
+    except FileExistsError:
+        pass
     test = Test('tests/out')
     if args.sumup:
         test.sumup()
