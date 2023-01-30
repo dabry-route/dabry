@@ -1,5 +1,4 @@
 import h5py
-from mpl_toolkits.basemap import Basemap
 from pyproj import Proj
 
 from dabry.aero import LLAero, MermozAero
@@ -45,7 +44,6 @@ class NavigationProblem:
                  bl=None,
                  tr=None,
                  autodomain=True,
-                 mask_land=True,
                  autoframe=False,
                  descr=None,
                  time_scale=None,
@@ -98,15 +96,9 @@ class NavigationProblem:
                     w = 1.15 * self.geod_l
                     self.bl = (self.x_init + self.x_target) / 2. - np.array((w / 2., w / 2.))
                     self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
-                if self.coords == COORD_GCS and mask_land:
+                if self.coords == COORD_GCS:
                     factor = 1. if wind.units_grid == U_DEG else RAD_TO_DEG
-                    self.bm = Basemap(llcrnrlon=factor * self.bl[0],
-                                      llcrnrlat=factor * self.bl[1],
-                                      urcrnrlon=factor * self.tr[0],
-                                      urcrnrlat=factor * self.tr[1],
-                                      projection='cyl', resolution='c')
-                self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1] and \
-                                        (self.bm is None or not self.bm.is_land(factor * x[0], factor * x[1]))
+                self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
         else:
             if self.bl is not None and self.tr is not None:
                 self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1] and domain(x)
