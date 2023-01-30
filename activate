@@ -1,0 +1,2 @@
+export DABRYPATH=$(pwd)
+export PYTHONPATH=$DABRYPATH/src
