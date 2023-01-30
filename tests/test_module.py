@@ -60,6 +60,8 @@ if __name__ == '__main__':
     pb_ok = []
     pb_nok = []
     problems = []
+    if not os.path.exists('tests/out'):
+        os.mkdir('tests/out')
     test = Test('tests/out')
     if args.sumup:
         test.sumup()
