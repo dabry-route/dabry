@@ -1,12 +1,12 @@
 import os
 
-from mermoz.mdf_manager import MDFmanager
-from mermoz.obstacle import GreatCircleObs, ParallelObs
-from mermoz.params_summary import ParamsSummary
-from mermoz.misc import *
-from mermoz.problem import IndexedProblem, DatabaseProblem
-from mermoz.solver_ef import SolverEF
-from mermoz.solver_rp import SolverRP
+from dabry.mdf_manager import DDFmanager
+from dabry.obstacle import GreatCircleObs, ParallelObs
+from dabry.params_summary import ParamsSummary
+from dabry.misc import *
+from dabry.problem import IndexedProblem, DatabaseProblem
+from dabry.solver_ef import SolverEF
+from dabry.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
@@ -21,7 +21,7 @@ if __name__ == '__main__':
     chrono = Chrono()
 
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = DDFmanager()
     mdfm.setup()
     if len(dbpb) > 0:
         case_name = f'example_solver-ef_{dbpb}'

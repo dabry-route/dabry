@@ -1,29 +1,9 @@
 import os
-import time
-from math import atan2
-
-from datetime import datetime, timedelta
-
-import matplotlib.pyplot as plt
-import numpy as np
-import scipy.optimize
-from tqdm import tqdm
-import sys
-sys.path.extend([
-    '/home/bastien/Documents/work/mermoz/src',
-    '/home/bastien/Documents/work/mdisplay/src'
-])
-from mermoz.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB, FixedHeadingFB, FunAS, E_GSTargetFB
-from mermoz.mdf_manager import MDFmanager
-from mermoz.params_summary import ParamsSummary
-from mermoz.misc import *
-from mermoz.problem import IndexedProblem, DatabaseProblem
-from mermoz.shooting import Shooting
-from mermoz.solver_ef import SolverEF, Pareto
-from mermoz.trajectory import Trajectory
-from mermoz.solver_rp import SolverRP
-from mermoz.stoppingcond import TimedSC, DistanceSC, DisjunctionSC
-from mermoz.wind import DiscreteWind
+from dabry.mdf_manager import DDFmanager
+from dabry.misc import *
+from dabry.problem import IndexedProblem, DatabaseProblem
+from dabry.shooting import Shooting
+from dabry.solver_ef import SolverEF, Pareto
 
 
 if __name__ == '__main__':
@@ -36,7 +16,7 @@ if __name__ == '__main__':
     chrono = Chrono()
 
     # Create a file manager to dump problem data
-    mdfm = MDFmanager(cache_wind=True)
+    mdfm = DDFmanager(cache_wind=True)
     mdfm.setup()
     if dbpb is not None:
         case_name = f'example_energy_{dbpb}'

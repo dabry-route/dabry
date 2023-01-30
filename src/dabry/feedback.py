@@ -3,9 +3,9 @@ import random
 from math import atan2
 import scipy.optimize
 
-from mermoz.aero import Aero
-from mermoz.wind import Wind, UniformWind
-from mermoz.misc import *
+from dabry.aero import Aero
+from dabry.wind import Wind, UniformWind
+from dabry.misc import *
 
 
 class Feedback(ABC):

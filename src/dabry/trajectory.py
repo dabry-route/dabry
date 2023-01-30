@@ -5,7 +5,7 @@ from .misc import *
 
 class Trajectory:
     """
-    The definition of a trajectory for the Mermoz problem
+    The definition of a trajectory for the navigation problem
     """
 
     def __init__(self,

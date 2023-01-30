@@ -6,10 +6,10 @@ import time
 import markdown
 import datetime
 
-from mermoz.problem import MermozProblem
-from mermoz.solver import Solver
-from mermoz.misc import *
-from mermoz.solver_rp import SolverRP
+from dabry.problem import NavigationProblem
+from dabry.solver import Solver
+from dabry.misc import *
+from dabry.solver_rp import SolverRP
 
 
 class ParamsSummary:
@@ -44,9 +44,9 @@ class ParamsSummary:
         self.md = None
 
     def setup(self, output_dir):
-        path = os.environ.get('MERMOZ_PATH')
+        path = os.environ.get('DABRYPATH')
         if path is None:
-            raise Exception('Unable to set output dir automatically. Please set MERMOZ_PATH variable.')
+            raise Exception('Unable to set output dir automatically. Please set DABRYPATH variable.')
         self.module_dir = path
         self.params_ss_path = os.path.join(self.module_dir, 'docs')
         self.output_dir = output_dir
@@ -105,7 +105,7 @@ class ParamsSummary:
         self.add_param('ny_rft', sv.ny_rft)
         self.add_param('nt_rft_eff', sv.nt_rft_eff)
 
-    def load_from_problem(self, pb: MermozProblem):
+    def load_from_problem(self, pb: NavigationProblem):
         self.add_param('coords', pb.coords)
         self.add_param('x_init', tuple(pb.x_init))
         self.add_param('x_target', tuple(pb.x_target))

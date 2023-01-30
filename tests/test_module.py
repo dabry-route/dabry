@@ -3,9 +3,9 @@ import os.path
 import shutil
 import sys
 
-from mermoz.misc import *
-from mermoz.problem import IndexedProblem
-from mermoz.solver_ef import SolverEF
+from dabry.misc import *
+from dabry.problem import IndexedProblem
+from dabry.solver_ef import SolverEF
 
 
 class Test:
@@ -53,19 +53,23 @@ if __name__ == '__main__':
                         const=True, default=False)
     parser.add_argument('-q', '--quicksolve', help='Use quick solve mode', action='store_const',
                         const=True, default=False)
+    parser.add_argument('-s', '--sumup', help='Print test outcome sumup', action='store_const',
+                        const=True, default=False)
     args = parser.parse_args(sys.argv[1:])
     unit_pb = -1
     pb_ok = []
     pb_nok = []
     problems = []
+    test = Test('tests/out')
+    if args.sumup:
+        test.sumup()
+        exit(0)
     if args.idtest != -1:
         unit_pb = int(sys.argv[1])
     else:
         problems = list(IndexedProblem.problems.keys())
         for pb_id in IndexedProblem.exclude_from_test:
             problems.remove(pb_id)
-
-    test = Test('tests/out')
 
     if unit_pb >= 0:
         test.solve(unit_pb)

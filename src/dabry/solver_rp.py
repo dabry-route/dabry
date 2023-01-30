@@ -1,9 +1,9 @@
-from mermoz.problem import MermozProblem
-from mermoz.rft import RFT
-from mermoz.misc import *
-from mermoz.feedback import FunFB
-from mermoz.solver_ef import EFOptRes
-from mermoz.stoppingcond import DistanceSC
+from dabry.problem import NavigationProblem
+from dabry.rft import RFT
+from dabry.misc import *
+from dabry.feedback import FunFB
+from dabry.solver_ef import EFOptRes
+from dabry.stoppingcond import DistanceSC
 
 
 class SolverRP:
@@ -16,7 +16,7 @@ class SolverRP:
     """
 
     def __init__(self,
-                 mp: MermozProblem,
+                 mp: NavigationProblem,
                  nx_rft,
                  ny_rft,
                  nt_rft,

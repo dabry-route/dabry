@@ -9,7 +9,7 @@ from mpl_toolkits.basemap import Basemap
 from math import exp, log
 from pyproj import Proj
 
-from mermoz.misc import *
+from dabry.misc import *
 
 
 class Wind:

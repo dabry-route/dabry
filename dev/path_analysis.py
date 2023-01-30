@@ -3,13 +3,13 @@ import os
 
 import h5py
 
-from mermoz.problem import IndexedProblem
-from mermoz.misc import *
-from mermoz.trajectory import Trajectory
-from mermoz.post_processing import PostProcessing
-from mermoz.mdf_manager import MDFmanager
-from mermoz.params_summary import ParamsSummary
-from mermoz.solver_rp import SolverRP
+from dabry.problem import IndexedProblem
+from dabry.misc import *
+from dabry.trajectory import Trajectory
+from dabry.post_processing import PostProcessing
+from dabry.mdf_manager import DDFmanager
+from dabry.params_summary import ParamsSummary
+from dabry.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID
@@ -20,7 +20,7 @@ if __name__ == '__main__':
         os.mkdir(output_dir)
 
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = DDFmanager()
     mdfm.set_output_dir(output_dir)
     mdfm.clean_output_dir()
     wind_fpath = '/home/bastien/Documents/data/wind/ncdc/test-postproc.mz/wind.h5'

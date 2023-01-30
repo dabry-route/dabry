@@ -3,23 +3,16 @@ import datetime
 import os
 import sys
 
-import asciitable
 import h5py
 import json
 
-import numpy as np
-import scipy.interpolate as itp
-from numpy import sin, pi, cos
-from math import atan2, asin
+from numpy import sin
 import matplotlib.pyplot as plt
 
-from mermoz.aero import LLAero, Aero, MermozAero
+from dabry.aero import LLAero, Aero, MermozAero
 
-sys.path.extend('/home/bastien/Documents/work/mdisplay/src/mdisplay/')
-from mdisplay.misc import windy_cm
-
-from mermoz.wind import DiscreteWind
-from mermoz.misc import *
+from dabry.wind import DiscreteWind
+from dabry.misc import *
 
 path_colors = ['b', 'g', 'r', 'c', 'm', 'y']
 
@@ -108,7 +101,7 @@ class PostProcessing:
             except KeyError:
                 self.aero_mode = 'dobro'
 
-        if self.aero_mode in ['dobro', 'mermoz']:
+        if self.aero_mode in ['dobro', 'dabry']:
             self.aero = LLAero(mode=self.aero_mode)
         elif self.aero_mode == 'mermoz_fitted':
             self.aero = MermozAero()
@@ -157,7 +150,7 @@ class PostProcessing:
             self.trajs.append(_traj)
         f.close()
 
-    def stats(self, fancynormplot=False):
+    def stats(self):
         fig, ax = plt.subplots(ncols=3, nrows=2, figsize=(12, 8))
         decorate(ax[0, 0], 'Marginal delay per length unit', 'Curvilinear abscissa (scaled)', '[h]')
         decorate(ax[0, 1], 'Power', 'Time (scaled)', '[W]')
@@ -218,12 +211,6 @@ class PostProcessing:
             ax[0, 2].plot(ts[:nt - 1], tstats.energy / 3.6e6, color=color)
             ax2.plot(ts[:nt - 1], tstats.dtarget, color=color, alpha=0.2)
             y = np.sqrt(tstats.cw ** 2 + tstats.tw ** 2)
-            if fancynormplot:
-                xx = np.linspace(0, nt - 1, 10 * (nt - 1))
-                yy = itp.interp1d(x, y)(xx)
-                ax[1, 1].scatter(xx, yy, c=windy_cm(yy / windy_cm.norm_max), s=0.5, color=color)
-            else:
-                ax[1, 1].plot(ts[:nt - 1], y, color=color)
             ax[1, 0].plot(ts[:nt - 1], tstats.gs, color=color)
             N_convolve = 10
             vas = np.convolve(tstats.vas, np.ones(N_convolve) / N_convolve,
@@ -256,7 +243,6 @@ class PostProcessing:
         data = [['', '#', 'Name', 'Time', 'Length (km)', 'Mean GS (m/s)', 'Mean AS (m/s)',
                  'Mean power (W)', 'Energy (kWh)', 'Intr']] + \
                list(map(lambda x: x[1], sorted(entries, key=lambda x: x[0])))
-        # asciitable.write(data, sys.stdout, Writer=asciitable.FixedWidthNoHeader)
         with open(os.path.join(self.output_dir, '..', '.post_proc', self.analysis_fn), 'w') as f:
             writer = csv.writer(f)
             writer.writerow([str(datetime.datetime.fromtimestamp(time.time())).split('.')[0]] + data[0][1:])
@@ -376,5 +362,5 @@ class PostProcessing:
 
 
 if __name__ == '__main__':
-    pp = PostProcessing('/home/bastien/Documents/work/mermoz/output/example_solver-pa_linear_0')
-    pp.stats(only_opti=True)
+    pp = PostProcessing('//output/example_solver-pa_linear_0')
+    pp.stats()

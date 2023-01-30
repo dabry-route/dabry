@@ -6,16 +6,16 @@ from datetime import datetime, timedelta
 import numpy as np
 import scipy.optimize
 
-from mermoz.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB
-from mermoz.mdf_manager import MDFmanager
-from mermoz.params_summary import ParamsSummary
-from mermoz.misc import *
-from mermoz.problem import IndexedProblem, DatabaseProblem
-from mermoz.shooting import Shooting
-from mermoz.solver_ef import SolverEF
-from mermoz.solver_rp import SolverRP
-from mermoz.stoppingcond import TimedSC, DistanceSC
-from mermoz.wind import DiscreteWind
+from dabry.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB
+from dabry.mdf_manager import DDFmanager
+from dabry.params_summary import ParamsSummary
+from dabry.misc import *
+from dabry.problem import IndexedProblem, DatabaseProblem
+from dabry.shooting import Shooting
+from dabry.solver_ef import SolverEF
+from dabry.solver_rp import SolverRP
+from dabry.stoppingcond import TimedSC, DistanceSC
+from dabry.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
@@ -27,7 +27,7 @@ if __name__ == '__main__':
     chrono = Chrono()
 
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = DDFmanager()
     if dbpb is not None:
         output_dir = f'/home/bastien/Documents/work/mermoz/output/example_solver-ef_{dbpb}'
     else:

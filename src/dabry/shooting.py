@@ -2,10 +2,10 @@ import warnings
 from abc import ABC
 from scipy.integrate import ode, odeint
 
-from mermoz.dynamics import Dynamics
-from mermoz.stoppingcond import PrecisionSC, TimedSC
-from mermoz.trajectory import AugmentedTraj
-from mermoz.misc import *
+from dabry.dynamics import Dynamics
+from dabry.stoppingcond import PrecisionSC, TimedSC
+from dabry.trajectory import AugmentedTraj
+from dabry.misc import *
 
 
 class DomainException(Exception):

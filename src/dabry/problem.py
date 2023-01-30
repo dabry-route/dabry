@@ -2,15 +2,15 @@ import h5py
 from mpl_toolkits.basemap import Basemap
 from pyproj import Proj
 
-from mermoz.aero import LLAero, MermozAero
-from mermoz.feedback import Feedback, AirspeedLaw, MultiFeedback, GSTargetFB
-from mermoz.integration import IntEulerExpl
-from mermoz.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
+from dabry.aero import LLAero, MermozAero
+from dabry.feedback import Feedback, AirspeedLaw, MultiFeedback, GSTargetFB
+from dabry.integration import IntEulerExpl
+from dabry.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
     PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind, LVWind, TrapWind, ChertovskihWind
-from mermoz.model import Model, ZermeloGeneralModel
-from mermoz.stoppingcond import StoppingCond, TimedSC, DistanceSC
-from mermoz.misc import *
-from mermoz.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, LSEMaxiObs, MeanObs
+from dabry.model import Model, ZermeloGeneralModel
+from dabry.stoppingcond import StoppingCond, TimedSC, DistanceSC
+from dabry.misc import *
+from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, LSEMaxiObs, MeanObs
 
 """
 problem.py
@@ -33,7 +33,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
-class MermozProblem:
+class NavigationProblem:
 
     def __init__(self,
                  model: Model,
@@ -56,7 +56,7 @@ class MermozProblem:
         self.x_target = np.zeros(2)
         self.x_target[:] = x_target
         self.coords = coords
-        # self.aero = LLAero(mode='mermoz')
+        # self.aero = LLAero(mode='dabry')
         self.aero = MermozAero()
 
         # Domain bounding box corners
@@ -205,7 +205,7 @@ class MermozProblem:
             else:
                 kwargs[k] = v
 
-        return MermozProblem(**kwargs)
+        return NavigationProblem(**kwargs)
 
     def flatten(self):
         if self.coords != COORD_GCS:
@@ -282,7 +282,7 @@ class MermozProblem:
             return -1
 
 
-class DatabaseProblem(MermozProblem):
+class DatabaseProblem(NavigationProblem):
 
     def __init__(self, wind_fpath, x_init=None, x_target=None, airspeed=AIRSPEED_DEFAULT, obstacles=None):
         total_wind = DiscreteWind(interp='linear')
@@ -326,7 +326,7 @@ class DatabaseProblem(MermozProblem):
         super().__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles, mask_land=False)
 
 
-class IndexedProblem(MermozProblem):
+class IndexedProblem(NavigationProblem):
     problems = {
         0: ['Three vortices', '3vor'],
         1: ['Linear wind', 'linear'],
@@ -366,31 +366,32 @@ class IndexedProblem(MermozProblem):
             x_init = f * np.array([0., 0.])
             x_target = f * np.array([1., 0.])
 
-            # bl = f * np.array([-0.2, -1.])
-            # tr = f * np.array([1.2, 1.])
-
             bl = f * np.array([-2, -2])
             tr = f * np.array([2, 2])
 
-            import csv
-            with open('/home/bastien/Documents/work/mermoz/src/mermoz/.seeds/problem0/center1.csv', 'r') as file:
-                reader = csv.reader(file)
-                for k, row in enumerate(reader):
-                    if k == seed:
-                        omega1 = f * np.array(list(map(float, row)))
-                        break
-            with open('/home/bastien/Documents/work/mermoz/src/mermoz/.seeds/problem0/center2.csv', 'r') as file:
-                reader = csv.reader(file)
-                for k, row in enumerate(reader):
-                    if k == seed:
-                        omega2 = f * np.array(list(map(float, row)))
-                        break
-            with open('/home/bastien/Documents/work/mermoz/src/mermoz/.seeds/problem0/center3.csv', 'r') as file:
-                reader = csv.reader(file)
-                for k, row in enumerate(reader):
-                    if k == seed:
-                        omega3 = f * np.array(list(map(float, row)))
-                        break
+            omega1 = f * np.array((0.5, 0.8))
+            omega2 = f * np.array((0.8, 0.2))
+            omega3 = f * np.array((0.6, -0.5))
+
+            # import csv
+            # with open('/dabry/.seeds/problem0/center1.csv', 'r') as file:
+            #     reader = csv.reader(file)
+            #     for k, row in enumerate(reader):
+            #         if k == seed:
+            #             omega1 = f * np.array(list(map(float, row)))
+            #             break
+            # with open('/dabry/.seeds/problem0/center2.csv', 'r') as file:
+            #     reader = csv.reader(file)
+            #     for k, row in enumerate(reader):
+            #         if k == seed:
+            #             omega2 = f * np.array(list(map(float, row)))
+            #             break
+            # with open('/dabry/.seeds/problem0/center3.csv', 'r') as file:
+            #     reader = csv.reader(file)
+            #     for k, row in enumerate(reader):
+            #         if k == seed:
+            #             omega3 = f * np.array(list(map(float, row)))
+            #             break
 
             vortex1 = RankineVortexWind(omega1, f * fs * -1., f * 1e-1)
             vortex2 = RankineVortexWind(omega2, f * fs * -0.8, f * 1e-1)

@@ -1,15 +1,15 @@
 import os
 
-from mermoz.mdf_manager import MDFmanager
-from mermoz.obstacle import GreatCircleObs, ParallelObs, MaxiObs, LSEMaxiObs
-from mermoz.misc import *
-from mermoz.problem import IndexedProblem, DatabaseProblem
-from mermoz.solver_ef import SolverEF
-from mermoz.solver_rp import SolverRP
+from dabry.mdf_manager import DDFmanager
+from dabry.obstacle import GreatCircleObs, ParallelObs, MaxiObs, LSEMaxiObs
+from dabry.misc import *
+from dabry.problem import IndexedProblem, DatabaseProblem
+from dabry.solver_ef import SolverEF
+from dabry.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 21
+    pb_id = 0
     # Or choose database problem. If empty, will use previous ID
     dbpb = '44W_16S_9W_25S_20220301_12'
     suffix = ''
@@ -21,7 +21,7 @@ if __name__ == '__main__':
     chrono = Chrono()
 
     # Create a file manager to dump problem data
-    mdfm = MDFmanager(cache_wind, cache_rff)
+    mdfm = DDFmanager(cache_wind, cache_rff)
     mdfm.setup()
     if len(dbpb) > 0:
         case_name = f'example_solver-ef_{dbpb}' + (f'_{suffix}' if len(suffix) > 0 else '')
@@ -50,7 +50,7 @@ if __name__ == '__main__':
         # obs2 = GreatCircleObs(np.array((-30 * DEG_TO_RAD, 10 * DEG_TO_RAD)),
         #                           np.array((-31 * DEG_TO_RAD, 10 * DEG_TO_RAD)))
         # obs.append(LSEMaxiObs([obs1, obs2]))
-        pb = DatabaseProblem(os.path.join(os.environ.get('MERMOZ_WIND_PATH'), dbpb, 'wind.h5'),
+        pb = DatabaseProblem(os.path.join(os.environ.get('DABRY_WINDPATH'), dbpb, 'wind.h5'),
                              airspeed=23.,
                              obstacles=obs,
                              x_init=DEG_TO_RAD * np.array([-35.2080905, -5.805398]),

@@ -4,16 +4,16 @@ import time
 import matplotlib as mpl
 import numpy as np
 
-from mdisplay.geodata import GeoData
+from dabry.geodata import GeoData
 
-from mermoz.misc import *
-from mermoz.params_summary import ParamsSummary
-from mermoz.problem import MermozProblem
-from mermoz.model import ZermeloGeneralModel
-from mermoz.rft import RFT
-from mermoz.shooting import Shooting
-from mermoz.wind import DiscreteWind
-from mermoz.mdf_manager import MDFmanager
+from dabry.misc import *
+from dabry.params_summary import ParamsSummary
+from dabry.problem import NavigationProblem
+from dabry.model import ZermeloGeneralModel
+from dabry.rft import RFT
+from dabry.shooting import Shooting
+from dabry.wind import DiscreteWind
+from dabry.mdf_manager import DDFmanager
 
 mpl.style.use('seaborn-notebook')
 
@@ -30,7 +30,7 @@ def run():
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = DDFmanager()
     mdfm.set_output_dir(output_dir)
 
     print("Example : Test grib")
@@ -41,7 +41,6 @@ def run():
     # The time window upper bound in seconds
     T = 40 * 3600.
 
-    # Convert grib wind to Mermoz Data Format (MDF)
     wind_filename = 'gfs_4_20220324_1200_000.grb2'
     data_filepath = os.path.join(wind_data_dir, 'ncdc', wind_filename)
     bl = np.array((-50., 0.))
@@ -67,7 +66,7 @@ def run():
     x_init = 0.5 * (bl + tr)
 
     # Creates the navigation problem on top of the previous model
-    mp = MermozProblem(zermelo_model, T=T, visual_mode='only-map')
+    mp = NavigationProblem(zermelo_model, T=T, visual_mode='only-map')
 
     t_end = time.time()
     print(f"Done ({t_end - t_start:.3f} s)")

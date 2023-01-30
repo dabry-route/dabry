@@ -1,6 +1,6 @@
-from mermoz.dynamics import *
-from mermoz.problem import DatabaseProblem
-from mermoz.misc import *
+from dabry.dynamics import *
+from dabry.problem import DatabaseProblem
+from dabry.misc import *
 import random
 
 if __name__ == '__main__':

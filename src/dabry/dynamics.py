@@ -3,8 +3,8 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 
-from mermoz.misc import *
-from mermoz.wind import Wind, LinearWind
+from dabry.misc import *
+from dabry.wind import Wind, LinearWind
 
 
 class Dynamics(ABC):

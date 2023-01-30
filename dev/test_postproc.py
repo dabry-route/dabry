@@ -5,20 +5,20 @@ import matplotlib as mpl
 import numpy as np
 import scipy.optimize
 
-from mdisplay.geodata import GeoData
+from dabry.geodata import GeoData
 
-from mermoz.misc import *
-from mermoz.params_summary import ParamsSummary
-from mermoz.problem import MermozProblem
-from mermoz.model import ZermeloGeneralModel
-from mermoz.rft import RFT
-from mermoz.shooting import Shooting
-from mermoz.solver import Solver
-from mermoz.solver_rp import SolverRP
-from mermoz.trajectory import Trajectory
-from mermoz.wind import DiscreteWind
-from mermoz.mdf_manager import MDFmanager
-from mermoz.post_processing import PostProcessing
+from dabry.misc import *
+from dabry.params_summary import ParamsSummary
+from dabry.problem import NavigationProblem
+from dabry.model import ZermeloGeneralModel
+from dabry.rft import RFT
+from dabry.shooting import Shooting
+from dabry.solver import Solver
+from dabry.solver_rp import SolverRP
+from dabry.trajectory import Trajectory
+from dabry.wind import DiscreteWind
+from dabry.mdf_manager import DDFmanager
+from dabry.post_processing import PostProcessing
 
 mpl.style.use('seaborn-notebook')
 
@@ -35,7 +35,7 @@ def run():
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = DDFmanager()
     mdfm.set_output_dir(output_dir)
     mdfm.clean_output_dir()
 
@@ -75,7 +75,7 @@ def run():
     print(np.linalg.norm(x_target - x_init))
 
     # Creates the navigation problem on top of the previous model
-    mp = MermozProblem(zermelo_model, x_init, x_target, coords=coords)
+    mp = NavigationProblem(zermelo_model, x_init, x_target, coords=coords)
 
     t_end = time.time()
     print(f"Done ({t_end - t_start:.3f} s)")

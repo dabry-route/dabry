@@ -9,10 +9,10 @@ import h5py
 from matplotlib import pyplot as plt
 from math import atan2
 
-from mermoz.misc import *
-from mermoz.problem import MermozProblem
-from mermoz.trajectory import Trajectory
-from mermoz.wind import DiscreteWind
+from dabry.misc import *
+from dabry.problem import NavigationProblem
+from dabry.trajectory import Trajectory
+from dabry.wind import DiscreteWind
 
 
 def upwind_diff(field, axis, delta):
@@ -180,7 +180,7 @@ class RFT:
     Python interface for reachability front tracker
     """
 
-    def __init__(self, bl, tr, max_time, nx, ny, nt, mp: MermozProblem, kernel='matlab', method='sethian'):
+    def __init__(self, bl, tr, max_time, nx, ny, nt, mp: NavigationProblem, kernel='matlab', method='sethian'):
         """
         :param bl: Grid bottom left point
         :param tr: Grid top right point
@@ -188,7 +188,7 @@ class RFT:
         :param nx: Number of points in the x-axis direction
         :param ny: Number of points in the y-axis direction
         :param nt: Number of points in the time direction.
-        :param mp: The mermoz problem instance containing the analytic wind
+        :param mp: The dabry problem instance containing the analytic wind
         :param kernel: 'base' for Python implementation of level set methods or 'matlab'
         to use ToolboxLS (https://www.cs.ubc.ca/~mitchell/ToolboxLS)
         :param method: With 'base' kernel, select numerical scheme ('sethian' or 'lolla')
@@ -258,9 +258,9 @@ class RFT:
             exit(1)
 
     def setup_matlab(self):
-        path = os.environ.get('MERMOZ_PATH')
+        path = os.environ.get('DABRYPATH')
         if path is None:
-            raise Exception('Unable to locate matlab script. Please set MERMOZ_PATH variable.')
+            raise Exception('Unable to locate matlab script. Please set DABRYPATH variable.')
         self.matlabLS_path = os.path.join(path, 'rft')
 
     def compute(self):

@@ -340,7 +340,7 @@ def linear_wind_alyt_traj(airspeed, gradient, x_init, x_target, theta_f=None):
     print(f'T : {2 / w * np.tan(theta_f)}')
 
     points = np.array(list(map(lambda theta: analytic_traj(theta, theta_f), np.linspace(-theta_f, theta_f, 1000))))
-    from mermoz.trajectory import Trajectory
+    from dabry.trajectory import Trajectory
     return Trajectory(np.zeros(points.shape[0]),
                       points,
                       np.zeros(points.shape[0]),

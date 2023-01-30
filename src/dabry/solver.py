@@ -5,19 +5,19 @@ import scipy.optimize
 from matplotlib import pyplot as plt
 from heapq import heappush, heappop
 
-from mermoz.problem import MermozProblem
-from mermoz.shooting import Shooting
-from mermoz.trajectory import Trajectory
-from mermoz.misc import *
+from dabry.problem import NavigationProblem
+from dabry.shooting import Shooting
+from dabry.trajectory import Trajectory
+from dabry.misc import *
 
 
 class Solver:
     """
-    Solve the Mermoz problem
+    Solve navigation problems
     """
 
     def __init__(self,
-                 mp: MermozProblem,
+                 mp: NavigationProblem,
                  x_init,
                  x_target,
                  T,

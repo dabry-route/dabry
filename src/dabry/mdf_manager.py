@@ -6,15 +6,15 @@ import pygrib
 
 import h5py
 
-from mermoz.misc import *
-from mermoz.params_summary import ParamsSummary
-from mermoz.problem import MermozProblem
-from mermoz.wind import Wind, DiscreteWind
+from dabry.misc import *
+from dabry.params_summary import ParamsSummary
+from dabry.problem import NavigationProblem
+from dabry.wind import Wind, DiscreteWind
 
 
-class MDFmanager:
+class DDFmanager:
     """
-    This class handles the writing and reading of Mermoz Data Format (MDF) files
+    This class handles the writing and reading of Dabry Data Format (DDF) files
     """
 
     def __init__(self, cache_wind=False, cache_rff=False):
@@ -32,9 +32,9 @@ class MDFmanager:
         if module_dir is not None:
             self.module_dir = module_dir
         else:
-            path = os.environ.get('MERMOZ_PATH')
+            path = os.environ.get('DABRYPATH')
             if path is None:
-                raise Exception('Unable to set output dir automatically. Please set MERMOZ_PATH variable.')
+                raise Exception('Unable to set output dir automatically. Please set DABRYPATH variable.')
             self.module_dir = path
 
     def set_case(self, case_name):
@@ -103,7 +103,7 @@ class MDFmanager:
                     dset = trajgroup.create_dataset('energy', n - 1, dtype='f8', fillvalue=0.)
                     dset[:] = traj.energy[:n - 1]
 
-    def dump_obs(self, pb: MermozProblem, nx=100, ny=100):
+    def dump_obs(self, pb: NavigationProblem, nx=100, ny=100):
         filepath = os.path.join(self.case_dir, self.obs_filename)
         with h5py.File(os.path.join(filepath), 'w') as f:
             f.attrs['coords'] = pb.coords
@@ -245,8 +245,8 @@ class MDFmanager:
 
 
 if __name__ == '__main__':
-    mdfm = MDFmanager()
-    # mdfm.print_trajs('/home/bastien/Documents/work/mermoz/output/example_front_tracking2/trajectories.h5')
+    mdfm = DDFmanager()
+    # mdfm.print_trajs('/home/bastien/Documents/work/dabry/output/example_front_tracking2/trajectories.h5')
     mdfm.setup('/home/bastien/Documents/work/test')
     data_dir = '/home/bastien/Documents/data/other'
     # data_filepath = os.path.join(data_dir, 'gfs_3_20090823_0600_000.grb2')

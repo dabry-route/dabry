@@ -8,9 +8,9 @@ from shapely.geometry import Polygon, Point, LineString
 import csv
 import scipy.integrate
 
-from mermoz.misc import *
-from mermoz.problem import MermozProblem
-from mermoz.trajectory import AugmentedTraj
+from dabry.misc import *
+from dabry.problem import NavigationProblem
+from dabry.trajectory import AugmentedTraj
 
 """
 solver_ef.py
@@ -225,7 +225,7 @@ class EFOptRes:
         with optimal cost
         :param trajs: Dictionary with keys being trajectory indexes and values being optimal trajectories to
         which optimal particles belong
-        :param mp: MermozProblem
+        :param mp: NavigationProblem
         """
         self.status = status
         self.bests = bests
@@ -467,7 +467,7 @@ class SolverEF:
     MODE_ENERGY = 1
 
     def __init__(self,
-                 mp: MermozProblem,
+                 mp: NavigationProblem,
                  max_time,
                  mode=0,
                  N_disc_init=20,
@@ -482,7 +482,7 @@ class SolverEF:
                  quick_solve=False,
                  pareto=None):
         self.mp_primal = mp
-        self.mp_dual = MermozProblem(**mp.__dict__)  # mp.dualize()
+        self.mp_dual = NavigationProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
         self.mp_dual.x_init = np.array(self.mp_dual.x_target)
         self.mp_dual.x_target = np.array(mem)

@@ -3,9 +3,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-from mermoz.wind import VortexWind, RadialGaussWind, RankineVortexWind, DoubleGyreWind, PointSymWind, DiscreteWind, \
+from dabry.wind import VortexWind, RadialGaussWind, RankineVortexWind, DoubleGyreWind, PointSymWind, DiscreteWind, \
     TrapWind
-from mermoz.misc import *
+from dabry.misc import *
 
 
 class WindTester:
@@ -90,7 +90,7 @@ if __name__ == '__main__':
     wind = TrapWind(np.array(10.).reshape((1,1)), np.zeros((1, 2)), np.array(l_factor).reshape((1, 1)))
     # wind = DiscreteWind(interp='linear')
     # total_wind = DiscreteWind(force_analytical=True, interp='linear')
-    # total_wind.load('/home/bastien/Documents/work/mermoz/output/example_wf_san-juan_dublin/wind.h5')
+    # total_wind.load('/home/bastien/Documents/work/dabry/output/example_wf_san-juan_dublin/wind.h5')
     x_min, x_max = -1. * l_factor, 3 * l_factor
     y_min, y_max = -1. * l_factor, 3 * l_factor
 
