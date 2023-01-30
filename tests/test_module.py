@@ -3,9 +3,9 @@ import os.path
 import shutil
 import sys
 
-from mermoz.misc import *
-from mermoz.problem import IndexedProblem
-from mermoz.solver_ef import SolverEF
+from dabry.misc import Utils, Chrono
+from dabry.problem import IndexedProblem
+from dabry.solver_ef import SolverEF
 
 
 class Test:
@@ -13,7 +13,7 @@ class Test:
     def __init__(self, output_dir):
         self.output_dir = output_dir
 
-    def solve(self, pb_id):
+    def solve(self, pb_id, debug=False):
         output_dir = os.path.join(self.output_dir, f'{pb_id}')
         if not os.path.exists(output_dir):
             os.mkdir(output_dir)
@@ -26,8 +26,10 @@ class Test:
             solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=args.quicksolve)
             solver_ef.solve(verbose=1 if args.multithreaded else 2)
             status = 0
-        except Exception:
+        except Exception as e:
             status = 1
+            if debug:
+                raise e
         with open(os.path.join(output_dir, f'{pb_id}'), 'w') as f:
             f.writelines([f'{status}'])
 
@@ -53,11 +55,23 @@ if __name__ == '__main__':
                         const=True, default=False)
     parser.add_argument('-q', '--quicksolve', help='Use quick solve mode', action='store_const',
                         const=True, default=False)
+    parser.add_argument('-s', '--sumup', help='Print test outcome sumup', action='store_const',
+                        const=True, default=False)
+    parser.add_argument('-d', '--debug', help='Debug mode', action='store_const',
+                        const=True, default=False)
     args = parser.parse_args(sys.argv[1:])
     unit_pb = -1
     pb_ok = []
     pb_nok = []
     problems = []
+    try:
+        os.mkdir('tests/out')
+    except FileExistsError:
+        pass
+    test = Test('tests/out')
+    if args.sumup:
+        test.sumup()
+        exit(0)
     if args.idtest != -1:
         unit_pb = int(sys.argv[1])
     else:
@@ -65,13 +79,11 @@ if __name__ == '__main__':
         for pb_id in IndexedProblem.exclude_from_test:
             problems.remove(pb_id)
 
-    test = Test('tests/out')
-
     if unit_pb >= 0:
-        test.solve(unit_pb)
+        test.solve(unit_pb, args.debug)
     else:
         chrono = Chrono()
         chrono.start('Starting test suite')
         for pb_id in problems:
-            test.solve(pb_id)
+            test.solve(pb_id, args.debug)
         test.sumup()

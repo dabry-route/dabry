@@ -1,15 +1,18 @@
 import random
 import os
-
+import numpy as np
+from numpy import pi
+import sys
+import time
 import h5py
 
-from mermoz.problem import IndexedProblem
-from mermoz.misc import *
-from mermoz.trajectory import Trajectory
-from mermoz.post_processing import PostProcessing
-from mermoz.mdf_manager import MDFmanager
-from mermoz.params_summary import ParamsSummary
-from mermoz.solver_rp import SolverRP
+from dabry.problem import IndexedProblem
+from dabry.misc import Utils
+from dabry.trajectory import Trajectory
+from dabry.post_processing import PostProcessing
+from dabry.mdf_manager import DDFmanager
+from dabry.params_summary import ParamsSummary
+from dabry.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID
@@ -20,7 +23,7 @@ if __name__ == '__main__':
         os.mkdir(output_dir)
 
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = DDFmanager()
     mdfm.set_output_dir(output_dir)
     mdfm.clean_output_dir()
     wind_fpath = '/home/bastien/Documents/data/wind/ncdc/test-postproc.mz/wind.h5'
@@ -31,7 +34,7 @@ if __name__ == '__main__':
     # pb = DatabaseProblem(wind_fpath)
     pb = IndexedProblem(pb_id)
 
-    if pb.coords == COORD_GCS:
+    if pb.coords == Utils.COORD_GCS:
         print('Not handling GCS for now', file=sys.stderr)
         exit(1)
 
@@ -97,14 +100,14 @@ if __name__ == '__main__':
                               np.zeros(nt),
                               nt,
                               coords=pb.coords,
-                              type=TRAJ_PATH,
+                              type=Utils.TRAJ_PATH,
                               label=i)
             i += 1
             trajs.append(traj)
 
     if pb_id == 1:
         # Linear wind case comes with an analytical solution
-        alyt_traj = linear_wind_alyt_traj(pb.model.v_a, pb.model.wind.gradient[0, 1], pb.x_init, pb.x_target)
+        alyt_traj = Utils.linear_wind_alyt_traj(pb.model.v_a, pb.model.wind.gradient[0, 1], pb.x_init, pb.x_target)
         trajs.append(alyt_traj)
 
     nx_rft = 51

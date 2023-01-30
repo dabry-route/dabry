@@ -1,20 +1,20 @@
 import datetime
 import os
 import shutil
-
+import numpy as np
+import sys
 import pygrib
-
 import h5py
 
-from mermoz.misc import *
-from mermoz.params_summary import ParamsSummary
-from mermoz.problem import MermozProblem
-from mermoz.wind import Wind, DiscreteWind
+from dabry.misc import Utils
+from dabry.params_summary import ParamsSummary
+from dabry.problem import NavigationProblem
+from dabry.wind import Wind, DiscreteWind
 
 
-class MDFmanager:
+class DDFmanager:
     """
-    This class handles the writing and reading of Mermoz Data Format (MDF) files
+    This class handles the writing and reading of Dabry Data Format (DDF) files
     """
 
     def __init__(self, cache_wind=False, cache_rff=False):
@@ -32,16 +32,16 @@ class MDFmanager:
         if module_dir is not None:
             self.module_dir = module_dir
         else:
-            path = os.environ.get('MERMOZ_PATH')
+            path = os.environ.get('DABRYPATH')
             if path is None:
-                raise Exception('Unable to set output dir automatically. Please set MERMOZ_PATH variable.')
+                raise Exception('Unable to set output dir automatically. Please set DABRYPATH variable.')
             self.module_dir = path
 
     def set_case(self, case_name):
-        self.case_name = case_name
+        self.case_name = case_name.split('/')[-1]
         if self.module_dir is None:
             raise Exception('Output directory not specified yet')
-        self.case_dir = os.path.join(self.module_dir, 'output', case_name)
+        self.case_dir = os.path.join(self.module_dir, 'output', self.case_name)
         if not os.path.exists(self.case_dir):
             os.mkdir(self.case_dir)
         self.ps.setup(self.case_dir)
@@ -103,7 +103,7 @@ class MDFmanager:
                     dset = trajgroup.create_dataset('energy', n - 1, dtype='f8', fillvalue=0.)
                     dset[:] = traj.energy[:n - 1]
 
-    def dump_obs(self, pb: MermozProblem, nx=100, ny=100):
+    def dump_obs(self, pb: NavigationProblem, nx=100, ny=100):
         filepath = os.path.join(self.case_dir, self.obs_filename)
         with h5py.File(os.path.join(filepath), 'w') as f:
             f.attrs['coords'] = pb.coords
@@ -145,7 +145,7 @@ class MDFmanager:
                 for attr, val in traj.attrs.items():
                     print(f'{attr} : {val}')
 
-    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None, coords=COORD_CARTESIAN,
+    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None, coords=Utils.COORD_CARTESIAN,
                   force_analytical=False):
         if wind.is_dumpable == 0:
             print('Error : Wind is not dumpable to file', file=sys.stderr)
@@ -167,7 +167,7 @@ class MDFmanager:
             dwind = wind
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = dwind.coords
-            f.attrs['units_grid'] = U_METERS if dwind.coords == COORD_CARTESIAN else U_RAD
+            f.attrs['units_grid'] = Utils.U_METERS if dwind.coords == Utils.COORD_CARTESIAN else Utils.U_RAD
             f.attrs['analytical'] = dwind.is_analytical
             if dwind.lon_0 is not None:
                 f.attrs['lon_0'] = dwind.lon_0
@@ -181,8 +181,8 @@ class MDFmanager:
             dset = f.create_dataset('grid', (dwind.nx, dwind.ny, 2), dtype='f8')
             dset[:] = dwind.grid
 
-    def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=COORD_GCS):
-        if coords == COORD_CARTESIAN:
+    def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Utils.COORD_GCS):
+        if coords == Utils.COORD_CARTESIAN:
             print('Cartesian conversion not handled yet', file=sys.stderr)
             exit(1)
         if type(srcfiles) == str:
@@ -193,7 +193,7 @@ class MDFmanager:
         def process(grbfile, setup=False, nx=None, ny=None):
             grbs = pygrib.open(grbfile)
             grb = grbs.select(name='U component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
-            lon_b = rectify(bl[0], tr[0])
+            lon_b = Utils.rectify(bl[0], tr[0])
             U, lats, lons = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
             grb = grbs.select(name='V component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
             V, _, _ = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
@@ -232,21 +232,21 @@ class MDFmanager:
 
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = coords
-            f.attrs['units_grid'] = U_RAD
+            f.attrs['units_grid'] = Utils.U_RAD
             f.attrs['analytical'] = False
             dset = f.create_dataset('data', (nt, nx, ny, 2), dtype='f8')
             dset[:] = UVs
             dset = f.create_dataset('ts', (nt,), dtype='f8')
             dset[:] = dates
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
-            dset[:] = DEG_TO_RAD * grid
+            dset[:] = Utils.DEG_TO_RAD * grid
 
         return nt, nx, ny
 
 
 if __name__ == '__main__':
-    mdfm = MDFmanager()
-    # mdfm.print_trajs('/home/bastien/Documents/work/mermoz/output/example_front_tracking2/trajectories.h5')
+    mdfm = DDFmanager()
+    # mdfm.print_trajs('/home/bastien/Documents/work/dabry/output/example_front_tracking2/trajectories.h5')
     mdfm.setup('/home/bastien/Documents/work/test')
     data_dir = '/home/bastien/Documents/data/other'
     # data_filepath = os.path.join(data_dir, 'gfs_3_20090823_0600_000.grb2')

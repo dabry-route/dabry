@@ -1,11 +1,13 @@
 import warnings
 from abc import ABC
 from scipy.integrate import ode, odeint
+import numpy as np
+from numpy import ndarray
 
-from mermoz.dynamics import Dynamics
-from mermoz.stoppingcond import PrecisionSC, TimedSC
-from mermoz.trajectory import AugmentedTraj
-from mermoz.misc import *
+from dabry.dynamics import Dynamics
+from dabry.stoppingcond import PrecisionSC, TimedSC
+from dabry.trajectory import AugmentedTraj
+from dabry.misc import Utils
 
 
 class DomainException(Exception):
@@ -28,7 +30,7 @@ class Shooting(ABC):
                  domain=None,
                  abort_on_precision=False,
                  fail_on_maxiter=False,
-                 coords=COORD_CARTESIAN,
+                 coords=Utils.COORD_CARTESIAN,
                  target_crit=None,
                  energy_ceil=None,
                  ):
@@ -69,7 +71,7 @@ class Shooting(ABC):
         self.fail_on_maxiter = fail_on_maxiter
         self.p_init = np.zeros(2)
         self.coords = coords
-        ensure_coords(coords)
+        Utils.ensure_coords(coords)
         self.target_crit = target_crit
         self.energy_ceil = energy_ceil
 
@@ -107,11 +109,11 @@ class Shooting(ABC):
             p = self.p_init
             states[0] = x
             adjoints[0] = p
-            u = controls[0] = heading_opti(x, p, 0., self.coords)
+            u = controls[0] = Utils.heading_opti(x, p, 0., self.coords)
             v_a = None
             energy = 0.
             if self.mode == 'energy-opt':
-                v_a = airspeed[0] = airspeed_opti(p)
+                v_a = airspeed[0] = Utils.airspeed_opti(p)
             interrupted = False
             optimal = False
             list_dt = []
@@ -137,9 +139,9 @@ class Shooting(ABC):
                         interrupted = True
                         break
                     t += dt
-                    u = heading_opti(x, p, t, self.coords)
+                    u = Utils.heading_opti(x, p, t, self.coords)
                     if self.mode == 'energy-opt':
-                        v_a = airspeed[i] = airspeed_opti(p)
+                        v_a = airspeed[i] = Utils.airspeed_opti(p)
                     else:
                         v_a = None
                     dyn_x = self.dyn.value(x, u, t, v_a=v_a)
@@ -151,12 +153,12 @@ class Shooting(ABC):
                     states[i] = x
                     adjoints[i] = p
                     controls[i] = u
-                    energy += power(v_a) * dt
+                    energy += Utils.power(v_a) * dt
                     if verbose:
                         print(sumup(i, t, x, p, u))
                 if interrupted:
                     i = i-1
-                return AugmentedTraj(timestamps, states, adjoints, controls, i, optimal=optimal, type=TRAJ_PMP,
+                return AugmentedTraj(timestamps, states, adjoints, controls, i, optimal=optimal, type=Utils.TRAJ_PMP,
                                      interrupted=interrupted, coords=self.coords, info=self.mode, airspeed=airspeed)
             else:
                 i = 1
@@ -164,7 +166,7 @@ class Shooting(ABC):
                     dt = 1 / self.dyn.wind.grad_norm(x) * self.factor
                     t += dt
                     list_dt.append(dt)
-                    u = heading_opti(x, p, t, self.coords)
+                    u = Utils.heading_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -187,7 +189,7 @@ class Shooting(ABC):
                     else:
                         warnings.warn(message, stacklevel=2)
                         interrupted = True
-                return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type=TRAJ_PMP,
+                return AugmentedTraj(timestamps, states, adjoints, controls, last_index=i, type=Utils.TRAJ_PMP,
                                      interrupted=interrupted, coords=self.coords)
 
         else:
@@ -208,7 +210,7 @@ class Shooting(ABC):
                     x[:] = z[:2]
                     p = np.zeros(2)
                     p[:] = z[2:]
-                    u = heading_opti(x, p, t, self.coords)
+                    u = Utils.heading_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -223,8 +225,8 @@ class Shooting(ABC):
                     if not self.domain(zz[i, :2]):
                         last_index = i + 1
                         break
-                controls = np.array(list(map(lambda z: heading_opti(z[:2], z[2:], 0, self.coords), zz)))
-                return AugmentedTraj(timestamps, zz[:, :2], zz[:, 2:], controls, last_index=last_index, type=TRAJ_PMP,
+                controls = np.array(list(map(lambda z: Utils.heading_opti(z[:2], z[2:], 0, self.coords), zz)))
+                return AugmentedTraj(timestamps, zz[:, :2], zz[:, 2:], controls, last_index=last_index, type=Utils.TRAJ_PMP,
                                      interrupted=(last_index != self.N_iter), coords=self.coords)
             else:
                 def f(t, z):
@@ -237,7 +239,7 @@ class Shooting(ABC):
                     x[:] = z[:2]
                     p = np.zeros(2)
                     p[:] = z[2:]
-                    u = heading_opti(x, p, t, self.coords)
+                    u = Utils.heading_opti(x, p, t, self.coords)
                     dyn_x = self.dyn.value(x, u, t)
                     A = -self.dyn.d_value__d_state(x, u, t).transpose()
                     dyn_p = A.dot(p)
@@ -265,9 +267,9 @@ class Shooting(ABC):
                     last_index += 1
                     states[last_index, :] = z[:2]
                     adjoints[last_index, :] = z[2:]
-                    controls[last_index] = heading_opti(z[:2], z[2:], solver.t, self.coords)
+                    controls[last_index] = Utils.heading_opti(z[:2], z[2:], solver.t, self.coords)
                     if last_index == self.N_iter - 1:
                         break
-                controls = np.array(list(map(lambda z: heading_opti(z[:2], z[2:], 0, self.coords), np.concatenate((states, adjoints), axis=0))))
-                return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter, type=TRAJ_PMP,
+                controls = np.array(list(map(lambda z: Utils.heading_opti(z[:2], z[2:], 0, self.coords), np.concatenate((states, adjoints), axis=0))))
+                return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter, type=Utils.TRAJ_PMP,
                                      interrupted=False, coords=self.coords)

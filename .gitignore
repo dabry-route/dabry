@@ -168,3 +168,4 @@ output/*
 /rft/main.prj
 /LICENSE_HEADER
 /tests/out
+data/*

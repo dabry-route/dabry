@@ -1,7 +1,7 @@
 import os
-from mermoz.mdf_manager import MDFmanager
-from mermoz.misc import *
-from mermoz.problem import IndexedProblem, DatabaseProblem
+from dabry.mdf_manager import DDFmanager
+from dabry.misc import Chrono
+from dabry.problem import IndexedProblem, DatabaseProblem
 
 if __name__ == '__main__':
     # Choose problem ID
@@ -11,12 +11,12 @@ if __name__ == '__main__':
     chrono = Chrono()
 
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = DDFmanager()
     if dbpb is not None:
-        output_dir = f'/home/bastien/Documents/work/mermoz/output/example_wind_{dbpb}'
+        case_name = f'example_wind_{dbpb}'
     else:
-        output_dir = f'/home/bastien/Documents/work/mermoz/output/example_wind_{IndexedProblem.problems[pb_id][1]}'
-    mdfm.set_output_dir(output_dir)
+        case_name = f'example_wind_{IndexedProblem.problems[pb_id][1]}'
+    mdfm.set_case(case_name)
     mdfm.clean_output_dir()
 
     nx_rft = 101

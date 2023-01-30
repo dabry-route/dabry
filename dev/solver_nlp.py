@@ -3,18 +3,18 @@ import os
 
 import numpy as np
 
-from mermoz.feedback import ConstantFB, GSTargetFB, FixedHeadingFB
-from mermoz.mdf_manager import MDFmanager
-from mermoz.params_summary import ParamsSummary
-from mermoz.misc import *
-from mermoz.problem import IndexedProblem
-from mermoz.shooting import Shooting
-from mermoz.solver_ef import SolverEF
-from mermoz.solver_nlp import SolverNLP
-from mermoz.solver_rp import SolverRP
-from mermoz.stoppingcond import TimedSC
-from mermoz.trajectory import Trajectory
-from mermoz.wind import DiscreteWind
+from dabry.feedback import ConstantFB, GSTargetFB, FixedHeadingFB
+from dabry.mdf_manager import DDFmanager
+from dabry.params_summary import ParamsSummary
+from dabry.misc import Utils
+from dabry.problem import IndexedProblem
+from dabry.shooting import Shooting
+from dabry.solver_ef import SolverEF
+from dabry.solver_nlp import SolverNLP
+from dabry.solver_rp import SolverRP
+from dabry.stoppingcond import TimedSC
+from dabry.trajectory import Trajectory
+from dabry.wind import DiscreteWind
 
 if __name__ == '__main__':
     # Choose problem ID
@@ -22,7 +22,7 @@ if __name__ == '__main__':
     cache = False
 
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = DDFmanager()
     output_dir = f'/home/bastien/Documents/work/mermoz/output/example_solver-nlp_{IndexedProblem.problems[pb_id][1]}'
     mdfm.set_output_dir(output_dir)
     mdfm.clean_output_dir(keep_rff=cache)
@@ -72,7 +72,7 @@ if __name__ == '__main__':
 
     print(res)
 
-    pb.trajs.append(Trajectory(np.zeros(n_steps), x_opt, np.zeros(n_steps), n_steps, type=TRAJ_PATH, coords=pb.coords))
+    pb.trajs.append(Trajectory(np.zeros(n_steps), x_opt, np.zeros(n_steps), n_steps, type=Utils.TRAJ_PATH, coords=pb.coords))
 
     mdfm.dump_trajs(trajs)
     mdfm.dump_trajs(pb.trajs)

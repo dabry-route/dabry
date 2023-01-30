@@ -8,15 +8,14 @@ import numpy as np
 from datetime import datetime, timedelta
 import shutil
 
-from mermoz.misc import EARTH_RADIUS, COORDS, ensure_coords, COORD_CARTESIAN, U_METERS, COORD_GCS, U_RAD, U_DEG, \
-    DEG_TO_RAD, ensure_units, ensure_compatible
-from mermoz.wind import LinearWind
+from dabry.misc import Utils
+from dabry.wind import LinearWind
 
 
 class WindConverter:
     """
     Handles conversion from Windy JSON wind format to
-    Mermoz-specific H5 wind format (see docs/)
+    Dabry-specific H5 wind format (see docs/)
     """
 
     def __init__(self):

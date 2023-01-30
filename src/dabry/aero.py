@@ -66,7 +66,7 @@ class LLAero(Aero):
             # Coefficients extracted from Dobrokhodov et al. 2020
             self.kp1 = 0.05
             self.kp2 = 1000
-        elif mode == 'mermoz':
+        elif mode == 'dabry':
             # Coefficients from Mermoz
             self.kp1 = 0.011
             self.kp2 = 500

@@ -1,12 +1,12 @@
 import numpy as np
-from mermoz.problem import MermozProblem
+from dabry.problem import NavigationProblem
 from scipy.optimize import Bounds, NonlinearConstraint, minimize
 from math import atan2
 
 
 class SolverNLP:
     def __init__(self,
-                 mp: MermozProblem,
+                 mp: NavigationProblem,
                  T,
                  nt,
                  i_guess=None):

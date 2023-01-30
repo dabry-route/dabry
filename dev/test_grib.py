@@ -4,16 +4,16 @@ import time
 import matplotlib as mpl
 import numpy as np
 
-from mdisplay.geodata import GeoData
+from dabry.geodata import GeoData
 
-from mermoz.misc import *
-from mermoz.params_summary import ParamsSummary
-from mermoz.problem import MermozProblem
-from mermoz.model import ZermeloGeneralModel
-from mermoz.rft import RFT
-from mermoz.shooting import Shooting
-from mermoz.wind import DiscreteWind
-from mermoz.mdf_manager import MDFmanager
+from dabry.misc import Utils
+from dabry.params_summary import ParamsSummary
+from dabry.problem import NavigationProblem
+from dabry.model import ZermeloGeneralModel
+from dabry.rft import RFT
+from dabry.shooting import Shooting
+from dabry.wind import DiscreteWind
+from dabry.mdf_manager import DDFmanager
 
 mpl.style.use('seaborn-notebook')
 
@@ -23,14 +23,14 @@ def run():
     Example of reachability front tracking
     """
 
-    coords = COORD_GCS
+    coords = Utils.COORD_GCS
 
     output_dir = '../output/example_test_grib/'
     wind_data_dir = '/home/bastien/Documents/data/wind'
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     # Create a file manager to dump problem data
-    mdfm = MDFmanager()
+    mdfm = DDFmanager()
     mdfm.set_output_dir(output_dir)
 
     print("Example : Test grib")
@@ -41,7 +41,6 @@ def run():
     # The time window upper bound in seconds
     T = 40 * 3600.
 
-    # Convert grib wind to Mermoz Data Format (MDF)
     wind_filename = 'gfs_4_20220324_1200_000.grb2'
     data_filepath = os.path.join(wind_data_dir, 'ncdc', wind_filename)
     bl = np.array((-50., 0.))
@@ -67,7 +66,7 @@ def run():
     x_init = 0.5 * (bl + tr)
 
     # Creates the navigation problem on top of the previous model
-    mp = MermozProblem(zermelo_model, T=T, visual_mode='only-map')
+    mp = NavigationProblem(zermelo_model, T=T, visual_mode='only-map')
 
     t_end = time.time()
     print(f"Done ({t_end - t_start:.3f} s)")
@@ -82,7 +81,7 @@ def run():
     print(f"Tracking reachability front ({nx_rft}x{ny_rft}, dx={delta_x:.2E}, dy={delta_y:.2E})... ", end='')
     t_start = time.time()
 
-    rft = RFT(bl, tr, T, nx_rft, ny_rft, 10, mp, x_init, kernel='matlab', coords=COORD_GCS)
+    rft = RFT(bl, tr, T, nx_rft, ny_rft, 10, mp, x_init, kernel='matlab', coords=Utils.COORD_GCS)
 
     # rft.compute()
 
@@ -123,12 +122,12 @@ def run():
 
     params = {
         'coords': 'gcs',
-        'bl_wind': (RAD_TO_DEG * total_wind.grid[0, 0, 0], RAD_TO_DEG * total_wind.grid[0, 0, 1]),
-        'tr_wind': (RAD_TO_DEG * total_wind.grid[-1, -1, 0], RAD_TO_DEG * total_wind.grid[-1, -1, 1]),
+        'bl_wind': (Utils.RAD_TO_DEG * total_wind.grid[0, 0, 0], Utils.RAD_TO_DEG * total_wind.grid[0, 0, 1]),
+        'tr_wind': (Utils.RAD_TO_DEG * total_wind.grid[-1, -1, 0], Utils.RAD_TO_DEG * total_wind.grid[-1, -1, 1]),
         'nx_wind': total_wind.grid.shape[0],
         'ny_wind': total_wind.grid.shape[1],
         'date_wind': total_wind.ts[0],
-        'point_init': (RAD_TO_DEG * x_init[0], RAD_TO_DEG * x_init[1]),
+        'point_init': (Utils.RAD_TO_DEG * x_init[0], Utils.RAD_TO_DEG * x_init[1]),
         'max_time': T,
         'nt_pmp': nt_pmp,
         'nt_rft': rft.nt,

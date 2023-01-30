@@ -1,7 +1,7 @@
 import h5py
 
 if __name__ == '__main__':
-    filepath = '/home/bastien/Documents/work/mermoz/output/example_wf_time/wind.h5'
+    filepath = '//output/example_wf_time/wind.h5'
     with h5py.File(filepath, 'r') as f:
         for a in f.attrs.items():
             print(f'{a[0]} : {a[1]}')

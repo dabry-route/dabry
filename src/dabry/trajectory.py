@@ -1,11 +1,12 @@
 import numpy as np
+from numpy import ndarray
 
-from .misc import *
+from dabry.misc import Utils
 
 
 class Trajectory:
     """
-    The definition of a trajectory for the Mermoz problem
+    The definition of a trajectory for the navigation problem
     """
 
     def __init__(self,
@@ -16,7 +17,7 @@ class Trajectory:
                  coords,
                  optimal=False,
                  interrupted=False,
-                 type=TRAJ_INT,
+                 type=Utils.TRAJ_INT,
                  label=0,
                  info=''):
         """
@@ -76,7 +77,7 @@ class AugmentedTraj(Trajectory):
                  coords,
                  optimal=False,
                  interrupted=False,
-                 type=TRAJ_INT,
+                 type=Utils.TRAJ_INT,
                  label=0,
                  info='',
                  transver=None,

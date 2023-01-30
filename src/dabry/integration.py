@@ -3,7 +3,7 @@ import numpy as np
 from numpy import ndarray
 
 from .trajectory import Trajectory
-from .misc import TRAJ_INT
+from dabry.misc import Utils
 
 
 class Integration(ABC):
@@ -89,4 +89,4 @@ class IntEulerExpl(Integration):
                 timestamps[i] = t
                 points[i] = x
                 controls[i] = heading
-        return Trajectory(timestamps, points, controls, i, self.coords, type=TRAJ_INT)
+        return Trajectory(timestamps, points, controls, i, self.coords, type=Utils.TRAJ_INT)

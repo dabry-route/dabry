@@ -1,6 +1,6 @@
 import os
 
-from mermoz.post_processing import PostProcessing
+from dabry.post_processing import PostProcessing
 
 
 def get_latest_output_dir(base_dir):
@@ -13,7 +13,7 @@ def get_latest_output_dir(base_dir):
 if __name__ == '__main__':
     base_dir = f'/home/bastien/Documents/work/mermoz/output/'
     output_dir = get_latest_output_dir(base_dir)
-    # output_dir = f'/home/bastien/Documents/work/mermoz/output/example_energy_band'
+    # output_dir = f'/home/bastien/Documents/work/dabry/output/example_energy_band'
     print(output_dir)
     pp = PostProcessing(output_dir)
     pp.load()

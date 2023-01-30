@@ -1,11 +1,15 @@
 from abc import ABC, abstractmethod
 import random
-from math import atan2
+from numpy import arctan2 as atan2
+from numpy import ndarray
+import numpy as np
+from numpy import pi, sin, cos
 import scipy.optimize
 
-from mermoz.aero import Aero
-from mermoz.wind import Wind, UniformWind
-from mermoz.misc import *
+
+from dabry.aero import Aero
+from dabry.wind import Wind, UniformWind
+from dabry.misc import Utils
 
 
 class Feedback(ABC):
@@ -128,7 +132,7 @@ class FixedHeadingFB(Feedback):
         self.coords = coords
 
     def value(self, t, x):
-        if self.coords == COORD_CARTESIAN:
+        if self.coords == Utils.COORD_CARTESIAN:
             e_theta_0 = np.array([np.cos(self.theta_0), np.sin(self.theta_0)])
         else:
             # coords gcs
@@ -142,7 +146,7 @@ class FixedHeadingFB(Feedback):
             res = -np.pi / 2.
         else:
             res = np.arcsin(r)
-            if self.coords == COORD_GCS:
+            if self.coords == Utils.COORD_GCS:
                 res *= -1
         res += self.theta_0
         return res
@@ -193,15 +197,15 @@ class GSTargetFB(Feedback):
         self.zero_ceil = 1e-3
 
     def value(self, t, x: ndarray):
-        if self.coords == COORD_GCS:
+        if self.coords == Utils.COORD_GCS:
             # Got to 3D cartesian assuming spherical earth
             lon, lat = x[0], x[1]
-            X3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            X3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
             # Vector normal to earth at position
             e_phi = np.array((-sin(lon), cos(lon), 0.))
             e_lambda = np.array((-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat)))
             lon, lat = self.target[0], self.target[1]
-            X_target3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            X_target3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
             e_target = np.zeros(2)
             e_target[0] = (X_target3 - X3) @ e_phi
             e_target[1] = (X_target3 - X3) @ e_lambda
@@ -224,7 +228,7 @@ class GSTargetFB(Feedback):
         else:
             res = np.arcsin(r)
         res += atan2(e_target[1], e_target[0])
-        if self.coords == COORD_GCS:
+        if self.coords == Utils.COORD_GCS:
             res = pi / 2 - res
         return res
 
@@ -243,15 +247,15 @@ class HTargetFB(Feedback):
 
     def value(self, t, x: ndarray):
         # Assuming GCS
-        if self.coords == COORD_GCS:
+        if self.coords == Utils.COORD_GCS:
             # Got to 3D cartesian assuming spherical earth
             lon, lat = x[0], x[1]
             # Vector normal to earth at position
-            X3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            X3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
             e_phi = np.array((-sin(lon), cos(lon), 0.))
             e_lambda = np.array((-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat)))
             lon, lat = self.target[0], self.target[1]
-            X_target3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            X_target3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
             e_target = np.zeros(2)
             e_target[0] = (X_target3 - X3) @ e_phi
             e_target[1] = (X_target3 - X3) @ e_lambda
@@ -265,7 +269,7 @@ class HTargetFB(Feedback):
 
         e_target = e_target / np.linalg.norm(e_target)
         res = atan2(e_target[1], e_target[0])
-        if self.coords == COORD_GCS:
+        if self.coords == Utils.COORD_GCS:
             res = pi / 2 - res
         return res
 
@@ -360,15 +364,15 @@ class E_GSTargetFB(MultiFeedback):
         self.angle0 = None
 
     def update(self, t, x):
-        if self.coords == COORD_GCS:
+        if self.coords == Utils.COORD_GCS:
             # Got to 3D cartesian assuming spherical earth
             lon, lat = x[0], x[1]
-            X3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            X3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
             # Vector normal to earth at position
             e_phi = np.array((-sin(lon), cos(lon), 0.))
             e_lambda = np.array((-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat)))
             lon, lat = self.target[0], self.target[1]
-            X_target3 = EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            X_target3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
             e_target = np.zeros(2)
             e_target[0] = (X_target3 - X3) @ e_phi
             e_target[1] = (X_target3 - X3) @ e_lambda
@@ -395,7 +399,7 @@ class E_GSTargetFB(MultiFeedback):
             res = np.arcsin(r)
         res += self.angle0
         v_heading = np.array((np.cos(res), np.sin(res)))
-        if self.coords == COORD_GCS:
+        if self.coords == Utils.COORD_GCS:
             res = pi / 2 - res
         return res, v_heading
 
