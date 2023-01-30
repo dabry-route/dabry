@@ -1,10 +1,13 @@
 import random
 import os
-
+import numpy as np
+from numpy import pi
+import sys
+import time
 import h5py
 
 from dabry.problem import IndexedProblem
-from dabry.misc import *
+from dabry.misc import Utils
 from dabry.trajectory import Trajectory
 from dabry.post_processing import PostProcessing
 from dabry.mdf_manager import DDFmanager
@@ -31,7 +34,7 @@ if __name__ == '__main__':
     # pb = DatabaseProblem(wind_fpath)
     pb = IndexedProblem(pb_id)
 
-    if pb.coords == COORD_GCS:
+    if pb.coords == Utils.COORD_GCS:
         print('Not handling GCS for now', file=sys.stderr)
         exit(1)
 
@@ -97,14 +100,14 @@ if __name__ == '__main__':
                               np.zeros(nt),
                               nt,
                               coords=pb.coords,
-                              type=TRAJ_PATH,
+                              type=Utils.TRAJ_PATH,
                               label=i)
             i += 1
             trajs.append(traj)
 
     if pb_id == 1:
         # Linear wind case comes with an analytical solution
-        alyt_traj = linear_wind_alyt_traj(pb.model.v_a, pb.model.wind.gradient[0, 1], pb.x_init, pb.x_target)
+        alyt_traj = Utils.linear_wind_alyt_traj(pb.model.v_a, pb.model.wind.gradient[0, 1], pb.x_init, pb.x_target)
         trajs.append(alyt_traj)
 
     nx_rft = 51

@@ -1,9 +1,11 @@
+import numpy as np
+
 from dabry.problem import NavigationProblem
 from dabry.rft import RFT
-from dabry.misc import *
 from dabry.feedback import FunFB
 from dabry.solver_ef import EFOptRes
 from dabry.stoppingcond import DistanceSC
+from dabry.misc import Utils
 
 
 class SolverRP:
@@ -37,7 +39,7 @@ class SolverRP:
 
         self.nt_pmp = nt_pmp
 
-        self.geod_l = distance(self.x_init, self.x_target, coords=self.mp.coords)
+        self.geod_l = Utils.distance(self.x_init, self.x_target, coords=self.mp.coords)
 
         if max_time is None:
             self.T = 1.5 * self.geod_l / mp.model.v_a
@@ -87,5 +89,5 @@ class SolverRP:
         traj.controls = traj.controls[:traj.last_index + 1]
         traj.flip()
         traj.info = 'rft'
-        traj.type = TRAJ_INT
+        traj.type = Utils.TRAJ_INT
         return traj

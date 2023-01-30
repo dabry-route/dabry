@@ -1,14 +1,17 @@
 # from heapq import heappush, heappop
 import os
+import sys
 import threading
-from math import asin
 
 import numpy as np
+from numpy import sin, cos, pi
+from numpy import arcsin as asin
+from numpy import arctan2 as atan2
 from shapely.geometry import Polygon, Point, LineString
 import csv
 import scipy.integrate
 
-from dabry.misc import *
+from dabry.misc import Utils, Chrono
 from dabry.problem import NavigationProblem
 from dabry.trajectory import AugmentedTraj
 
@@ -750,7 +753,7 @@ class SolverEF:
         # thetal, thetau = DEG_TO_RAD * np.array(rectify(RAD_TO_DEG * thetal, RAD_TO_DEG * thetau))
         rhol = np.linalg.norm(pcl1.adjoint)
         rhou = np.linalg.norm(pcl2.adjoint)
-        angles = linspace_sph(thetal, thetau, 3)
+        angles = Utils.linspace_sph(thetal, thetau, 3)
         f = 1.
         if angles.shape[0] > 1:
             if angles[1] < angles[0]:
@@ -844,7 +847,7 @@ class SolverEF:
 
                 # Select heading that maximizes ground speed along obstacle
                 u = max([arg_ot - asin(r), arg_ot + asin(r) - pi], key=lambda uu: gs_f(uu, v_a, w, obs_tgt))
-                if self.mp.coords == COORD_GCS:
+                if self.mp.coords == Utils.COORD_GCS:
                     u = np.pi / 2. - u
                 dyn_x = self.mp.model.dyn.value(x, u, t)
                 x_prev = np.zeros(x.shape)
@@ -877,7 +880,7 @@ class SolverEF:
                     # Keep moving in obstacle, no points leaving
                     i_obs_new = pcl.i_obs
                 else:
-                    if self.mp.coords == COORD_GCS:
+                    if self.mp.coords == Utils.COORD_GCS:
                         u = np.pi / 2 - u
                     s = np.array((np.cos(u), np.sin(u)))
                     obs_grad = self.mp.obstacles[i_obs_new].d_value(x)
@@ -914,8 +917,8 @@ class SolverEF:
                     pcl1 = self.trajs[k][itt]
                     pcl2 = self.trajs[k][itt + 1]
                     points = x_it, x_itp1, pcl1.state, pcl2.state
-                    if has_intersec(*points):
-                        _, alpha1, alpha2 = intersection(*points)
+                    if Utils.has_intersec(*points):
+                        _, alpha1, alpha2 = Utils.intersection(*points)
                         cost1 = (1 - alpha1) * pcl_prev.cost + alpha1 * pcl.cost
                         cost2 = (1 - alpha2) * pcl1.cost + alpha2 * pcl2.cost
                         if cost2 < cost1:
@@ -938,8 +941,8 @@ class SolverEF:
                         pcl1 = self.trajs[k][itt]
                         pcl2 = self.trajs[p][itt]
                         points = x_it, x_itp1, pcl1.state, pcl2.state
-                        if has_intersec(*points):
-                            _, alpha1, alpha2 = intersection(*points)
+                        if Utils.has_intersec(*points):
+                            _, alpha1, alpha2 = Utils.intersection(*points)
                             cost1 = (1 - alpha1) * pcl_prev.cost + alpha1 * pcl.cost
                             cost2 = (1 - alpha2) * pcl1.cost + alpha2 * pcl2.cost
                             if cost2 < cost1:
@@ -964,8 +967,8 @@ class SolverEF:
                     pcl2 = self.trajs[comp[i + 1]].get_last()
                     pcl3 = self.trajs[comp[j]].get_last()
                     pcl4 = self.trajs[comp[j + 1]].get_last()
-                    if has_intersec(pcl1.state, pcl2.state, pcl3.state, pcl4.state):
-                        s, _, _ = intersection(pcl1.state, pcl2.state, pcl3.state, pcl4.state)
+                    if Utils.has_intersec(pcl1.state, pcl2.state, pcl3.state, pcl4.state):
+                        s, _, _ = Utils.intersection(pcl1.state, pcl2.state, pcl3.state, pcl4.state)
                         v1 = 1 / self.mp.distance(pcl1.state, s)
                         v2 = 1 / self.mp.distance(pcl4.state, s)
                         alpha = v1 / (v1 + v2)
@@ -1059,9 +1062,9 @@ class SolverEF:
             hello += f' | {self.mp_primal.model.v_a:.2f} m/s'
         hello += f' | {self.mp_primal.geod_l:.2e} m'
         nowind_time = self.mp_primal.geod_l / self.mp_primal.model.v_a
-        hello += f' | scale {time_fmt(nowind_time)}'
+        hello += f' | scale {Utils.time_fmt(nowind_time)}'
         ortho_time = self.mp_primal.orthodromic()
-        hello += f' | orthodromic {time_fmt(ortho_time) if ortho_time >= 0 else "DNR"}'
+        hello += f' | orthodromic {Utils.time_fmt(ortho_time) if ortho_time >= 0 else "DNR"}'
         if verbose == 2:
             print(hello)
 
@@ -1086,13 +1089,13 @@ class SolverEF:
         chrono.stop()
 
         if res.status:
-            goodbye = f'Target reached in {time_fmt(res.duration)}'
+            goodbye = f'Target reached in {Utils.time_fmt(res.duration)}'
             goodbye += f' | {int(100 * (res.duration / nowind_time - 1)):+d}% no wind'
             if ortho_time >= 0:
                 goodbye += f' | {int(100 * (res.duration / ortho_time - 1)):+d}% orthodromic'
             goodbye += f' | cpu time {chrono}'
         else:
-            goodbye = f'No solution found in time < {time_fmt(self.max_steps * abs(self.dt))}'
+            goodbye = f'No solution found in time < {Utils.time_fmt(self.max_steps * abs(self.dt))}'
         if verbose == 2:
             print(goodbye)
         elif verbose == 1:
@@ -1279,6 +1282,6 @@ class SolverEF:
                 res.append(
                     AugmentedTraj(timestamps, points, adjoints, controls, last_index=n - 1, coords=self.mp.coords,
                                   label=k,
-                                  type=TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver, energy=energy))
+                                  type=Utils.TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver, energy=energy))
 
         return res

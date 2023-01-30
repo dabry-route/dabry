@@ -1,9 +1,10 @@
 import os
+import numpy as np
 
 from dabry.mdf_manager import DDFmanager
 from dabry.obstacle import GreatCircleObs, ParallelObs
 from dabry.params_summary import ParamsSummary
-from dabry.misc import *
+from dabry.misc import Utils, Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem
 from dabry.solver_ef import SolverEF
 from dabry.solver_rp import SolverRP
@@ -40,9 +41,9 @@ if __name__ == '__main__':
     # Create problem
     if len(dbpb) > 0:
         obs = []
-        obs.append(GreatCircleObs(np.array((-70 * DEG_TO_RAD, 30 * DEG_TO_RAD)),
-                                  np.array((20 * DEG_TO_RAD, 60 * DEG_TO_RAD))))
-        obs.append(ParallelObs(18 * DEG_TO_RAD, True))
+        obs.append(GreatCircleObs(np.array((-70 * Utils.DEG_TO_RAD, 30 * Utils.DEG_TO_RAD)),
+                                  np.array((20 * Utils.DEG_TO_RAD, 60 * Utils.DEG_TO_RAD))))
+        obs.append(ParallelObs(18 * Utils.DEG_TO_RAD, True))
         pb = DatabaseProblem(os.path.join(os.environ.get('MERMOZ_WIND_PATH'), dbpb, 'wind.h5'), airspeed=23.,
                              obstacles=obs)
     else:
@@ -65,7 +66,7 @@ if __name__ == '__main__':
         # Solution found
         # Save optimal trajectory
         mdfm.dump_trajs([res_ef.traj])
-        print(f'Target reached in : {time_fmt(res_ef.duration)}')
+        print(f'Target reached in : {Utils.time_fmt(res_ef.duration)}')
     else:
         print('No solution found')
 

@@ -1,7 +1,10 @@
-from dabry.dynamics import *
-from dabry.problem import DatabaseProblem
-from dabry.misc import *
 import random
+import numpy as np
+
+from dabry.dynamics import Utils
+from dabry.problem import DatabaseProblem
+from dabry.misc import Utils
+
 
 if __name__ == '__main__':
     pb = DatabaseProblem('/home/bastien/Documents/data/wind/ncdc/tmp.mz/wind.h5')

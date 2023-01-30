@@ -1,8 +1,9 @@
 import os
+import numpy as np
 
 from dabry.mdf_manager import DDFmanager
 from dabry.obstacle import GreatCircleObs, ParallelObs, MaxiObs, LSEMaxiObs
-from dabry.misc import *
+from dabry.misc import Utils, Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem
 from dabry.solver_ef import SolverEF
 from dabry.solver_rp import SolverRP
@@ -53,8 +54,8 @@ if __name__ == '__main__':
         pb = DatabaseProblem(os.path.join(os.environ.get('DABRY_WINDPATH'), dbpb, 'wind.h5'),
                              airspeed=23.,
                              obstacles=obs,
-                             x_init=DEG_TO_RAD * np.array([-35.2080905, -5.805398]),
-                             x_target=DEG_TO_RAD * np.array([-17.447938, 14.693425]))
+                             x_init=Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398]),
+                             x_target=Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425]))
     else:
         pb = IndexedProblem(pb_id)
 

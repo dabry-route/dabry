@@ -3,7 +3,7 @@ import os.path
 import shutil
 import sys
 
-from dabry.misc import *
+from dabry.misc import Utils, Chrono
 from dabry.problem import IndexedProblem
 from dabry.solver_ef import SolverEF
 

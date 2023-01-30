@@ -1,6 +1,7 @@
 import numpy as np
+from numpy import ndarray
 
-from .misc import *
+from dabry.misc import Utils
 
 
 class Trajectory:
@@ -16,7 +17,7 @@ class Trajectory:
                  coords,
                  optimal=False,
                  interrupted=False,
-                 type=TRAJ_INT,
+                 type=Utils.TRAJ_INT,
                  label=0,
                  info=''):
         """
@@ -76,7 +77,7 @@ class AugmentedTraj(Trajectory):
                  coords,
                  optimal=False,
                  interrupted=False,
-                 type=TRAJ_INT,
+                 type=Utils.TRAJ_INT,
                  label=0,
                  info='',
                  transver=None,

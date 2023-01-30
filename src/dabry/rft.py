@@ -1,15 +1,16 @@
 import json
 import os
+import sys
 
 import numpy as np
+from numpy import cos, sin
 import pyproj
 import scipy.io
 
 import h5py
 from matplotlib import pyplot as plt
 from math import atan2
-
-from dabry.misc import *
+from dabry.misc import Utils
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
 from dabry.wind import DiscreteWind
@@ -214,17 +215,17 @@ class RFT:
         self.x_init = np.zeros(2)
         self.x_init[:] = self.mp.x_init
 
-        if self.mp.coords == COORD_GCS:
+        if self.mp.coords == Utils.COORD_GCS:
             # When working in spherical coordinates, we will first flatten the
             # problem using an orthographic projection
             mid = self.mp.middle(self.mp.x_init, self.mp.x_target)
-            self.lon_0, self.lat_0 = RAD_TO_DEG * mid[0], RAD_TO_DEG * mid[1]
+            self.lon_0, self.lat_0 = Utils.RAD_TO_DEG * mid[0], Utils.RAD_TO_DEG * mid[1]
             self.proj = pyproj.Proj(proj='ortho', lon_0=self.lon_0, lat_0=self.lat_0)
             # New boundaries are defined as an encapsulating bounding box over the region defined
             # by (lon, lat) bottom left and top right corners
             # Define a dense grid of points within the (lon, lat) zone
-            x = RAD_TO_DEG * self.mp.model.wind.grid[:, :, 0]
-            y = RAD_TO_DEG * self.mp.model.wind.grid[:, :, 1]
+            x = Utils.RAD_TO_DEG * self.mp.model.wind.grid[:, :, 0]
+            y = Utils.RAD_TO_DEG * self.mp.model.wind.grid[:, :, 1]
             # x, y = np.meshgrid(RAD_TO_DEG * np.linspace(self.bl[0], self.tr[0], 100),
             #                    RAD_TO_DEG * np.linspace(self.bl[1], self.tr[1], 100), indexing='ij')
             # Project it
@@ -234,7 +235,7 @@ class RFT:
             self.bl = np.array((np.min(x), np.min(y)))
             self.tr = np.array((np.max(x), np.max(y)))
 
-            self.x_init = np.array(self.proj(*(RAD_TO_DEG * self.x_init)))
+            self.x_init = np.array(self.proj(*(Utils.RAD_TO_DEG * self.x_init)))
 
         self.delta_x = (self.tr[0] - self.bl[0]) / (self.nx - 1)
         self.delta_y = (self.tr[1] - self.bl[1]) / (self.ny - 1)
@@ -245,7 +246,7 @@ class RFT:
 
         self.ts = None
         self.flatten = False
-        self.flatten_factor = EARTH_RADIUS
+        self.flatten_factor = Utils.EARTH_RADIUS
 
         self.method = method
 
@@ -309,8 +310,8 @@ class RFT:
             for i in range(self.nx):
                 for j in range(self.ny):
                     point = np.array([self.bl[0] + i * self.delta_x, self.bl[1] + j * self.delta_y])
-                    if self.mp.coords == COORD_GCS:
-                        point = DEG_TO_RAD * np.array(self.proj(*point, inverse=True))
+                    if self.mp.coords == Utils.COORD_GCS:
+                        point = Utils.DEG_TO_RAD * np.array(self.proj(*point, inverse=True))
                     grid[i, j, :] = point
 
             ts = np.linspace(self.mp.model.wind.t_start, self.mp.model.wind.t_start + self.max_time, self.nt)
@@ -329,7 +330,7 @@ class RFT:
                         value = self.mp.model.wind.value(t, point)
                         uv[k, i, j, :] = value
 
-            if self.mp.coords == COORD_GCS:
+            if self.mp.coords == Utils.COORD_GCS:
                 dwind = DiscreteWind(wdata={'data': uv, 'grid': grid, 'ts': ts, 'coords': self.mp.coords})
                 m = 0.5 * (self.mp.x_init + self.mp.x_target)
                 dwind.flatten(proj='ortho', lon_0=m[0], lat_0=m[1])
@@ -374,7 +375,7 @@ class RFT:
 
 
 
-                factor = DEG_TO_RAD if self.mp.coords == COORD_GCS else 1.
+                factor = Utils.DEG_TO_RAD if self.mp.coords == Utils.COORD_GCS else 1.
                 self.bl = factor * np.array((grid[:, :, 0].min(), grid[:, :, 1].min()))
                 self.tr = factor * np.array((grid[:, :, 0].max(), grid[:, :, 1].max()))
 
@@ -432,10 +433,10 @@ class RFT:
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
             X, Y = np.meshgrid(self.bl[0] + self.delta_x * np.arange(self.nx),
                                self.bl[1] + self.delta_y * np.arange(self.ny), indexing='ij')
-            if self.mp.coords == COORD_GCS:
+            if self.mp.coords == Utils.COORD_GCS:
                 X, Y = self.proj(X, Y, inverse=True)
-                X[:] = DEG_TO_RAD * X
-                Y[:] = DEG_TO_RAD * Y
+                X[:] = Utils.DEG_TO_RAD * X
+                Y[:] = Utils.DEG_TO_RAD * Y
             dset[:, :, 0] = X
             dset[:, :, 1] = Y
 
@@ -447,10 +448,10 @@ class RFT:
         self.phi[:, :, 0] = lam * self.phi[:, :, k] + (1 - lam) * self.phi[:, :, k + 1]
 
     def project(self, x):
-        if self.mp.coords == COORD_CARTESIAN:
+        if self.mp.coords == Utils.COORD_CARTESIAN:
             return x
         else:
-            return np.array(self.proj(*(RAD_TO_DEG * np.array(x))))
+            return np.array(self.proj(*(Utils.RAD_TO_DEG * np.array(x))))
 
     def _value(self, point, timeindex):
         """
@@ -488,12 +489,12 @@ class RFT:
         factor = 1. if backward else -1.
         xp = self.project(x)
         s = factor * self.get_normal(xp)[0]
-        if self.mp.coords == COORD_CARTESIAN:
+        if self.mp.coords == Utils.COORD_CARTESIAN:
             return atan2(s[1], s[0])
         else:
             # Control vector is in projected space
             # It has to be rotated to fit to spherical space
-            tmp = d_proj_ortho_inv(xp[0], xp[1], self.lon_0, self.lat_0) @ s
+            tmp = Utils.d_proj_ortho_inv(xp[0], xp[1], self.lon_0, self.lat_0) @ s
             s_new = s #/ np.linalg.norm(tmp)
             return np.pi / 2. - atan2(s_new[1], s_new[0])
 
@@ -518,7 +519,7 @@ class RFT:
         k = 0
         for k in range(1, N_disc):
             points[k, :] = f(points[k - 1, :], 0.) * dt + points[k - 1, :]
-            if distance(points[k, :], new_target, coords=self.mp.coords) < ceil:
+            if Utils.distance(points[k, :], new_target, coords=self.mp.coords) < ceil:
                 break
         # points = np.array(odeint(f, x0, timestamps))
         controls = np.array(list(map(self.control, points)))

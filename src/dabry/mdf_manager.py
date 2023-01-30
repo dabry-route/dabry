@@ -1,12 +1,12 @@
 import datetime
 import os
 import shutil
-
+import numpy as np
+import sys
 import pygrib
-
 import h5py
 
-from dabry.misc import *
+from dabry.misc import Utils
 from dabry.params_summary import ParamsSummary
 from dabry.problem import NavigationProblem
 from dabry.wind import Wind, DiscreteWind
@@ -145,7 +145,7 @@ class DDFmanager:
                 for attr, val in traj.attrs.items():
                     print(f'{attr} : {val}')
 
-    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None, coords=COORD_CARTESIAN,
+    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None, coords=Utils.COORD_CARTESIAN,
                   force_analytical=False):
         if wind.is_dumpable == 0:
             print('Error : Wind is not dumpable to file', file=sys.stderr)
@@ -167,7 +167,7 @@ class DDFmanager:
             dwind = wind
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = dwind.coords
-            f.attrs['units_grid'] = U_METERS if dwind.coords == COORD_CARTESIAN else U_RAD
+            f.attrs['units_grid'] = Utils.U_METERS if dwind.coords == Utils.COORD_CARTESIAN else Utils.U_RAD
             f.attrs['analytical'] = dwind.is_analytical
             if dwind.lon_0 is not None:
                 f.attrs['lon_0'] = dwind.lon_0
@@ -181,8 +181,8 @@ class DDFmanager:
             dset = f.create_dataset('grid', (dwind.nx, dwind.ny, 2), dtype='f8')
             dset[:] = dwind.grid
 
-    def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=COORD_GCS):
-        if coords == COORD_CARTESIAN:
+    def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Utils.COORD_GCS):
+        if coords == Utils.COORD_CARTESIAN:
             print('Cartesian conversion not handled yet', file=sys.stderr)
             exit(1)
         if type(srcfiles) == str:
@@ -193,7 +193,7 @@ class DDFmanager:
         def process(grbfile, setup=False, nx=None, ny=None):
             grbs = pygrib.open(grbfile)
             grb = grbs.select(name='U component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
-            lon_b = rectify(bl[0], tr[0])
+            lon_b = Utils.rectify(bl[0], tr[0])
             U, lats, lons = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
             grb = grbs.select(name='V component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
             V, _, _ = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
@@ -232,14 +232,14 @@ class DDFmanager:
 
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = coords
-            f.attrs['units_grid'] = U_RAD
+            f.attrs['units_grid'] = Utils.U_RAD
             f.attrs['analytical'] = False
             dset = f.create_dataset('data', (nt, nx, ny, 2), dtype='f8')
             dset[:] = UVs
             dset = f.create_dataset('ts', (nt,), dtype='f8')
             dset[:] = dates
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
-            dset[:] = DEG_TO_RAD * grid
+            dset[:] = Utils.DEG_TO_RAD * grid
 
         return nt, nx, ny
 

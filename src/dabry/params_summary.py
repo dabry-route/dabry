@@ -8,8 +8,8 @@ import datetime
 
 from dabry.problem import NavigationProblem
 from dabry.solver import Solver
-from dabry.misc import *
 from dabry.solver_rp import SolverRP
+from dabry.misc import Utils
 
 
 class ParamsSummary:
@@ -83,7 +83,7 @@ class ParamsSummary:
 
     def load_from_solver(self, sv: Solver):
         T = sv.T
-        factor = RAD_TO_DEG if sv.mp.coords == COORD_GCS else 1.
+        factor = Utils.RAD_TO_DEG if sv.mp.coords == Utils.COORD_GCS else 1.
         self.params = {
             'coords': sv.mp.coords,
             'point_init': (factor * sv.x_init[0], factor * sv.x_init[1]),

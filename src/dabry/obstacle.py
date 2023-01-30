@@ -1,6 +1,6 @@
 from abc import ABC
 import numpy as np
-from dabry.misc import *
+from dabry.misc import Utils
 
 
 class Obstacle(ABC):
@@ -99,29 +99,29 @@ class FrameObs(Obstacle):
 class GreatCircleObs(Obstacle):
 
     def __init__(self, p1, p2):
-        X1 = np.array((EARTH_RADIUS * np.cos(p1[0]) * np.cos(p1[1]),
-                       EARTH_RADIUS * np.sin(p1[0]) * np.cos(p1[1]),
-                       EARTH_RADIUS * np.sin(p1[1])))
-        X2 = np.array((EARTH_RADIUS * np.cos(p2[0]) * np.cos(p2[1]),
-                       EARTH_RADIUS * np.sin(p2[0]) * np.cos(p2[1]),
-                       EARTH_RADIUS * np.sin(p2[1])))
+        X1 = np.array((Utils.EARTH_RADIUS * np.cos(p1[0]) * np.cos(p1[1]),
+                       Utils.EARTH_RADIUS * np.sin(p1[0]) * np.cos(p1[1]),
+                       Utils.EARTH_RADIUS * np.sin(p1[1])))
+        X2 = np.array((Utils.EARTH_RADIUS * np.cos(p2[0]) * np.cos(p2[1]),
+                       Utils.EARTH_RADIUS * np.sin(p2[0]) * np.cos(p2[1]),
+                       Utils.EARTH_RADIUS * np.sin(p2[1])))
         self.dir_vect = -np.cross(X1, X2)
         self.dir_vect /= np.linalg.norm(self.dir_vect)
         super().__init__(self.value, np.zeros(2), self.d_value)
 
     def value(self, x):
-        X = np.array((EARTH_RADIUS * np.cos(x[0]) * np.cos(x[1]),
-                      EARTH_RADIUS * np.sin(x[0]) * np.cos(x[1]),
-                      EARTH_RADIUS * np.sin(x[1])))
+        X = np.array((Utils.EARTH_RADIUS * np.cos(x[0]) * np.cos(x[1]),
+                      Utils.EARTH_RADIUS * np.sin(x[0]) * np.cos(x[1]),
+                      Utils.EARTH_RADIUS * np.sin(x[1])))
         return X @ self.dir_vect
 
     def d_value(self, x):
-        d_dphi = np.array((-EARTH_RADIUS * np.sin(x[0]) * np.cos(x[1]),
-                           EARTH_RADIUS * np.cos(x[0]) * np.cos(x[1]),
+        d_dphi = np.array((-Utils.EARTH_RADIUS * np.sin(x[0]) * np.cos(x[1]),
+                           Utils.EARTH_RADIUS * np.cos(x[0]) * np.cos(x[1]),
                            0))
-        d_dlam = np.array((-EARTH_RADIUS * np.cos(x[0]) * np.sin(x[1]),
-                           -EARTH_RADIUS * np.sin(x[0]) * np.sin(x[1]),
-                           EARTH_RADIUS * np.cos(x[1])))
+        d_dlam = np.array((-Utils.EARTH_RADIUS * np.cos(x[0]) * np.sin(x[1]),
+                           -Utils.EARTH_RADIUS * np.sin(x[0]) * np.sin(x[1]),
+                           Utils.EARTH_RADIUS * np.cos(x[1])))
         return np.array((self.dir_vect @ d_dphi, self.dir_vect @ d_dlam))
 
 

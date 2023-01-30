@@ -1,10 +1,10 @@
-import sys
 from abc import ABC, abstractmethod
 
 import numpy as np
-
-from dabry.misc import *
+from numpy import ndarray
+from dabry.misc import Utils
 from dabry.wind import Wind, LinearWind
+from numpy import cos, sin
 
 
 class Dynamics(ABC):
@@ -94,7 +94,7 @@ class PCZermeloDyn(Dynamics):
         """
         super().__init__(wind)
         self.v_a = v_a
-        self.factor = 1 / EARTH_RADIUS
+        self.factor = 1 / Utils.EARTH_RADIUS
 
     def value(self, x, psi, t, v_a=None):
         if v_a is None:

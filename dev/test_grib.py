@@ -6,7 +6,7 @@ import numpy as np
 
 from dabry.geodata import GeoData
 
-from dabry.misc import *
+from dabry.misc import Utils
 from dabry.params_summary import ParamsSummary
 from dabry.problem import NavigationProblem
 from dabry.model import ZermeloGeneralModel
@@ -23,7 +23,7 @@ def run():
     Example of reachability front tracking
     """
 
-    coords = COORD_GCS
+    coords = Utils.COORD_GCS
 
     output_dir = '../output/example_test_grib/'
     wind_data_dir = '/home/bastien/Documents/data/wind'
@@ -81,7 +81,7 @@ def run():
     print(f"Tracking reachability front ({nx_rft}x{ny_rft}, dx={delta_x:.2E}, dy={delta_y:.2E})... ", end='')
     t_start = time.time()
 
-    rft = RFT(bl, tr, T, nx_rft, ny_rft, 10, mp, x_init, kernel='matlab', coords=COORD_GCS)
+    rft = RFT(bl, tr, T, nx_rft, ny_rft, 10, mp, x_init, kernel='matlab', coords=Utils.COORD_GCS)
 
     # rft.compute()
 
@@ -122,12 +122,12 @@ def run():
 
     params = {
         'coords': 'gcs',
-        'bl_wind': (RAD_TO_DEG * total_wind.grid[0, 0, 0], RAD_TO_DEG * total_wind.grid[0, 0, 1]),
-        'tr_wind': (RAD_TO_DEG * total_wind.grid[-1, -1, 0], RAD_TO_DEG * total_wind.grid[-1, -1, 1]),
+        'bl_wind': (Utils.RAD_TO_DEG * total_wind.grid[0, 0, 0], Utils.RAD_TO_DEG * total_wind.grid[0, 0, 1]),
+        'tr_wind': (Utils.RAD_TO_DEG * total_wind.grid[-1, -1, 0], Utils.RAD_TO_DEG * total_wind.grid[-1, -1, 1]),
         'nx_wind': total_wind.grid.shape[0],
         'ny_wind': total_wind.grid.shape[1],
         'date_wind': total_wind.ts[0],
-        'point_init': (RAD_TO_DEG * x_init[0], RAD_TO_DEG * x_init[1]),
+        'point_init': (Utils.RAD_TO_DEG * x_init[0], Utils.RAD_TO_DEG * x_init[1]),
         'max_time': T,
         'nt_pmp': nt_pmp,
         'nt_rft': rft.nt,

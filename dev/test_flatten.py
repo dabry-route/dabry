@@ -6,7 +6,7 @@ import numpy as np
 
 from dabry.geodata import GeoData
 
-from dabry.misc import *
+from dabry.misc import Utils
 from dabry.params_summary import ParamsSummary
 from dabry.problem import NavigationProblem
 from dabry.model import ZermeloGeneralModel
@@ -23,7 +23,7 @@ def run():
     Example of reachability front tracking
     """
 
-    coords = COORD_CARTESIAN
+    coords = Utils.COORD_CARTESIAN
 
     output_dir = '../output/example_test_flatten/'
     wind_data_dir = '/home/bastien/Documents/data/wind/ncdc/test-flattened-ortho.mz'
@@ -113,7 +113,7 @@ def run():
 
     mdfm.dump_trajs(mp.trajs)
 
-    factor = RAD_TO_DEG if coords == 'gcs' else 1.
+    factor = Utils.RAD_TO_DEG if coords == 'gcs' else 1.
 
     params = {
         'coords': coords,

@@ -3,7 +3,7 @@ import numpy as np
 
 from .dynamics import ZermeloDyn, PCZermeloDyn
 from .wind import UniformWind, Wind
-from .misc import COORD_GCS, COORD_CARTESIAN
+from dabry.misc import Utils
 
 
 class Model(ABC):
@@ -28,13 +28,13 @@ class Model(ABC):
 
 class ZermeloGeneralModel(Model):
 
-    def __init__(self, v_a: float, coords=COORD_CARTESIAN):
+    def __init__(self, v_a: float, coords=Utils.COORD_CARTESIAN):
         self.coords = coords
         super().__init__(v_a)
         self.wind = UniformWind(np.zeros(2))
-        if self.coords == COORD_CARTESIAN:
+        if self.coords == Utils.COORD_CARTESIAN:
             self.dyn = ZermeloDyn(self.wind, self.v_a)
-        elif self.coords == COORD_GCS:
+        elif self.coords == Utils.COORD_GCS:
             self.dyn = PCZermeloDyn(self.wind, self.v_a)
         else:
             print(f'Unknown mode : {coords}')
@@ -42,16 +42,16 @@ class ZermeloGeneralModel(Model):
 
     def update_wind(self, wind: Wind):
         self.wind = wind
-        if self.coords == COORD_CARTESIAN:
+        if self.coords == Utils.COORD_CARTESIAN:
             self.dyn = ZermeloDyn(self.wind, self.v_a)
-        elif self.coords == COORD_GCS:
+        elif self.coords == Utils.COORD_GCS:
             self.dyn = PCZermeloDyn(self.wind, self.v_a)
 
     def update_airspeed(self, v_a):
         super(ZermeloGeneralModel, self).update_airspeed(v_a)
-        if self.coords == COORD_CARTESIAN:
+        if self.coords == Utils.COORD_CARTESIAN:
             self.dyn = ZermeloDyn(self.wind, self.v_a)
-        elif self.coords == COORD_GCS:
+        elif self.coords == Utils.COORD_GCS:
             self.dyn = PCZermeloDyn(self.wind, self.v_a)
 
     def __str__(self):

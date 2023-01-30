@@ -6,7 +6,7 @@ import numpy as np
 from dabry.feedback import ConstantFB, GSTargetFB, FixedHeadingFB
 from dabry.mdf_manager import DDFmanager
 from dabry.params_summary import ParamsSummary
-from dabry.misc import *
+from dabry.misc import Utils
 from dabry.problem import IndexedProblem
 from dabry.shooting import Shooting
 from dabry.solver_ef import SolverEF
@@ -72,7 +72,7 @@ if __name__ == '__main__':
 
     print(res)
 
-    pb.trajs.append(Trajectory(np.zeros(n_steps), x_opt, np.zeros(n_steps), n_steps, type=TRAJ_PATH, coords=pb.coords))
+    pb.trajs.append(Trajectory(np.zeros(n_steps), x_opt, np.zeros(n_steps), n_steps, type=Utils.TRAJ_PATH, coords=pb.coords))
 
     mdfm.dump_trajs(trajs)
     mdfm.dump_trajs(pb.trajs)

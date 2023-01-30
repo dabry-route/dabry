@@ -1,6 +1,6 @@
 import os
 from dabry.mdf_manager import DDFmanager
-from dabry.misc import *
+from dabry.misc import Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem
 
 if __name__ == '__main__':

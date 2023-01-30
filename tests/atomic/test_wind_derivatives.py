@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from dabry.wind import VortexWind, RadialGaussWind, RankineVortexWind, DoubleGyreWind, PointSymWind, DiscreteWind, \
     TrapWind
-from dabry.misc import *
+from dabry.misc import Utils
 
 
 class WindTester:

@@ -9,7 +9,7 @@ import scipy.optimize
 from dabry.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB
 from dabry.mdf_manager import DDFmanager
 from dabry.params_summary import ParamsSummary
-from dabry.misc import *
+from dabry.misc import Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem
 from dabry.shooting import Shooting
 from dabry.solver_ef import SolverEF

@@ -1,14 +1,17 @@
 import math
 import os
 import time
+import sys
 import scipy.optimize
 from matplotlib import pyplot as plt
 from heapq import heappush, heappop
+import numpy as np
+from numpy import pi
 
 from dabry.problem import NavigationProblem
 from dabry.shooting import Shooting
 from dabry.trajectory import Trajectory
-from dabry.misc import *
+from dabry.misc import Utils
 
 
 class Solver:
@@ -109,7 +112,7 @@ class Solver:
         self.distances_queue.append(t)
 
     def distance(self, x1, x2):
-        return distance(x1, x2, coords=self.mp.coords)
+        return Utils.distance(x1, x2, coords=self.mp.coords)
 
     def is_opti(self, traj: Trajectory):
         b = False
@@ -277,10 +280,10 @@ class Solver:
 
     def adj_from_dir(self, d):
         n = np.zeros(2)
-        if self.mp.coords == COORD_CARTESIAN:
+        if self.mp.coords == Utils.COORD_CARTESIAN:
             n[:] = np.array([np.cos(d), np.sin(d)])
 
-        elif self.mp.coords == COORD_GCS:
+        elif self.mp.coords == Utils.COORD_GCS:
             n[:] = np.array([np.sin(d), np.cos(d)])
 
         return -1*n# / (self.mp.model.v_a + self.mp.model.wind.value(self.mp.x_init) @ n)
@@ -321,7 +324,7 @@ class Solver:
                 dirs_queue.append(new_dir)
         t_end = time.time()
         for e in self.shoot_queue:
-            print(f'{e[0]:.5f}, {RAD_TO_DEG * e[1][0]:.2f}')
+            print(f'{e[0]:.5f}, {Utils.RAD_TO_DEG * e[1][0]:.2f}')
         t_start2 = time.time()
 
         try:
@@ -441,7 +444,7 @@ class Solver:
         else:
             for k in self.opti_indexes:
                 print(f'         Optimal time : {self.opti_time[k]}')
-                print(f'Optimal init. heading : {RAD_TO_DEG * self.opti_headings[k]}')
+                print(f'Optimal init. heading : {Utils.RAD_TO_DEG * self.opti_headings[k]}')
                 self.trajs[k].type = 'optimal'
                 return True
 
@@ -498,7 +501,7 @@ class Solver:
         else:
             for k in self.opti_indexes:
                 print(f'         Optimal time : {self.opti_time[k]}')
-                print(f'Optimal init. heading : {RAD_TO_DEG * self.opti_headings[k]}')
+                print(f'Optimal init. heading : {Utils.RAD_TO_DEG * self.opti_headings[k]}')
                 self.trajs[k].type = 'optimal'
 
     def solve_global(self, gradient=False):

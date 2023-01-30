@@ -2,13 +2,14 @@ import sys
 import warnings
 
 import numpy as np
+from numpy import ndarray, pi, sin, cos
 import scipy.interpolate as itp
 
 import h5py
 from math import exp, log
 from pyproj import Proj
 
-from dabry.misc import *
+from dabry.misc import Utils
 
 
 class Wind:
@@ -229,7 +230,7 @@ class DiscreteWind(Wind):
             self.y_min = np.min(self.grid[:, :, 1])
             self.y_max = np.max(self.grid[:, :, 1])
 
-            self.units_grid = U_RAD if self.coords == COORD_GCS else COORD_CARTESIAN
+            self.units_grid = Utils.U_RAD if self.coords == Utils.COORD_GCS else Utils.COORD_CARTESIAN
 
             self.d_u__d_x = None
             self.d_u__d_y = None
@@ -273,9 +274,9 @@ class DiscreteWind(Wind):
                 pass
 
             # Checking consistency before loading
-            ensure_coords(self.coords)
-            ensure_units(self.units_grid)
-            ensure_compatible(self.coords, self.units_grid)
+            Utils.ensure_coords(self.coords)
+            Utils.ensure_units(self.units_grid)
+            Utils.ensure_compatible(self.coords, self.units_grid)
 
             # Define computation bounds as smallest xy-coordinate outer bounding box
             self.x_min = wind_data['grid'][:, :, 0].min()
@@ -342,12 +343,12 @@ class DiscreteWind(Wind):
                 self.t_end /= 1000.
 
         # Post processing
-        if self.units_grid == U_DEG:
-            self.grid[:] = DEG_TO_RAD * self.grid
+        if self.units_grid == Utils.U_DEG:
+            self.grid[:] = Utils.DEG_TO_RAD * self.grid
             self.x_min, self.x_max, self.y_min, self.y_max = \
-                tuple(DEG_TO_RAD * np.array((self.x_min, self.x_max, self.y_min, self.y_max)))
+                tuple(Utils.DEG_TO_RAD * np.array((self.x_min, self.x_max, self.y_min, self.y_max)))
 
-            self.units_grid = U_RAD
+            self.units_grid = Utils.U_RAD
 
         # self.x_min = np.max(self.grid[0, :, 0])
         # self.x_max = np.min(self.grid[-1, :, 0])
@@ -361,13 +362,13 @@ class DiscreteWind(Wind):
 
     def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, nt=1, fd=False):
         self.coords = coords
-        self.units_grid = 'meters' if coords == COORD_CARTESIAN else 'degrees'
+        self.units_grid = 'meters' if coords == Utils.COORD_CARTESIAN else 'degrees'
         self.unstructured = wind.unstructured
 
         # Checking consistency before loading
-        ensure_units(self.units_grid)
-        ensure_coords(self.coords)
-        ensure_compatible(self.coords, self.units_grid)
+        Utils.ensure_units(self.units_grid)
+        Utils.ensure_coords(self.coords)
+        Utils.ensure_compatible(self.coords, self.units_grid)
 
         self.x_min = bl[0]
         self.x_max = tr[0]
@@ -418,14 +419,12 @@ class DiscreteWind(Wind):
             else:
                 self.compute_derivatives()
 
-    def value(self, t, x, units=U_METERS):
+    def value(self, t, x, units=Utils.U_METERS):
         """
         :param x: Point at which to give wind interpolation
         :param units: Units in which x is given
         :return: The interpolated wind value at x
         """
-        # ensure_units(units)
-        # ensure_compatible(self.coords, units)
 
         nx = self.nx
         ny = self.ny
@@ -473,7 +472,7 @@ class DiscreteWind(Wind):
                        alpha * ((1 - b) * ((1 - a) * self.uv[it + 1, i, j] + a * self.uv[it + 1, i + 1, j]) +
                                 b * ((1 - a) * self.uv[it + 1, i, j + 1] + a * self.uv[it + 1, i + 1, j + 1]))
 
-    def d_value(self, t, x, units=U_METERS):
+    def d_value(self, t, x, units=Utils.U_METERS):
         """
         :param x: Point at which to give wind interpolation
         :param units: Units in which x is given
@@ -551,7 +550,7 @@ class DiscreteWind(Wind):
         self.d_v__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
 
         # Use order 2 precision derivative
-        factor = 1 / EARTH_RADIUS if self.coords == 'gcs' else 1.
+        factor = 1 / Utils.EARTH_RADIUS if self.coords == 'gcs' else 1.
         self.d_u__d_x[:] = factor * 0.5 * (self.uv[:, 2:, 1:-1, 0] - self.uv[:, :-2, 1:-1, 0]) / (
                 self.grid[2:, 1:-1, 0] - self.grid[:-2, 1:-1, 0])
         self.d_u__d_y[:] = factor * 0.5 * (self.uv[:, 1:-1, 2:, 0] - self.uv[:, 1:-1, :-2, 0]) / (
@@ -566,7 +565,7 @@ class DiscreteWind(Wind):
         Flatten GCS-coordinates wind to euclidean space using given projection
         :return The flattened wind
         """
-        if self.coords != COORD_GCS:
+        if self.coords != Utils.COORD_GCS:
             print('Coordinates must be GCS to flatten', file=sys.stderr)
             exit(1)
         oldgrid = np.zeros(self.grid.shape)
@@ -575,7 +574,7 @@ class DiscreteWind(Wind):
         if proj == 'plate-carree':
             center = 0.5 * (self.grid[0, 0] + self.grid[-1, -1])
             newgrid = np.zeros(self.grid.shape)
-            newgrid[:] = EARTH_RADIUS * (self.grid - center)
+            newgrid[:] = Utils.EARTH_RADIUS * (self.grid - center)
             self.grid[:] = newgrid
             self.x_min = self.grid[0, 0, 0]
             self.y_min = self.grid[0, 0, 1]
@@ -585,7 +584,7 @@ class DiscreteWind(Wind):
             nx, ny, _ = self.grid.shape
             bl = self.grid[0, 0]
             tr = self.grid[-1, -1]
-            f_wind.load_from_wind(self, nx, ny, bl, tr, coords=COORD_CARTESIAN)
+            f_wind.load_from_wind(self, nx, ny, bl, tr, coords=Utils.COORD_CARTESIAN)
         elif proj == 'ortho':
             for p in ['lon_0', 'lat_0']:
                 if p not in kwargs.keys():
@@ -600,11 +599,11 @@ class DiscreteWind(Wind):
             nx, ny, _ = self.grid.shape
 
             # Grid
-            proj = Proj(proj='ortho', lon_0=RAD_TO_DEG * self.lon_0, lat_0=RAD_TO_DEG * self.lat_0)
+            proj = Proj(proj='ortho', lon_0=Utils.RAD_TO_DEG * self.lon_0, lat_0=Utils.RAD_TO_DEG * self.lat_0)
             oldgrid = np.zeros(self.grid.shape)
             oldgrid[:] = self.grid
             newgrid = np.zeros((2, nx, ny))
-            newgrid[:] = proj(RAD_TO_DEG * self.grid[:, :, 0], RAD_TO_DEG * self.grid[:, :, 1])
+            newgrid[:] = proj(Utils.RAD_TO_DEG * self.grid[:, :, 0], Utils.RAD_TO_DEG * self.grid[:, :, 1])
             self.grid[:] = newgrid.transpose((1, 2, 0))
             oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
             self.x_min = self.grid[:, :, 0].min()
@@ -619,8 +618,8 @@ class DiscreteWind(Wind):
             for kt in range(self.uv.shape[0]):
                 newuv[kt, :] = self._rotate_wind(self.uv[kt, :, :, 0],
                                                  self.uv[kt, :, :, 1],
-                                                 RAD_TO_DEG * oldgrid[:, :, 0],
-                                                 RAD_TO_DEG * oldgrid[:, :, 1])
+                                                 Utils.RAD_TO_DEG * oldgrid[:, :, 0],
+                                                 Utils.RAD_TO_DEG * oldgrid[:, :, 1])
             self.uv[:] = newuv
         else:
             print(f"Unknown projection type {proj}", file=sys.stderr)
@@ -630,7 +629,7 @@ class DiscreteWind(Wind):
         # self.x_min, self.y_min, self.x_max, self.y_max = oldbounds
 
         self.unstructured = True
-        self.coords = COORD_CARTESIAN
+        self.coords = Utils.COORD_CARTESIAN
         self.units_grid = 'meters'
         self.is_analytical = False
 

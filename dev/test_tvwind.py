@@ -5,7 +5,7 @@ import numpy as np
 
 from dabry.mdf_manager import DDFmanager
 from dabry.params_summary import ParamsSummary
-from dabry.misc import *
+from dabry.misc import Utils
 from dabry.problem import IndexedProblem
 from dabry.shooting import Shooting
 from dabry.solver_ef import SolverEF

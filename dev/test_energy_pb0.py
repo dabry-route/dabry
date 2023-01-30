@@ -12,7 +12,7 @@ from tqdm import tqdm
 from dabry.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB, FixedHeadingFB
 from dabry.mdf_manager import DDFmanager
 from dabry.params_summary import ParamsSummary
-from dabry.misc import *
+from dabry.misc import Utils, Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem
 from dabry.shooting import Shooting
 from dabry.solver_ef import SolverEF
@@ -76,8 +76,8 @@ if __name__ == '__main__':
         s = np.array((np.cos(a), np.sin(a)))
         cost = 'dobrokhodov'
         pn0 = scipy.optimize.brentq(lambda pn:
-                                    power(airspeed_opti(np.array((pn, 0.)), cost=cost), cost=cost) - pn * (
-                                            airspeed_opti(np.array((pn, 0.)), cost=cost) + s @ pb.model.wind.value(0., pb.x_init)),
+                                    Utils.power(Utils.airspeed_opti(np.array((pn, 0.)), cost=cost), cost=cost) - pn * (
+                                            Utils.airspeed_opti(np.array((pn, 0.)), cost=cost) + s @ pb.model.wind.value(0., pb.x_init)),
                                     1., 300.)
         print(f'pn0 : {pn0:.2f}')
         # pn0 = pn0s[k]
@@ -93,7 +93,7 @@ if __name__ == '__main__':
             trajs.append(traj)
 
     def auto_upperb(pn):
-        va = airspeed_opti_(pn)
+        va = Utils.airspeed_opti_(pn)
         return 3 * pb.geod_l / va
 
     good = [(5, 0.0626662),
@@ -126,7 +126,7 @@ if __name__ == '__main__':
         print(pn0, end='')
         for factor in np.linspace(0.18, 0.22, 0):
             theta = factor * np.pi
-            fb = FixedHeadingFB(pb.model.wind, airspeed_opti_(pn0), theta, coords=pb.coords)
+            fb = FixedHeadingFB(pb.model.wind, Utils.airspeed_opti_(pn0), theta, coords=pb.coords)
             psi = fb.value(0, pb.x_init)
             s = np.array((np.cos(psi), np.sin(psi)))
             shooting = Shooting(pb.model.dyn, pb.x_init, auto_upperb(pn0), mode='energy-opt', domain=pb.domain,
@@ -159,7 +159,7 @@ if __name__ == '__main__':
         pb.load_feedback(FunFB(solver.control))
         sc = TimedSC(pb.model.wind.t_start + solver.reach_time)
         traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=pb.model.wind.t_start)
-        traj.type = TRAJ_OPTIMAL
+        traj.type = Utils.TRAJ_OPTIMAL
         traj.info = f'Extremals_{v_a:.2f}'
         chrono.stop()
         mdfm.dump_trajs([traj])

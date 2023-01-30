@@ -3,11 +3,12 @@ import time
 
 import matplotlib as mpl
 import numpy as np
+from numpy import pi
 import scipy.optimize
 
 from dabry.geodata import GeoData
 
-from dabry.misc import *
+from dabry.misc import Utils
 from dabry.params_summary import ParamsSummary
 from dabry.problem import NavigationProblem
 from dabry.model import ZermeloGeneralModel
@@ -28,7 +29,7 @@ def run():
     Example of reachability front tracking
     """
 
-    coords = COORD_CARTESIAN
+    coords = Utils.COORD_CARTESIAN
 
     output_dir = '../output/example_test_postproc/'
     wind_data_dir = '/home/bastien/Documents/data/wind/ncdc/test-postproc.mz'
@@ -69,7 +70,7 @@ def run():
     x_target = np.zeros(2)
     x_target[:] = tr - offset
 
-    T = distance(x_init, x_target, coords=coords) / v_a * 1.2
+    T = Utils.distance(x_init, x_target, coords=coords) / v_a * 1.2
     print(T/3600.)
 
     print(np.linalg.norm(x_target - x_init))
@@ -158,8 +159,8 @@ def run():
     opti_ceil = L * 0.005
     neighb_ceil = opti_ceil / 2.
 
-    u_min = DEG_TO_RAD * 10.
-    u_max = DEG_TO_RAD * 90.
+    u_min = Utils.DEG_TO_RAD * 10.
+    u_max = Utils.DEG_TO_RAD * 90.
 
     #solver = SolverRP(mp, 51, 51, 25)
     solver = Solver(mp,
@@ -182,7 +183,7 @@ def run():
     #mdfm.dump_trajs(solver.mp_pmp.trajs)
     #solver.rft.dump_rff(output_dir)
 
-    factor = RAD_TO_DEG if coords == 'gcs' else 1.
+    factor = Utils.RAD_TO_DEG if coords == 'gcs' else 1.
 
     params = {
         'coords': coords,

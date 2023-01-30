@@ -2,17 +2,19 @@ import csv
 import datetime
 import os
 import sys
-
+import numpy as np
+from numpy import sin, ndarray
+from numpy import arctan2 as atan2
+import time
 import h5py
 import json
 
-from numpy import sin
 import matplotlib.pyplot as plt
 
 from dabry.aero import LLAero, Aero, MermozAero
 
 from dabry.wind import DiscreteWind
-from dabry.misc import *
+from dabry.misc import Utils
 
 path_colors = ['b', 'g', 'r', 'c', 'm', 'y']
 
@@ -89,12 +91,12 @@ class PostProcessing:
                     pass
             if not success:
                 print('[PP-Warn] Airspeed not found in parameters, switching to default value')
-                self.va = AIRSPEED_DEFAULT
+                self.va = Utils.AIRSPEED_DEFAULT
 
             try:
                 self.geod_l = pd['geodesic_length']
             except KeyError:
-                self.geod_l = distance(self.x_init, self.x_target, self.coords)
+                self.geod_l = Utils.distance(self.x_init, self.x_target, self.coords)
 
             try:
                 self.aero_mode = pd['aero_mode']
@@ -152,12 +154,12 @@ class PostProcessing:
 
     def stats(self):
         fig, ax = plt.subplots(ncols=3, nrows=2, figsize=(12, 8))
-        decorate(ax[0, 0], 'Marginal delay per length unit', 'Curvilinear abscissa (scaled)', '[h]')
-        decorate(ax[0, 1], 'Power', 'Time (scaled)', '[W]')
-        decorate(ax[0, 2], 'Energy spent', 'Time (scaled)', '[kWh]')
-        decorate(ax[1, 0], 'Ground speed', 'Time (scaled)', '[m/s]', ylim=(0., 2. * self.va))
-        decorate(ax[1, 1], 'Wind norm', 'Time (scaled)', '[m/s]', ylim=(0, 1.1 * self.va))
-        decorate(ax[1, 2], 'Airspeed', 'Time (scaled)', '[m/s]')
+        Utils.decorate(ax[0, 0], 'Marginal delay per length unit', 'Curvilinear abscissa (scaled)', '[h]')
+        Utils.decorate(ax[0, 1], 'Power', 'Time (scaled)', '[W]')
+        Utils.decorate(ax[0, 2], 'Energy spent', 'Time (scaled)', '[kWh]')
+        Utils.decorate(ax[1, 0], 'Ground speed', 'Time (scaled)', '[m/s]', ylim=(0., 2. * self.va))
+        Utils.decorate(ax[1, 1], 'Wind norm', 'Time (scaled)', '[m/s]', ylim=(0, 1.1 * self.va))
+        Utils.decorate(ax[1, 2], 'Airspeed', 'Time (scaled)', '[m/s]')
         ax2 = ax[0, 2].twinx()
         ax2.tick_params(direction='in')
         ax2.set_ylabel('Distance to target (m)')
@@ -261,7 +263,7 @@ class PostProcessing:
             ax.annotate(self.trajs[k]['info'], (ets[k][1] / 3.6e3, ets[k][0] / 3.6e6), fontsize=8)
         v_minp = (1000 / (3 * 0.05)) ** (1 / 4)
         p_min = 0.05 * v_minp ** 3 + 1000 / v_minp
-        decorate(ax, 'Energy vs. time', 'Time (h)', 'Energy (kWh)')
+        Utils.decorate(ax, 'Energy vs. time', 'Time (h)', 'Energy (kWh)')
         x = np.linspace(5, 1.15 * max(times), 100)
         y = np.linspace(0.5, 1.15 * max(energies), 100)
         x, y = np.meshgrid(x, y, indexing='ij')
@@ -315,7 +317,7 @@ class PostProcessing:
         controls = np.zeros(n - 1)
         duration = 0.
 
-        dtarget = np.array([distance(points[i], self.x_target, self.coords) for i in range(n - 1)])
+        dtarget = np.array([Utils.distance(points[i], self.x_target, self.coords) for i in range(n - 1)])
 
         imax = n - 2
         for i in range(len(dtarget)):
@@ -323,14 +325,14 @@ class PostProcessing:
                 imax = i
                 break
 
-        length = float(np.sum([distance(points[i], points[i + 1], self.coords) for i in range(imax + 1)]))
+        length = float(np.sum([Utils.distance(points[i], points[i + 1], self.coords) for i in range(imax + 1)]))
         for i in range(n - 1):
             dt = ts[i + 1] - ts[i]
             p = np.zeros(2)
             p2 = np.zeros(2)
             p[:] = points[i]
             p2[:] = points[i + 1]
-            corr_mat = EARTH_RADIUS * np.diag((np.cos(p[1]), 1.)) if self.coords == COORD_GCS else np.diag((1., 1.))
+            corr_mat = Utils.EARTH_RADIUS * np.diag((np.cos(p[1]), 1.)) if self.coords == Utils.COORD_GCS else np.diag((1., 1.))
             delta_x = (p2 - p)
             dx_norm = np.linalg.norm(delta_x)
             e_dx = delta_x / dx_norm
@@ -353,7 +355,7 @@ class PostProcessing:
             cw[i] = np.cross(e_dx, w)
             tw[i] = e_dx @ w
             vas[i] = v_a
-            controls[i] = u if self.coords == COORD_CARTESIAN else np.pi / 2. - u
+            controls[i] = u if self.coords == Utils.COORD_CARTESIAN else np.pi / 2. - u
             if i <= imax:
                 duration += dt
 
