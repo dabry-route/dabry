@@ -421,16 +421,3 @@ class Chrono:
 
     def __str__(self):
         return time_fmt(self.t_end - self.t_start)
-
-
-# From https://gis.stackexchange.com/questions/416120/importerror-when-importing-linestring-from-shapely-geometry
-def find_self_intersection(line):
-    intersection = None
-    if not line.is_simple:
-        intersection = unary_union(line)
-        seg_coordinates = []
-        for seg in intersection.geoms:
-            seg_coordinates.extend(list(seg.coords))
-        intersection = [Point(p) for p, c in Counter(seg_coordinates).items() if c > 1]
-        intersection = MultiPoint(intersection)
-    return intersection
