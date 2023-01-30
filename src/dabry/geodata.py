@@ -28,7 +28,7 @@ class GeoData:
             else:
                 self.cache = {}
         if self.full_inet:
-            raise UserWarning('GeoData : unable to locate cache, switching to full-Internet mode')
+            print('GeoData : unable to locate cache, switching to full-Internet mode')
         self.locator = None
 
     def get_coords(self, name, units='deg'):
