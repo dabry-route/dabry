@@ -3,11 +3,14 @@
  'type' : {'integral', 'pmp'},
  'last_index' : integer,
  'label' : integer,
+ 'info': string,
  'interrupted' : {False, True}]
 	data : (nt, 2)
 	ts : (nt, )
 	(OPT) controls : (nt, )
 	(OPT) adjoints : (nt, 2)
+	(OPT) airspeed : (nt, )
+	(OPT) energy : (nt-1,)
 	
 	
 	
