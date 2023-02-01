@@ -10,9 +10,9 @@ from dabry.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 0
+    pb_id = 21
     # Or choose database problem. If empty, will use previous ID
-    dbpb = 'ncdc/44W_16S_9W_25S_20220301_12'
+    dbpb = '' # 'ncdc/44W_16S_9W_25S_20220301_12'
     suffix = ''
     # When running several times, wind data or reachability fronts data can be cached
     cache_wind = True
@@ -51,7 +51,7 @@ if __name__ == '__main__':
         # obs2 = GreatCircleObs(np.array((-30 * DEG_TO_RAD, 10 * DEG_TO_RAD)),
         #                           np.array((-31 * DEG_TO_RAD, 10 * DEG_TO_RAD)))
         # obs.append(LSEMaxiObs([obs1, obs2]))
-        pb = DatabaseProblem(os.path.join(os.environ.get('DABRYPATH'), 'data', dbpb, 'wind.h5'),
+        pb = DatabaseProblem(dbpb,
                              airspeed=23.,
                              obstacles=obs,
                              x_init=Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398]),

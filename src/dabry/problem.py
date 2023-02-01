@@ -997,8 +997,8 @@ class IndexedProblem(NavigationProblem):
             v_a = 23.
 
             x_init = np.array((1.6e6, 1.6e6))
-            x_target = np.array((-2e6, 0.5e6))
-            bl = np.array((-2e6, -1.5e6))
+            x_target = np.array((-1.8e6, 0.5e6))
+            bl = np.array((-2.3e6, -1.5e6))
             tr = np.array((2e6, 2e6))
             coords = Utils.COORD_CARTESIAN
             wind = DiscreteWind()
@@ -1006,7 +1006,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=True,
                                                  autodomain=False)
 
         elif i == 22:
