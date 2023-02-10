@@ -18,7 +18,7 @@ from dabry.solver import Solver
 from dabry.solver_rp import SolverRP
 from dabry.trajectory import Trajectory
 from dabry.wind import DiscreteWind
-from dabry.mdf_manager import DDFmanager
+from dabry.ddf_manager import DDFmanager
 from dabry.post_processing import PostProcessing
 
 mpl.style.use('seaborn-notebook')

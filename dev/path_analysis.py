@@ -10,7 +10,7 @@ from dabry.problem import IndexedProblem
 from dabry.misc import Utils
 from dabry.trajectory import Trajectory
 from dabry.post_processing import PostProcessing
-from dabry.mdf_manager import DDFmanager
+from dabry.ddf_manager import DDFmanager
 from dabry.params_summary import ParamsSummary
 from dabry.solver_rp import SolverRP
 

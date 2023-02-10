@@ -7,7 +7,7 @@ import numpy as np
 import scipy.optimize
 
 from dabry.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB
-from dabry.mdf_manager import DDFmanager
+from dabry.ddf_manager import DDFmanager
 from dabry.params_summary import ParamsSummary
 from dabry.misc import Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem
@@ -20,7 +20,7 @@ from dabry.wind import DiscreteWind
 if __name__ == '__main__':
     # Choose problem ID
     pb_id, seed = 0, 0
-    dbpb = None#'37W_8S_16W_17S_20220301_12'
+    dbpb = '37W_8S_16W_17S_20220301_12'
     cache_rff = True
     cache_wind = True
 

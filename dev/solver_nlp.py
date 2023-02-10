@@ -4,7 +4,7 @@ import os
 import numpy as np
 
 from dabry.feedback import ConstantFB, GSTargetFB, FixedHeadingFB
-from dabry.mdf_manager import DDFmanager
+from dabry.ddf_manager import DDFmanager
 from dabry.params_summary import ParamsSummary
 from dabry.misc import Utils
 from dabry.problem import IndexedProblem

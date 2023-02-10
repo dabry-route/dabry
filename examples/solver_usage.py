@@ -1,7 +1,7 @@
 import os
 import numpy as np
 
-from dabry.mdf_manager import DDFmanager
+from dabry.ddf_manager import DDFmanager
 from dabry.obstacle import GreatCircleObs, ParallelObs
 from dabry.misc import Utils, Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem

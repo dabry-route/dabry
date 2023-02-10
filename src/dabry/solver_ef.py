@@ -1,13 +1,12 @@
 # from heapq import heappush, heappop
 import os
 import sys
-import threading
 
 import numpy as np
 from numpy import sin, cos, pi
 from numpy import arcsin as asin
 from numpy import arctan2 as atan2
-from shapely.geometry import Polygon, Point, LineString
+from shapely.geometry import Polygon
 import csv
 import scipy.integrate
 
@@ -78,6 +77,69 @@ class Particle:
         self.i_obs = i_obs
         self.ccw = ccw
         self.rot = rot
+
+
+class ExtremalField:
+
+    def __init__(self):
+        self.trajs = {}
+        self.p_inits = {}
+        self.parents = {}
+        self.index = 0
+
+    def new_traj(self, pcl: Particle, p_init):
+        """
+        Create new initial trajectory
+        """
+        i = self.index
+        self.trajs[i] = PartialTraj(pcl.idt, [pcl])
+        self.p_inits[i] = np.zeros(2)
+        self.p_inits[i][:] = p_init
+        self.index += 1
+
+    def new_traj_between(self, i1, i2, idt, pcl_new=None):
+        pcl1 = self.trajs[i1][idt]
+        pcl2 = self.trajs[i2][idt]
+
+        i_new = self.index
+        if pcl_new is None:
+            state = 0.5 * (pcl1.state + pcl2.state)
+            cost = 0.5 * (pcl1.cost + pcl2.cost)
+            adjoint = 0.5 * (pcl1.adjoint + pcl2.adjoint)
+            pcl_new = Particle(i_new, idt, pcl1.t, state, adjoint, cost)
+        else:
+            pcl_new.idf = i_new
+
+        self.trajs[i_new] = PartialTraj(pcl_new.idt, [pcl_new])
+        self.parents[i_new] = tuple(sorted((i1, i2)))
+        self.index += 1
+        return pcl_new
+
+    def add(self, pcl: Particle):
+        """
+        Add particle to existing trajectory
+        """
+        id_traj = pcl.idf
+        if id_traj not in self.trajs.keys():
+            raise Exception(f'Error in add : Trajectory {id_traj} does not exist')
+        else:
+            self.trajs[id_traj].append(pcl)
+
+    def get_parents(self, i):
+        try:
+            return self.parents[i]
+        except KeyError:
+            return None, None
+
+    def empty(self):
+        return len(self.trajs.keys()) == 0
+
+    def get_init_adjoint(self, i):
+        if i not in self.parents.keys():
+            return self.p_inits[i]
+        else:
+            p1, p2 = self.parents[i]
+            return 0.5 * (self.get_init_adjoint(p1) + self.get_init_adjoint(p2))
 
 
 class PartialTraj:
@@ -346,7 +408,7 @@ class Relations:
         _, j = self.get(i)
         in_comp = True
         start = True
-        #print(f'\n{i0}')
+        # print(f'\n{i0}')
         i1, i2 = self.get(i0)
         # print(i1, i2)
         # print(self.get(i1))
@@ -506,21 +568,18 @@ class SolverEF:
         # This group shall be reinitialized before new resolution
         self.active = []
         self.new_points = []
-        self.p_inits = {}
+        self.ef_primal = ExtremalField()
+        self.ef_dual = ExtremalField()
+        self.ef = self.ef_primal
         self.lsets = []
         self.rel = Relations()
         self.n_points = 0
-        self.parents_primal = {}
-        self.parents_dual = {}
 
-        self.trajs_primal = {}
-        self.trajs_dual = {}
         self.trajs_control = {}
         self.trajs_add_info = {}
         # Default mode is dual problem
         self.mode_primal = False
         self.mp = self.mp_dual
-        self.trajs = self.trajs_dual
         self.max_extremals = 10000
         self.max_time = max_time
         self.cost_ceil = cost_ceil
@@ -558,43 +617,16 @@ class SolverEF:
 
         self.trimming_rate = 10
 
-    def new_traj_index(self, par1=None, par2=None):
-        if sum((par1 is None, par2 is None)) == 1:
-            print('Error in new index creation : one of the two parents is None', file=sys.stderr)
-            exit(1)
-        if self.mode_primal:
-            i = self._index_p
-            self.parents_primal[i] = (par1, par2)
-            self._index_p += 1
-        else:
-            i = self._index_d
-            self.parents_dual[i] = (par1, par2)
-            self._index_d += 1
-        return i
-
-    def get_parents(self, i):
-        if self.mode_primal:
-            p1, p2 = self.parents_primal[i]
-        else:
-            p1, p2 = self.parents_dual[i]
-        return p1, p2
-
-    def ancestors(self, i):
-        p1, p2 = self.get_parents(i)
-        if p1 is None:
-            return set()
-        return {p1, p2}.union(self.ancestors(p1)).union(self.ancestors(p2))
-
     def set_primal(self, b):
         self.mode_primal = b
         if b:
             self.mp = self.mp_primal
-            self.trajs = self.trajs_primal
+            self.ef = self.ef_primal
             if self.dt < 0:
                 self.dt *= -1
         else:
             self.mp = self.mp_dual
-            self.trajs = self.trajs_dual
+            self.ef = self.ef_dual
             if self.dt > 0:
                 self.dt *= -1
 
@@ -605,7 +637,12 @@ class SolverEF:
         """
         self.active = []
         self.new_points = []
-        self.p_inits = {}
+        if self.mode_primal:
+            self.ef_primal = ExtremalField()
+            self.ef = self.ef_primal
+        else:
+            self.ef_dual = ExtremalField()
+            self.ef = self.ef_dual
         self.lsets = []
         self.rel = Relations()
         self.it = 0
@@ -626,30 +663,20 @@ class SolverEF:
                         -pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
                 pn = self.mp.aero.d_power(asp)
             p = pn * pd
-            i = self.new_traj_index()
-            self.p_inits[i] = np.zeros(2)
-            self.p_inits[i][:] = p
-            pcl = Particle(i, 0, t_start, self.mp.x_init, p, 0.)
+            pcl = Particle(k, 0, t_start, self.mp.x_init, p, 0.)
             if not self.no_coll_filtering:
                 self.collbuf.add_particle(pcl)
             self.active.append(pcl)
-            self.save(pcl)
+            self.ef.new_traj(pcl, p)
         self.rel.fill(list(np.arange(self.N_disc_init)))
-
-    def save(self, p: Particle):
-        id_traj = p.idf
-        if id_traj not in self.trajs.keys():
-            self.trajs[id_traj] = PartialTraj(p.idt, [p])
-        else:
-            self.trajs[id_traj].append(p)
 
     def build_cfront(self):
         # Build current front
         i = self.rel.get_index()
-        front = [list(self.trajs[i].values())[-1][1]]
+        front = [list(self.ef.trajs[i].values())[-1][1]]
         _, j = self.rel.get(i)
         while j != i:
-            front.append(list(self.trajs[j].values())[-1][1])
+            front.append(list(self.ef.trajs[j].values())[-1][1])
             _, j = self.rel.get(j)
         return Polygon(front)
 
@@ -684,7 +711,7 @@ class SolverEF:
                 self.rel.deactivate(idf, 'pareto')
             else:
                 self.new_points.append(pcl_new)
-                self.save(pcl_new)
+                self.ef.add(pcl_new)
                 self.n_points += 1
 
         # Collision filtering if needed
@@ -705,7 +732,7 @@ class SolverEF:
             if not (self.rel.is_active(idf) and self.rel.is_active(iu)):
                 continue
 
-            pcl_other = self.trajs[iu][pcl.idt]
+            pcl_other = self.ef.trajs[iu][pcl.idt]
             # Resample when precision is lost
             if self.mp.distance(pcl.state, pcl_other.state) <= self.abs_nb_ceil:
                 continue
@@ -714,8 +741,8 @@ class SolverEF:
                 self.rel.deact_link(pcl.idf, pcl_other.idf)
                 continue
 
-            p1i, p2i = self.get_parents(idf)
-            p1u, p2u = self.get_parents(iu)
+            p1i, p2i = self.ef.get_parents(idf)
+            p1u, p2u = self.ef.get_parents(iu)
             same_parents = (p1i == p1u and p2i == p2u) or (p1i == p2u and p2i == p1u)
             no_parents = same_parents and p1i is None
             between_cond = idf in (p1u, p2u) or iu in (p1i, p2i) or (same_parents and no_parents) or same_parents
@@ -723,7 +750,11 @@ class SolverEF:
                 continue
 
             # Resampling needed
-            self.create_between(idf, iu, pcl.idt)
+            pcl_new = self.ef.new_traj_between(idf, iu, pcl.idt)
+            self.new_points.append(pcl_new)
+            if not self.no_coll_filtering:
+                self.collbuf.add_particle(pcl_new)
+            self.rel.add(pcl_new.idf, idf, iu)
 
         # Trimming procedure
         if self.no_coll_filtering and self.mode == 0:
@@ -736,46 +767,6 @@ class SolverEF:
                 self.active.append(pcl)
         self.new_points.clear()
         self.it += 1
-
-    def create_between(self, i1, i2, idt):
-        """
-        Creates new trajectory between given ones at given time index
-        :param i1: First traj. index
-        :param i2: Second traj. index
-        :param idt: Time index
-        :return: a new Particle
-        """
-        pcl1 = self.trajs[i1][idt]
-        pcl2 = self.trajs[i2][idt]
-
-        thetal = np.arctan2(*pcl1.adjoint[::-1])
-        thetau = np.arctan2(*pcl2.adjoint[::-1])
-        # thetal, thetau = DEG_TO_RAD * np.array(rectify(RAD_TO_DEG * thetal, RAD_TO_DEG * thetau))
-        rhol = np.linalg.norm(pcl1.adjoint)
-        rhou = np.linalg.norm(pcl2.adjoint)
-        angles = Utils.linspace_sph(thetal, thetau, 3)
-        f = 1.
-        if angles.shape[0] > 1:
-            if angles[1] < angles[0]:
-                f = -1.
-        theta = angles[1]
-        hdg = np.array((np.cos(theta), np.sin(theta)))
-        rho = f * 0.5 * (rhol + rhou)
-        adjoint = rho * hdg
-
-        state = 0.5 * (pcl1.state + pcl2.state)
-        cost = 0.5 * (pcl1.cost + pcl2.cost)
-        new_p_init = 0.5 * (self.p_inits[i1] + self.p_inits[i2])
-        i_new = self.new_traj_index(i1, i2)
-        self.p_inits[i_new] = np.zeros(2)
-        self.p_inits[i_new][:] = new_p_init
-
-        pcl_new = Particle(i_new, idt, pcl1.t, state, adjoint, cost)
-        self.new_points.append(pcl_new)
-        if not self.no_coll_filtering:
-            self.collbuf.add_particle(pcl_new)
-        self.rel.add(i_new, i1, i2)
-        self.save(pcl_new)
 
     def step_single(self, pcl: Particle):
         x = np.zeros(2)
@@ -903,7 +894,7 @@ class SolverEF:
                 # Skip active points inside obstacles
                 continue
             it = pcl.idt
-            pcl_prev = self.trajs[idf][pcl.idt - 1]
+            pcl_prev = self.ef.trajs[idf][pcl.idt - 1]
             x_it = pcl_prev.state
             x_itp1 = pcl.state
             interactions = self.collbuf.get_inter(x_it, x_itp1)
@@ -914,8 +905,8 @@ class SolverEF:
                 for itt in range(l[0], l[1]):
                     if stop:
                         break
-                    pcl1 = self.trajs[k][itt]
-                    pcl2 = self.trajs[k][itt + 1]
+                    pcl1 = self.ef.trajs[k][itt]
+                    pcl2 = self.ef.trajs[k][itt + 1]
                     points = x_it, x_itp1, pcl1.state, pcl2.state
                     if Utils.has_intersec(*points):
                         _, alpha1, alpha2 = Utils.intersection(*points)
@@ -926,7 +917,7 @@ class SolverEF:
                             stop = True
                 if stop:
                     break
-                p1, p2 = self.get_parents(k)
+                p1, p2 = self.ef.get_parents(k)
                 for p in (p1, p2):
                     if p not in interactions.keys():
                         continue
@@ -938,8 +929,8 @@ class SolverEF:
                     for itt in range(l3[0], l3[1] + 1):
                         if itt + 1 >= it:
                             break
-                        pcl1 = self.trajs[k][itt]
-                        pcl2 = self.trajs[p][itt]
+                        pcl1 = self.ef.trajs[k][itt]
+                        pcl2 = self.ef.trajs[p][itt]
                         points = x_it, x_itp1, pcl1.state, pcl2.state
                         if Utils.has_intersec(*points):
                             _, alpha1, alpha2 = Utils.intersection(*points)
@@ -963,10 +954,10 @@ class SolverEF:
                 for j in range(i + 2, n_edges):
                     if cyclic and i == 0 and j == n_edges - 1:
                         continue
-                    pcl1 = self.trajs[comp[i]].get_last()
-                    pcl2 = self.trajs[comp[i + 1]].get_last()
-                    pcl3 = self.trajs[comp[j]].get_last()
-                    pcl4 = self.trajs[comp[j + 1]].get_last()
+                    pcl1 = self.ef.trajs[comp[i]].get_last()
+                    pcl2 = self.ef.trajs[comp[i + 1]].get_last()
+                    pcl3 = self.ef.trajs[comp[j]].get_last()
+                    pcl4 = self.ef.trajs[comp[j + 1]].get_last()
                     if Utils.has_intersec(pcl1.state, pcl2.state, pcl3.state, pcl4.state):
                         s, _, _ = Utils.intersection(pcl1.state, pcl2.state, pcl3.state, pcl4.state)
                         v1 = 1 / self.mp.distance(pcl1.state, s)
@@ -976,11 +967,9 @@ class SolverEF:
                         adjoint = alpha * pcl1.adjoint + (1 - alpha) * pcl4.adjoint
                         cost = alpha * pcl1.cost + (1 - alpha) * pcl4.cost
 
-                        idf = self.new_traj_index(comp[i], comp[j + 1])
-                        new_p_init = 0.5 * (self.p_inits[comp[i]] + self.p_inits[comp[j + 1]])
-                        self.p_inits[idf] = np.zeros(2)
-                        self.p_inits[idf][:] = new_p_init
-                        pcl = Particle(idf, pcl1.idt, pcl1.t, state, adjoint, cost)
+                        pcl = Particle(pcl1.idf, pcl1.idt, pcl1.t, state, adjoint, cost)
+                        self.ef.new_traj_between(comp[i], comp[j + 1], pcl1.idt, pcl_new=pcl)
+
                         intersec.append((i, j, pcl))
 
             def clen(i, j):
@@ -995,12 +984,12 @@ class SolverEF:
                     self.rel.deactivate(comp[k], reason='trimming')
                 self.new_points.append(pcl)
                 self.rel.add(pcl.idf, comp[i], comp[j + 1], force=True)
-                self.save(pcl)
+                self.ef.add(pcl)
 
     def exit_cond(self):
         return len(self.active) == 0 or \
                self.step_algo >= self.max_steps or \
-               len(self.trajs) >= self.max_extremals or \
+               len(self.ef.trajs) >= self.max_extremals or \
                (self.quick_solve and self.quick_traj_idx != -1) or \
                (not self.any_out_obs)
 
@@ -1015,12 +1004,12 @@ class SolverEF:
             if verbose == 2:
                 print(
                     f'\rSteps : {self.step_algo:>6}/{self.max_steps}, '''
-                    f'Extremals : {len(self.trajs):>6}, Active : {len(self.active):>4}, '
+                    f'Extremals : {len(self.ef.trajs):>6}, Active : {len(self.active):>4}, '
                     f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} '
                     f'Comp : {len(self.rel.components(free_only=True))} ', end='', flush=True)
         if self.step_algo == self.max_steps:
             msg = f'Stopped on iteration limit {self.max_steps}'
-        elif len(self.trajs) == self.max_extremals:
+        elif len(self.ef.trajs) == self.max_extremals:
             msg = f'Stopped on extremals limit {self.max_extremals}'
         elif self.quick_solve and self.quick_traj_idx != -1:
             msg = 'Stopped quick solve'
@@ -1028,25 +1017,6 @@ class SolverEF:
             msg = f'Stopped empty active list'
         if verbose == 2:
             print(msg)
-
-    def prepare_control_law(self):
-        # For the control law, keep only trajectories close to the goal
-        for k, v in self.trajs_dual.items():
-            m = None
-            for vv in v.values():
-                candidate = self.mp.distance(vv[1], self.mp_primal.x_init)
-                if m is None or candidate < m:
-                    m = candidate
-            if m < self.mp.geod_l * 0.1:
-                self.trajs_control[k] = v
-                self.trajs_add_info[k] = 'control'
-        # Add parent trajectories
-        parents_set = set()
-        for k in self.trajs_control.keys():
-            parents_set = parents_set.union(self.ancestors(k))
-        for kp in parents_set:
-            self.trajs_control[kp] = self.trajs_dual[kp]
-            self.trajs_add_info[kp] = 'control'
 
     def solve(self, verbose=2, backward=False):
         """
@@ -1128,17 +1098,12 @@ class SolverEF:
                         p[:] = vv[2]
         return self.mp.aero.asp_opti(p)
 
-    def build_opti_traj(self, force_primal=False, force_dual=False):
-        if force_primal or ((not force_dual) and len(self.trajs_dual) == 0):
-            # Priorize dual. If empty then resort to primal.
-            trajs = self.trajs_primal
-            mp = self.mp_primal
-            parents = self.parents_primal
+    def build_opti_traj(self, dual=False):
+        if not dual:
+            self.set_primal(True)
             using_primal = True
         else:
-            trajs = self.trajs_dual
-            mp = self.mp_dual
-            parents = self.parents_dual
+            self.set_primal(False)
             using_primal = False
 
         bests = {}
@@ -1146,10 +1111,10 @@ class SolverEF:
         closest = None
         dist = None
         best_cost = None
-        for k, ptraj in trajs.items():
+        for k, ptraj in self.ef.trajs.items():
             for pcl in ptraj.particles:
                 duration = pcl.t - self.mp_primal.model.wind.t_start
-                cur_dist = mp.distance(pcl.state, mp.x_target)
+                cur_dist = self.mp.distance(pcl.state, self.mp.x_target)
                 if dist is None or cur_dist < dist:
                     dist = cur_dist
                     closest = pcl
@@ -1187,7 +1152,7 @@ class SolverEF:
         for pcl in bests.values():
             nt = pcl.idt + 1
             k0 = pcl.idf
-            p_traj = self.trajs[k0]
+            p_traj = self.ef.trajs[k0]
             points = np.zeros((nt, 2))
             adjoints = np.zeros((nt, 2))
             controls = np.zeros(nt)
@@ -1201,27 +1166,27 @@ class SolverEF:
             sm = p_traj.id_start - 1
 
             if k0 not in range(self.N_disc_init):
-                kl, ku = parents[k0]
+                kl, ku = self.ef.get_parents(k0)
                 a = 0.5
                 while sm >= 0:
-                    endl = sm < trajs[kl].id_start
-                    endu = sm < trajs[ku].id_start
+                    endl = sm < self.ef.trajs[kl].id_start
+                    endu = sm < self.ef.trajs[ku].id_start
                     if endl and not endu:
                         b = 0.5
-                        kl, _ = parents[kl]
+                        kl, _ = self.ef.get_parents(kl)
                         a = a + b * (1 - a)
                     if endu and not endl:
                         b = 0.5
-                        _, ku = parents[ku]
+                        _, ku = self.ef.get_parents(ku)
                         a = a * b
                     if endl and endu:
                         b = 0.5
                         c = 0.5
-                        kl, _ = parents[kl]
-                        _, ku = parents[ku]
+                        kl, _ = self.ef.get_parents(kl)
+                        _, ku = self.ef.get_parents(ku)
                         a = a * c + b * (1 - a)
-                    ptraj_l = self.trajs[kl]
-                    ptraj_u = self.trajs[ku]
+                    ptraj_l = self.ef.trajs[kl]
+                    ptraj_u = self.ef.trajs[ku]
                     # Position cursor to lowest common instant
                     sb = max(ptraj_l.id_start, ptraj_u.id_start)
                     # Create interpolated traj
@@ -1238,7 +1203,7 @@ class SolverEF:
                 points = points[::-1]
                 adjoints = adjoints[::-1]
                 controls = controls[::-1]
-            traj = AugmentedTraj(ts, points, adjoints, controls, nt - 1, mp.coords,
+            traj = AugmentedTraj(ts, points, adjoints, controls, nt - 1, self.mp.coords,
                                  info=f'opt_m{self.mode}_{self.asp_init:.0f}')
             btrajs[k0] = traj
         res = EFOptRes(status, bests, btrajs, self.mp_primal)
@@ -1248,9 +1213,9 @@ class SolverEF:
         res = []
         trajgroups = []
         if not primal_only:
-            trajgroups.append(self.trajs_dual)
+            trajgroups.append(self.ef_dual.trajs)
         if not dual_only:
-            trajgroups.append(self.trajs_primal)
+            trajgroups.append(self.ef_primal.trajs)
         for i, trajs in enumerate(trajgroups):
             for k, p_traj in trajs.items():
                 n = len(p_traj.particles)

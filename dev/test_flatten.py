@@ -13,7 +13,7 @@ from dabry.model import ZermeloGeneralModel
 from dabry.rft import RFT
 from dabry.shooting import Shooting
 from dabry.wind import DiscreteWind
-from dabry.mdf_manager import DDFmanager
+from dabry.ddf_manager import DDFmanager
 
 mpl.style.use('seaborn-notebook')
 
