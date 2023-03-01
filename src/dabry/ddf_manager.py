@@ -1,10 +1,14 @@
-import datetime
+from datetime import datetime, timedelta
 import os
 import shutil
 import numpy as np
 import sys
 import pygrib
 import h5py
+import pyproj
+from time import strftime
+
+from ecmwfapi import ECMWFDataServer
 
 from dabry.misc import Utils
 from dabry.params_summary import ParamsSummary
@@ -19,6 +23,7 @@ class DDFmanager:
 
     def __init__(self, cache_wind=False, cache_rff=False):
         self.module_dir = None
+        self.ecmwf_wind_db_dir = None
         self.case_dir = None
         self.trajs_filename = 'trajectories.h5'
         self.wind_filename = 'wind.h5'
@@ -36,6 +41,7 @@ class DDFmanager:
             if path is None:
                 raise Exception('Unable to set output dir automatically. Please set DABRYPATH variable.')
             self.module_dir = path
+        self.ecmwf_wind_db_dir = os.path.join(self.module_dir, 'data', 'ecmwf')
 
     def set_case(self, case_name):
         self.case_name = case_name.split('/')[-1]
@@ -135,7 +141,7 @@ class DDFmanager:
         year = int(date[:4])
         month = int(date[4:6])
         day = int(date[6:])
-        dt = datetime.datetime(year, month, day, hours, minutes)
+        dt = datetime(year, month, day, hours, minutes)
         return dt.timestamp()
 
     def print_trajs(self, filepath):
@@ -193,7 +199,7 @@ class DDFmanager:
         def process(grbfile, setup=False, nx=None, ny=None):
             grbs = pygrib.open(grbfile)
             grb = grbs.select(name='U component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
-            lon_b = Utils.rectify(bl[0], tr[0])
+            lon_b = (bl[0], tr[0]) #Utils.rectify(bl[0], tr[0])
             U, lats, lons = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
             grb = grbs.select(name='V component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
             V, _, _ = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
@@ -242,6 +248,110 @@ class DDFmanager:
             dset[:] = Utils.DEG_TO_RAD * grid
 
         return nt, nx, ny
+
+    def format_cname(self, x_init, x_target, t_start):
+        """
+        Stardand case name
+        """
+        slon = str(abs(round(x_init[0]))) + ('W' if x_init[0] < 0 else 'E')
+        slat = str(abs(round(x_init[1]))) + ('S' if x_init[1] < 0 else 'N')
+        tlon = str(abs(round(x_target[0]))) + ('W' if x_target[0] < 0 else 'E')
+        tlat = str(abs(round(x_target[1]))) + ('S' if x_target[1] < 0 else 'N')
+        start_date = datetime.fromtimestamp(t_start)
+        return f'{slon}_{slat}_{tlon}_{tlat}_{strftime("%Y%m%d", start_date.timetuple())}_{start_date.hour:0>2}'
+
+    def process_grib(self, input_gribs, output_path, x_init, x_target, print_name=False):
+        """
+        :param x_init: Initial point (lon, lat) in degrees
+        :param x_target: Target point (lon, lat) in degrees
+        """
+        # data_dir = '/home/bastien/Documents/data/wind/ncdc/20210929'
+        # output_path = '/home/bastien/Documents/data/wind/ncdc/'
+        x_init = np.array(x_init)
+        x_target = np.array(x_target)
+        middle = Utils.middle(Utils.DEG_TO_RAD * x_init, Utils.DEG_TO_RAD * x_target, Utils.COORD_GCS)
+        distance = Utils.distance(Utils.DEG_TO_RAD * x_init, Utils.DEG_TO_RAD * x_target, Utils.COORD_GCS)
+        factor = 1.2
+        lon_0, lat_0 = Utils.RAD_TO_DEG * middle[0], Utils.RAD_TO_DEG * middle[1]
+        proj = pyproj.Proj(proj='ortho', lon_0=lon_0, lat_0=lat_0)
+
+        bl = np.array(proj(*middle)) - 0.5 * factor * distance * np.ones(2)
+        tr = np.array(proj(*middle)) + 0.5 * factor * distance * np.ones(2)
+        bl = 1. * (np.array((lon_0, lat_0)) + np.array(proj(*bl, inverse=True)))
+        tr = 1. * (np.array((lon_0, lat_0)) + np.array(proj(*tr, inverse=True)))
+
+        # Data files
+        gribfiles = input_gribs
+        date_start = gribfiles[0].split('_')[2]
+        hour_start = gribfiles[0].split('_')[3][:2]
+
+        slon = str(abs(round(bl[0]))) + ('W' if bl[0] < 0 else 'E')
+        slat = str(abs(round(bl[1]))) + ('S' if bl[1] < 0 else 'N')
+        tlon = str(abs(round(tr[0]))) + ('W' if tr[0] < 0 else 'E')
+        tlat = str(abs(round(tr[1]))) + ('S' if tr[1] < 0 else 'N')
+
+        name = f'{slon}_{slat}_{tlon}_{tlat}_{date_start}_{hour_start}'
+
+        if print_name:
+            return name
+
+        output_dir = os.path.join(output_path, name)
+        if not os.path.exists(output_dir):
+            os.mkdir(output_dir)
+
+        data_dir = os.path.dirname(input_gribs[0])
+        grib_fps = list(map(lambda gf: os.path.join(data_dir, gf), gribfiles))
+
+        self.case_dir = output_dir
+        print(self.dump_wind_from_grib2(grib_fps, bl, tr))
+
+    def days_between(self, start_date, stop_date):
+        l = []
+        day_count = (stop_date - start_date).days + 1
+        for single_date in [d for d in (start_date + timedelta(n) for n in range(day_count)) if d <= stop_date]:
+            l.append(strftime("%Y%m%d", single_date.timetuple()))
+        return l
+
+    def retrieve_wind(self, start_date, stop_date, level='1000', res='0.5'):
+        in_cache = []
+        days_required = self.days_between(start_date, stop_date)
+        db_path = os.path.join(self.ecmwf_wind_db_dir, res)
+        if not os.path.exists(db_path):
+            os.mkdir(db_path)
+        for wind_file in os.listdir(db_path):
+            wf_date = wind_file.split('.')[0]
+            if wf_date in days_required:
+                in_cache.append(wf_date)
+        for wf_date in in_cache:
+            days_required.remove(wf_date)
+        if len(days_required) == 0:
+            sdstr = strftime('%Y%m%d %H:%M', start_date.timetuple())
+            sdstr_stop = strftime('%Y%m%d %H:%M', stop_date.timetuple())
+            print(f'Wind fully in cache ({sdstr} to {sdstr_stop})')
+        else:
+            print(f'Shall retrieve {len(days_required)} : {days_required}')
+
+        for day_required in days_required:
+            server = ECMWFDataServer()
+            kwargs = {
+                'dataset': 'era20c',
+                'stream': 'oper',
+                'levtype': 'pl',
+                'levelist': level,
+                'param': '131.128/132.128',
+                'step': '1',
+                'type': 'an',
+                'grid': f'{res}/{res}',
+            }
+            kwargs['date'] = day_required
+            kwargs['time'] = f'00/to/21/by/3'
+            wind_name = f'{day_required}.grb2'
+            res_path = os.path.join(self.ecmwf_wind_db_dir, res)
+            if not os.path.exists(res_path):
+                os.mkdir(res_path)
+            kwargs['target'] = os.path.join(res_path, wind_name)
+
+            server.retrieve(kwargs)
 
 
 if __name__ == '__main__':

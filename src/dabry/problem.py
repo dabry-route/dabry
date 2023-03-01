@@ -1,3 +1,4 @@
+import math
 import os
 
 import h5py
@@ -13,7 +14,7 @@ from dabry.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind,
 from dabry.model import Model, ZermeloGeneralModel
 from dabry.stoppingcond import StoppingCond, TimedSC, DistanceSC
 from dabry.misc import Utils
-from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, LSEMaxiObs, MeanObs
+from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, LSEMaxiObs, MeanObs, MaxiObs
 
 """
 problem.py
@@ -51,6 +52,7 @@ class NavigationProblem:
                  autoframe=False,
                  descr=None,
                  time_scale=None,
+                 t_init=None,
                  **kwargs):
         self.model = model
         self.x_init = np.zeros(2)
@@ -58,6 +60,7 @@ class NavigationProblem:
         self.x_target = np.zeros(2)
         self.x_target[:] = x_target
         self.coords = coords
+        self.t_init = t_init
         # self.aero = LLAero(mode='dabry')
         self.aero = MermozAero()
 
@@ -270,39 +273,68 @@ class NavigationProblem:
     def orthodromic(self):
         fb = GSTargetFB(self.model.wind, self.model.v_a, self.x_target, self.coords)
         self.load_feedback(fb)
-        sc = DistanceSC(lambda x: self.distance(x, self.x_target), self.geod_l * 0.02)
-        traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale/1000, max_iter=3000)
+        sc = DistanceSC(lambda x: self.distance(x, self.x_target), self.geod_l * 0.01)
+        traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale / 2000, max_iter=6000,
+                                         t_init=self.model.wind.t_start)
         if sc.value(0, traj.points[traj.last_index]):
-            return traj.timestamps[traj.last_index]
+            return traj.timestamps[traj.last_index] - self.model.wind.t_start
         else:
             return -1
 
 
 class DatabaseProblem(NavigationProblem):
 
-    def __init__(self, problem_name, x_init=None, x_target=None, airspeed=Utils.AIRSPEED_DEFAULT, obstacles=None):
+    def __init__(self, x_init=None, x_target=None, airspeed=Utils.AIRSPEED_DEFAULT,
+                 obstacles=None, ncdc='', t_start=None, t_end=None):
         total_wind = DiscreteWind(interp='linear')
-        wind_fpath = os.path.join(os.environ.get('DABRYPATH'), 'data', problem_name, 'wind.h5')
-        total_wind.load(wind_fpath)
-        print(f'Problem from database : {wind_fpath}')
-
-        with h5py.File(wind_fpath, 'r') as f:
-            coords = f.attrs['coords']
-            bl = np.array((f['grid'][0, 0, 0], f['grid'][0, 0, 1]))
-            tr = np.array((f['grid'][-1, -1, 0], f['grid'][-1, -1, 1]))
-            if x_init is None:
-                print('Automatic parameters')
-                offset = (tr - bl) * 0.1
-                x_init = bl + offset
-                x_target = tr - offset
+        wind_fpath = None
+        wind_db_path = None
+        if len(ncdc) > 0:
+            wind_fpath = os.path.join(os.environ.get('DABRYPATH'), 'data', 'ncdc', ncdc, 'wind.h5')
+            total_wind.load(wind_fpath)
+            with h5py.File(wind_fpath, 'r') as f:
+                coords = f.attrs['coords']
+                bl = np.array((f['grid'][0, 0, 0], f['grid'][0, 0, 1]))
+                tr = np.array((f['grid'][-1, -1, 0], f['grid'][-1, -1, 1]))
+                if x_init is None:
+                    print('Automatic parameters')
+                    offset = (tr - bl) * 0.1
+                    x_init = bl + offset
+                    x_target = tr - offset
+        else:
+            wind_db_path = os.path.join(os.environ.get('DABRYPATH'), 'data', 'ecmwf', '0.5')
+            bl_lon = Utils.RAD_TO_DEG * min(x_init[0], x_target[0])
+            bl_lat = Utils.RAD_TO_DEG * min(x_init[1], x_target[1])
+            bl_lon = math.floor((bl_lon - 5) / 10) * 10
+            bl_lat = math.floor((bl_lat - 5) / 10) * 10
+            bl = Utils.DEG_TO_RAD * np.array((bl_lon, bl_lat))
+            tr_lon = Utils.RAD_TO_DEG * max(x_init[0], x_target[0])
+            tr_lat = Utils.RAD_TO_DEG * max(x_init[1], x_target[1])
+            tr_lon = math.ceil((tr_lon + 5) / 10) * 10
+            tr_lat = math.ceil((tr_lat + 5) / 10) * 10
+            tr = Utils.DEG_TO_RAD * np.array((tr_lon, tr_lat))
+            total_wind.load_from_ecmwf(wind_db_path, Utils.RAD_TO_DEG * bl, Utils.RAD_TO_DEG * tr,
+                                       t_start=t_start, t_end=t_end)
+        print(f'Problem from database : {wind_db_path if wind_fpath is None else wind_fpath}')
 
         if obstacles is None:
             obstacles = []
 
-        offset = (tr - bl) * 0.02
+        obstacles = obstacles + DatabaseProblem.spherical_frame(bl, tr)
+
+        zermelo_model = ZermeloGeneralModel(airspeed, coords=Utils.COORD_GCS)
+        zermelo_model.update_wind(total_wind)
+
+        super().__init__(zermelo_model, x_init, x_target, Utils.COORD_GCS, obstacles=obstacles, bl=bl, tr=tr,
+                         t_init=t_start)
+
+    @staticmethod
+    def spherical_frame(bl, tr, offset_rel=0.02):
+        offset = (tr - bl) * offset_rel
         bl_obs = bl + offset
         tr_obs = tr - offset
 
+        obstacles = []
         obstacles.append(MeridianObs(bl_obs[0], True))
         obstacles.append(MeridianObs(tr_obs[0], False))
         obstacles.append(ParallelObs(bl_obs[1], True))
@@ -317,10 +349,9 @@ class DatabaseProblem(NavigationProblem):
                                         np.array((tr_obs[0], tr_obs[1])) + np.array((0, -eps_lat))))
         obstacles.append(GreatCircleObs(np.array((bl_obs[0], tr_obs[1])) + np.array((0, -eps_lat)),
                                         np.array((bl_obs[0], tr_obs[1])) + np.array((eps_lon, 0))))
-
-        zermelo_model = ZermeloGeneralModel(airspeed, coords=coords)
-        zermelo_model.update_wind(total_wind)
-        super().__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles, mask_land=False)
+        obstacles.append(ParallelObs(-80 * Utils.DEG_TO_RAD, True))
+        obstacles.append(ParallelObs(80 * Utils.DEG_TO_RAD, False))
+        return obstacles
 
 
 class IndexedProblem(NavigationProblem):
@@ -348,7 +379,8 @@ class IndexedProblem(NavigationProblem):
         20: ['Trap wind', 'trap'],
         21: ['San Juan Dublin Flattened Time varying', 'sanjuan-dublin-ortho-tv'],
         22: ['Obstacle', 'obs'],
-        23: ['Chertovskih', 'chertov']
+        23: ['Chertovskih', 'chertov'],
+        24: ['Natal Dakar constrained', 'natal-dakar-constr']
     }
     exclude_from_test = [12]
 
@@ -950,7 +982,7 @@ class IndexedProblem(NavigationProblem):
             self.time_scale = time_scale
 
         elif i == 19:
-            v_a = 15.
+            v_a = 23.
 
             sf = 3e6
 
@@ -1001,7 +1033,7 @@ class IndexedProblem(NavigationProblem):
             bl = np.array((-2.3e6, -1.5e6))
             tr = np.array((2e6, 2e6))
             coords = Utils.COORD_CARTESIAN
-            wind = DiscreteWind()
+            wind = DiscreteWind(interp='pwc')
             wind.load('/home/bastien/Documents/data/wind/ncdc/san-juan-dublin-flattened-ortho-tv.mz/wind.h5')
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(wind)
@@ -1024,7 +1056,7 @@ class IndexedProblem(NavigationProblem):
             # obstacles.append(CircleObs(sf * np.array((0.4, 0.1)), sf * 0.1))
             # obstacles.append(CircleObs(sf * np.array((0.5, 0.)), sf * 0.1))
             obstacles.append(MeanObs([CircleObs(sf * np.array((0.4, 0.1)), sf * 0.1),
-                                         CircleObs(sf * np.array((0.5, 0.)), sf * 0.1)]))
+                                      CircleObs(sf * np.array((0.5, 0.)), sf * 0.1)]))
             obstacles.append(FrameObs(sf * np.array((0.05, -0.45)), sf * np.array((0.95, 0.45))))
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles)
@@ -1043,7 +1075,48 @@ class IndexedProblem(NavigationProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles,
                                                  bl=np.array((-1.5, -6.05)),
                                                  tr=np.array((1.5, 0.05)), autodomain=False)
+        elif i == 24:
+            # v_a = 18
+            # x_init = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
+            # x_target = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
+            # coords = Utils.COORD_GCS
+            # zermelo_model = ZermeloGeneralModel(v_a, coords)
+            # wind = DiscreteWind(interp='pwc')
+            # wind_fpath = os.path.join(os.environ.get('DABRYPATH'), 'data/ncdc/37W_8S_16W_17S_20220301_12/wind.h5')
+            # wind.load(wind_fpath)
+            # zermelo_model.update_wind(wind)
+            #
+            # bl = np.array((wind.grid[0, 0, 0], wind.grid[0, 0, 1]))
+            # tr = np.array((wind.grid[-1, -1, 0], wind.grid[-1, -1, 1]))
+            #
+            # obstacles = DatabaseProblem.spherical_frame(bl, tr)
+            # super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles,
+            #                                      bl=bl, tr=tr, autodomain=False)
 
+            v_a = 23
+            x_init = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
+            x_target = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
+            coords = Utils.COORD_GCS
+            zermelo_model = ZermeloGeneralModel(v_a, coords)
+            wind = DiscreteWind(interp='linear')
+            wind_fpath = os.path.join(os.environ.get('DABRYPATH'), 'data/ncdc/44W_16S_9W_25N_20210929_00/wind.h5')
+            wind.load(wind_fpath)
+            zermelo_model.update_wind(wind)
+
+            bl = np.array((wind.grid[0, 0, 0], wind.grid[0, 0, 1]))
+            tr = np.array((wind.grid[-1, -1, 0], wind.grid[-1, -1, 1]))
+
+            obstacles = DatabaseProblem.spherical_frame(bl, tr)
+            # obstacles.append(LSEMaxiObs([
+            #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-17, 10)),
+            #                    Utils.DEG_TO_RAD * np.array((-30, 15))),
+            #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-20, 5)),
+            #                    Utils.DEG_TO_RAD * np.array((-17, 10))),
+            #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-30, 7)),
+            #                    Utils.DEG_TO_RAD * np.array((-20, 5)))
+            # ]))
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles,
+                                                 bl=bl, tr=tr, autodomain=False)
 
         else:
             raise IndexError(f'No problem with index {i}')

@@ -1,2 +1,5 @@
+#!/usr/bin/bash
+source ./env/bin/activate
 export DABRYPATH=$(pwd)
 export PYTHONPATH=$DABRYPATH/src
+echo $PYTHONPATH

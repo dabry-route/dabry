@@ -11,11 +11,9 @@ from dabry.feedback import GSTargetFB
 from dabry.stoppingcond import DistanceSC
 
 if __name__ == '__main__':
-    # Choose problem ID for IndexedProblem
-    pb_id = 24
-    # Or choose database problem. If empty, will use previous ID
-    dbpb = ''
-    # When running several times, wind data or reachability fronts data can be cached
+
+    dbpb = 'ecmwf/test.grb2'
+
     cache_wind = False
     cache_rff = False
 
@@ -39,12 +37,8 @@ if __name__ == '__main__':
     ny_rft = 101
     nt_rft = 20
 
-    # Create problem
-    if len(dbpb) > 0:
-        pb = DatabaseProblem(dbpb, x_init=Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425]),
-                             x_target=Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398]), airspeed=23)
-    else:
-        pb = IndexedProblem(pb_id)
+    pb = DatabaseProblem(dbpb, x_init=Utils.DEG_TO_RAD * np.array([150, -40]),
+                             x_target=Utils.DEG_TO_RAD * np.array([170, -50]), airspeed=23)
 
     # pb.flatten()
 
@@ -54,7 +48,7 @@ if __name__ == '__main__':
         chrono.stop()
 
     # Setting the extremal solver
-    solver_ef = solver = SolverEF(pb, pb.time_scale, max_steps=700, rel_nb_ceil=0.01, quick_solve=True)
+    solver_ef = solver = SolverEF(pb, pb.time_scale, max_steps=700, rel_nb_ceil=0.02, quick_solve=True)
 
 
     chrono.start('Solving problem using extremal field (EF)')
@@ -77,8 +71,9 @@ if __name__ == '__main__':
     pb.orthodromic()
     mdfm.dump_trajs([pb.trajs[-1]])
 
-
+    #pb.flatten()
     """
+
     # Setting the front tracking solver
     solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft)
     if cache_rff:
@@ -89,14 +84,14 @@ if __name__ == '__main__':
     chrono.stop()
     if res_rp.status:
         # Save optimal trajectory
-        mdfm.dump_trajs([res_rp.traj])
+        #mdfm.dump_trajs([res_rp.traj])
         print(f'Target reached in : {Utils.time_fmt(res_rp.duration)}')
 
     # Save fronts for display purposes
     if not cache_rff:
         solver_rp.rft.dump_rff(mdfm.case_dir)
-    """
 
+    """
     # Extract information for display and write it to output
     mdfm.ps.load_from_problem(pb)
     mdfm.ps.dump()

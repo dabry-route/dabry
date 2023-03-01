@@ -99,6 +99,7 @@ class FrameObs(Obstacle):
 class GreatCircleObs(Obstacle):
 
     def __init__(self, p1, p2):
+        # Cross product of p1 and p2 points TOWARDS obstacle
         X1 = np.array((Utils.EARTH_RADIUS * np.cos(p1[0]) * np.cos(p1[1]),
                        Utils.EARTH_RADIUS * np.sin(p1[0]) * np.cos(p1[1]),
                        Utils.EARTH_RADIUS * np.sin(p1[1])))

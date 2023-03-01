@@ -36,6 +36,10 @@ class Utils:
         return angle - 360. * floor(angle / 360.)
 
     @staticmethod
+    def to_m180_180(angle):
+        return angle - 360. * floor((angle + 180) / 360.)
+
+    @staticmethod
     def rectify(a, b):
         """
         Bring angles to 0-720 and keep order

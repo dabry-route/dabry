@@ -64,7 +64,7 @@ class ParamsSummary:
         self.process_params()
         fname = self.params_fname if fname is None else fname
         with open(os.path.join(self.output_dir, fname), 'w') as f:
-            json.dump(self.params, f)
+            json.dump(self.params, f, indent=2)
         if not nohtml:
             path = os.path.join(self.output_dir, self.params_fname_formatted)
             with open(path, "w", encoding="utf-8", errors="xmlcharrefreplace") as output_file:

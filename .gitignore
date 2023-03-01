@@ -169,3 +169,7 @@ output/*
 /LICENSE_HEADER
 /tests/out
 data/*
+/misc/
+/local/
+/utils/
+

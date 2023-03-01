@@ -296,7 +296,10 @@ class EFOptRes:
         self.bests = bests
         self.trajs = trajs
         self.mp = mp
-        self.min_cost_idx = sorted(bests, key=lambda k: bests[k].cost)[0]
+        try:
+            self.min_cost_idx = sorted(bests, key=lambda k: bests[k].cost)[0]
+        except IndexError:
+            self.min_cost_idx = -1
 
     @property
     def cost(self):
@@ -648,7 +651,10 @@ class SolverEF:
         self.it = 0
         self.n_points = 0
         self.any_out_obs = True
-        t_start = self.mp_primal.model.wind.t_start + time_offset
+        if self.mp_primal.t_init is not None:
+            t_start = self.mp_primal.t_init
+        else:
+            t_start = self.mp_primal.model.wind.t_start + time_offset
         if not self.no_coll_filtering:
             self.collbuf.init(*self.collbuf_shape, self.mp.bl, self.mp.tr)
         for k in range(self.N_disc_init):

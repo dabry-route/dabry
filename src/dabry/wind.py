@@ -1,13 +1,19 @@
+import os
 import sys
 import warnings
 
 import numpy as np
+import pygrib
 from numpy import ndarray, pi, sin, cos
 import scipy.interpolate as itp
+from datetime import datetime, timedelta
+from tqdm import tqdm
 
 import h5py
 from math import exp, log
 from pyproj import Proj
+
+from mpl_toolkits.basemap import Basemap
 
 from dabry.misc import Utils
 
@@ -412,12 +418,80 @@ class DiscreteWind(Wind):
                                 diff = wind.d_value(self.ts[k], point)
                             else:
                                 diff = wind.d_value(wind.t_start, point)
-                            self.d_u__d_x[0, i - 1, j - 1] = diff[0, 0]
-                            self.d_u__d_y[0, i - 1, j - 1] = diff[0, 1]
-                            self.d_v__d_x[0, i - 1, j - 1] = diff[1, 0]
-                            self.d_v__d_y[0, i - 1, j - 1] = diff[1, 1]
+                            self.d_u__d_x[k, i - 1, j - 1] = diff[0, 0]
+                            self.d_u__d_y[k, i - 1, j - 1] = diff[0, 1]
+                            self.d_v__d_x[k, i - 1, j - 1] = diff[1, 0]
+                            self.d_v__d_y[k, i - 1, j - 1] = diff[1, 1]
             else:
                 self.compute_derivatives()
+
+    def load_from_ecmwf(self, wind_db_path, bl, tr, t_start=None, t_end=None):
+
+        # Get grid
+        lon_b = Utils.rectify(bl[0], tr[0])
+        start_date = datetime.fromtimestamp(t_start)
+        stop_date = datetime.fromtimestamp(t_end)
+
+        grb = pygrib.open(os.path.join(wind_db_path, os.listdir(wind_db_path)[0]))
+        grb_u = grb.select(name='U component of wind')
+        self.ny, self.nx = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[1].shape
+        self.grid = np.zeros((self.nx, self.ny, 2))
+        self.grid[:, :, 0] = Utils.DEG_TO_RAD * \
+                             np.vectorize(Utils.to_m180_180)(
+                                 grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
+                                 [2]).transpose()
+        self.grid[:, :, 1] = Utils.DEG_TO_RAD * \
+                             np.vectorize(Utils.to_m180_180)(
+                                 grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
+                                 [1]).transpose()
+        self.x_min = np.min(self.grid[:, :, 0])
+        self.x_max = np.max(self.grid[:, :, 0])
+        self.y_min = np.min(self.grid[:, :, 1])
+        self.y_max = np.max(self.grid[:, :, 1])
+
+        # Get wind and timestamps
+        uv_frames = []
+        ts = []
+        start_date_rounded = datetime(start_date.year, start_date.month, start_date.day, 0, 0)
+        stop_date_rounded = datetime(stop_date.year, stop_date.month, stop_date.day, 0, 0) + timedelta(days=1)
+        startd_rounded = datetime(start_date.year, start_date.month, start_date.day, 3 * (start_date.hour // 3), 0)
+        stopd_rounded = datetime(stop_date.year, stop_date.month, stop_date.day, 0, 0) + timedelta(hours=3 * (1 + (stop_date.hour // 3)))
+        for wind_file in sorted(os.listdir(wind_db_path)):
+            wind_date = datetime(int(wind_file[:4]), int(wind_file[4:6]),int(wind_file[6:8]))
+            if wind_date < start_date_rounded:
+                continue
+            if wind_date >= stop_date_rounded:
+                break
+            grb = pygrib.open(os.path.join(wind_db_path, wind_file))
+            grb_u = grb.select(name='U component of wind')
+            grb_v = grb.select(name='V component of wind')
+            for i in range(len(grb_u)):
+                date = f'{grb_u[i]["date"]:0>8}'
+                hours = f'{grb_u[i]["time"]:0>4}'
+                t = datetime(int(date[:4]), int(date[4:6]), int(date[6:8]),
+                             int(hours[:2]), int(hours[2:4]))
+                if t < startd_rounded:
+                    continue
+                if t > stopd_rounded:
+                    break
+                uv = np.zeros((self.nx, self.ny, 2))
+                U, lats, lons = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
+                V, _, _ = grb_v[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
+                uv[:, :, 0] = U.transpose()
+                uv[:, :, 1] = V.transpose()
+                uv_frames.append(uv)
+                ts.append(t.timestamp())
+
+        self.nt = len(uv_frames)
+        self.uv = np.array(uv_frames)
+        self.ts = np.array(ts)
+        print(list(map(lambda t: str(datetime.fromtimestamp(t)), self.ts)))
+
+        self.coords = Utils.COORD_GCS
+
+        self.compute_derivatives()
+        self.t_start = self.ts[0]
+        self.t_end = self.ts[-1]
 
     def value(self, t, x, units=Utils.U_METERS):
         """
@@ -634,10 +708,10 @@ class DiscreteWind(Wind):
         self.is_analytical = False
 
     def _rotate_wind(self, u, v, x, y):
-        raise Exception('Method not supported anymore')
-        # if self.bm is None:
-        #     self.bm = Basemap(projection='ortho', lon_0=RAD_TO_DEG * self.lon_0, lat_0=RAD_TO_DEG * self.lat_0)
-        # return np.array(self.bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
+        if self.bm is None:
+            self.bm = Basemap(projection='ortho', lon_0=Utils.RAD_TO_DEG * self.lon_0,
+                              lat_0=Utils.RAD_TO_DEG * self.lat_0)
+        return np.array(self.bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
 
     def dualize(self):
         # Override method so that the dual of a DiscreteWind stays a DiscreteWind and

@@ -420,7 +420,7 @@ class RFT:
 
         self.t += 1
 
-    def dump_rff(self, filepath):
+    def dump_rff(self, filepath, lon0=None, lat0=None):
         with h5py.File(os.path.join(filepath, 'rff.h5'), 'w') as f:
             nx, ny, nt = self.phi.shape
             f.attrs['coords'] = self.mp.coords
