@@ -40,6 +40,10 @@ class Wind:
         # Used when wind is flattened
         self.lon_0 = None
         self.lat_0 = None
+        self.lon_1 = None
+        self.lat_1 = None
+        self.lon_2 = None
+        self.lat_2 = None
 
         # When grid is not regularly spaced
         self.unstructured = False
@@ -455,9 +459,10 @@ class DiscreteWind(Wind):
         start_date_rounded = datetime(start_date.year, start_date.month, start_date.day, 0, 0)
         stop_date_rounded = datetime(stop_date.year, stop_date.month, stop_date.day, 0, 0) + timedelta(days=1)
         startd_rounded = datetime(start_date.year, start_date.month, start_date.day, 3 * (start_date.hour // 3), 0)
-        stopd_rounded = datetime(stop_date.year, stop_date.month, stop_date.day, 0, 0) + timedelta(hours=3 * (1 + (stop_date.hour // 3)))
+        stopd_rounded = datetime(stop_date.year, stop_date.month, stop_date.day, 0, 0) + timedelta(
+            hours=3 * (1 + (stop_date.hour // 3)))
         for wind_file in sorted(os.listdir(wind_db_path)):
-            wind_date = datetime(int(wind_file[:4]), int(wind_file[4:6]),int(wind_file[6:8]))
+            wind_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
             if wind_date < start_date_rounded:
                 continue
             if wind_date >= stop_date_rounded:
@@ -485,7 +490,6 @@ class DiscreteWind(Wind):
         self.nt = len(uv_frames)
         self.uv = np.array(uv_frames)
         self.ts = np.array(ts)
-        print(list(map(lambda t: str(datetime.fromtimestamp(t)), self.ts)))
 
         self.coords = Utils.COORD_GCS
 
@@ -695,6 +699,49 @@ class DiscreteWind(Wind):
                                                  Utils.RAD_TO_DEG * oldgrid[:, :, 0],
                                                  Utils.RAD_TO_DEG * oldgrid[:, :, 1])
             self.uv[:] = newuv
+        elif proj == 'omerc':
+            for p in ['lon_1', 'lat_1', 'lon_2', 'lat_2']:
+                if p not in kwargs.keys():
+                    print(f'Missing parameter {p} for {proj} flatten type', file=sys.stderr)
+                    exit(1)
+            # Lon and lats expected in radians
+            self.lon_1 = kwargs['lon_1']
+            self.lat_1 = kwargs['lat_1']
+            self.lon_2 = kwargs['lon_2']
+            self.lat_2 = kwargs['lat_2']
+            # width = kwargs['width']
+            # height = kwargs['height']
+
+            nx, ny, _ = self.grid.shape
+
+            # Grid
+            proj = Proj(proj='omerc',
+                        lon_1=Utils.RAD_TO_DEG * self.lon_1,
+                        lat_1=Utils.RAD_TO_DEG * self.lat_1,
+                        lon_2=Utils.RAD_TO_DEG * self.lon_2,
+                        lat_2=Utils.RAD_TO_DEG * self.lat_2,
+                        )
+            oldgrid = np.zeros(self.grid.shape)
+            oldgrid[:] = self.grid
+            newgrid = np.zeros((2, nx, ny))
+            newgrid[:] = proj(Utils.RAD_TO_DEG * self.grid[:, :, 0], Utils.RAD_TO_DEG * self.grid[:, :, 1])
+            self.grid[:] = newgrid.transpose((1, 2, 0))
+            oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
+            self.x_min = self.grid[:, :, 0].min()
+            self.y_min = self.grid[:, :, 1].min()
+            self.x_max = self.grid[:, :, 0].max()
+            self.y_max = self.grid[:, :, 1].max()
+
+            print(self.x_min, self.x_max, self.y_min, self.y_max)
+
+            # Wind
+            newuv = np.zeros(self.uv.shape)
+            for kt in range(self.uv.shape[0]):
+                newuv[kt, :] = self._rotate_wind(self.uv[kt, :, :, 0],
+                                                 self.uv[kt, :, :, 1],
+                                                 Utils.RAD_TO_DEG * oldgrid[:, :, 0],
+                                                 Utils.RAD_TO_DEG * oldgrid[:, :, 1])
+            self.uv[:] = newuv
         else:
             print(f"Unknown projection type {proj}", file=sys.stderr)
             exit(1)
@@ -709,8 +756,21 @@ class DiscreteWind(Wind):
 
     def _rotate_wind(self, u, v, x, y):
         if self.bm is None:
-            self.bm = Basemap(projection='ortho', lon_0=Utils.RAD_TO_DEG * self.lon_0,
-                              lat_0=Utils.RAD_TO_DEG * self.lat_0)
+            if self.lon_0 is not None:
+                self.bm = Basemap(projection='ortho',
+                                  lon_0=Utils.RAD_TO_DEG * self.lon_0,
+                                  lat_0=Utils.RAD_TO_DEG * self.lat_0)
+            else:
+                self.bm = Basemap(projection='omerc',
+                                  lon_1=Utils.RAD_TO_DEG * self.lon_1,
+                                  lat_1=Utils.RAD_TO_DEG * self.lat_1,
+                                  lon_2=Utils.RAD_TO_DEG * self.lon_2,
+                                  lat_2=Utils.RAD_TO_DEG * self.lat_2,
+                                  lon_0=Utils.RAD_TO_DEG * 0.5 * (self.lon_1 + self.lon_2),
+                                  lat_0=Utils.RAD_TO_DEG * 0.5 * (self.lat_1 + self.lat_2),
+                                  height=Utils.EARTH_RADIUS,
+                                  width=Utils.EARTH_RADIUS,
+                                  )
         return np.array(self.bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
 
     def dualize(self):

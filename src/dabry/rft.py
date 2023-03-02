@@ -221,6 +221,11 @@ class RFT:
             mid = self.mp.middle(self.mp.x_init, self.mp.x_target)
             self.lon_0, self.lat_0 = Utils.RAD_TO_DEG * mid[0], Utils.RAD_TO_DEG * mid[1]
             self.proj = pyproj.Proj(proj='ortho', lon_0=self.lon_0, lat_0=self.lat_0)
+            # self.proj = pyproj.Proj(proj='omerc',
+            #             lon_1=self.mp.x_init[0],
+            #             lat_1=self.mp.x_init[1],
+            #             lon_2=self.mp.x_target[0],
+            #             lat_2=self.mp.x_target[1])
             # New boundaries are defined as an encapsulating bounding box over the region defined
             # by (lon, lat) bottom left and top right corners
             # Define a dense grid of points within the (lon, lat) zone
@@ -334,6 +339,11 @@ class RFT:
                 dwind = DiscreteWind(wdata={'data': uv, 'grid': grid, 'ts': ts, 'coords': self.mp.coords})
                 m = 0.5 * (self.mp.x_init + self.mp.x_target)
                 dwind.flatten(proj='ortho', lon_0=m[0], lat_0=m[1])
+                # dwind.flatten(proj='omerc',
+                #               lon_1=self.mp.x_init[0],
+                #               lat_1=self.mp.x_init[1],
+                #               lon_2=self.mp.x_target[0],
+                #               lat_2=self.mp.x_target[1])
                 uv = dwind.uv
             uv = uv.transpose((3, 1, 2, 0))
             d = {'data': uv}
@@ -372,8 +382,6 @@ class RFT:
 
                 grid = np.zeros(f['grid'].shape)
                 grid[:] = f['grid']
-
-
 
                 factor = Utils.DEG_TO_RAD if self.mp.coords == Utils.COORD_GCS else 1.
                 self.bl = factor * np.array((grid[:, :, 0].min(), grid[:, :, 1].min()))
@@ -495,7 +503,7 @@ class RFT:
             # Control vector is in projected space
             # It has to be rotated to fit to spherical space
             tmp = Utils.d_proj_ortho_inv(xp[0], xp[1], self.lon_0, self.lat_0) @ s
-            s_new = s #/ np.linalg.norm(tmp)
+            s_new = s  # / np.linalg.norm(tmp)
             return np.pi / 2. - atan2(s_new[1], s_new[0])
 
     def backward_traj(self, point, new_target, ceil, T, model, N_disc=100):

@@ -355,37 +355,37 @@ class DatabaseProblem(NavigationProblem):
 
 
 class IndexedProblem(NavigationProblem):
-    problems = {
-        0: ['Three vortices', '3vor'],
-        1: ['Linear wind', 'linear'],
-        2: ['Honolulu Vancouver', 'honolulu-vancouver'],
-        3: ['Double Gyre Li2020', 'double-gyre-li2020'],
-        4: ['Double Gyre Kularatne2016', 'double-gyre-ku2016'],
-        5: ['Point symmetric Techy2011', 'pointsym-techy2011'],
-        6: ['Three obstacles', '3obs'],
-        7: ['San-Juan Dublin Ortho', 'sanjuan-dublin-ortho'],
-        8: ['Big Rankine vortex', 'big_rankine'],
-        9: ['Four vortices', '4vor'],
-        10: ['Moving_vortex', 'movor'],
-        11: ['One obstacle', '1obs'],
-        12: ['Moving obstacle', 'movobs'],
-        13: ['Time-varying linear wind', 'tvlinear'],
-        14: ['Moving vortices', 'movors'],
-        15: ['Gyre Rhoads2010', 'gyre-rhoads2010'],
-        16: ['Gyre Transversality', 'gyre-transver'],
-        17: ['Band wind', 'band'],
-        18: ['Linearly varying wind', 'lva'],
-        19: ['Double gyre scaled', 'double-gyre-scaled'],
-        20: ['Trap wind', 'trap'],
-        21: ['San Juan Dublin Flattened Time varying', 'sanjuan-dublin-ortho-tv'],
-        22: ['Obstacle', 'obs'],
-        23: ['Chertovskih', 'chertov'],
-        24: ['Natal Dakar constrained', 'natal-dakar-constr']
-    }
-    exclude_from_test = [12]
+    problems = [
+        ['Three vortices', '3vor'],
+        ['Linear wind', 'linear'],
+        ['Moving_vortex', 'movor'],
+        ['Chertovskih 2020', 'chertovskih2020'],
+        ['Double gyre scaled', 'double-gyre-scaled'],
+        ['Linearly varying wind', 'lva'],
+        ['Big Rankine vortex', 'big_rankine'],
+        ['Moving vortices', 'movors'],
+        ['Four vortices', '4vor'],
+        ['One obstacle', '1obs'],
+        ['Time-varying linear wind', 'tvlinear'],
+        ['Gyre Rhoads 2010', 'gyre-rhoads2010'],
+        ['Band wind', 'band'],
+        ['Linearly varying wind', 'lva'],
+        ['Three obstacles', '3obs'],
+        ['Trap wind', 'trap'],
+        ['Point symmetric Techy2011', 'pointsym-techy2011'],
+        ['San Juan Dublin Flattened Time varying', 'sanjuan-dublin-ortho-tv'],
+        ['Natal Dakar constrained', 'natal-dakar-constr']
+    ]
+    others = ['double-gyre-li2020',
+              'double-gyre-ku2016',
+              'sanjuan-dublin-ortho',
+              'gyre-transver',
+              'obs', 
+              'movobs']
 
     def __init__(self, i, seed=0):
-        if i == 0:
+        name = IndexedProblem.problems[i][1]
+        if name == '3vor':
             v_a = 14.11
             coords = Utils.COORD_CARTESIAN
 
@@ -436,9 +436,8 @@ class IndexedProblem(NavigationProblem):
             zermelo_model = ZermeloGeneralModel(v_a)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
-
-        elif i == 1:
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, autoframe=True)
+        elif name == 'linear':
             v_a = 23.
             coords = Utils.COORD_CARTESIAN
 
@@ -463,32 +462,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(linear_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
-
-        elif i == 2:
-            v_a = 23.
-            coords = Utils.COORD_GCS
-
-            total_wind = DiscreteWind(interp='pwc')
-            total_wind.load('/home/bastien/Documents/data/wind/windy/Vancouver-Honolulu-0.5.mz/data2.h5')
-
-            # Creates the cinematic model
-            zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
-            zermelo_model.update_wind(total_wind)
-
-            # Get problem domain boundaries
-            bl = np.zeros(2)
-            tr = np.zeros(2)
-            bl[:] = total_wind.grid[1, 1]
-            tr[:] = total_wind.grid[-2, -2]
-
-            # Initial point
-            offset = np.array([5., 5.])  # Degrees
-            x_init = Utils.DEG_TO_RAD * (np.array([-157.855676, 21.304547]) + offset)
-            x_target = Utils.DEG_TO_RAD * (np.array([-123.113952, 49.2608724]) - offset)
-
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
-
-        elif i == 3:
+        elif name == 'double-gyre-li2020':
             v_a = 0.6
 
             sf = 1.
@@ -505,8 +479,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
-
-        elif i == 4:
+        elif name == 'double-gyre-ku2016':
             v_a = 0.05
 
             sf = 1.
@@ -523,8 +496,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
-
-        elif i == 5:
+        elif name == 'pointsym-techy2011':
             v_a = 18.
             sf = 1e6
 
@@ -544,8 +516,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
-
-        elif i == 6:
+        elif name == '3obs':
 
             v_a = 23.
 
@@ -584,8 +555,7 @@ class IndexedProblem(NavigationProblem):
                 phi_obs[j] = f
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, phi_obs=phi_obs, bl=bl, tr=tr)
-
-        elif i == 7:
+        elif name == 'sanjuan-dublin-ortho':
             v_a = 23.
             coords = Utils.COORD_CARTESIAN
             total_wind = DiscreteWind()
@@ -607,8 +577,7 @@ class IndexedProblem(NavigationProblem):
 
             # Creates the navigation problem on top of the previous model
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
-
-        elif i == 8:
+        elif name == 'big_rankine':
             v_a = 23.
             coords = Utils.COORD_CARTESIAN
 
@@ -636,8 +605,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(alty_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
-
-        elif i == 9:
+        elif name == '4vor':
             v_a = 23.
             coords = Utils.COORD_CARTESIAN
 
@@ -667,8 +635,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(alty_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
-
-        elif i == 10:
+        elif name == 'movor':
             v_a = 23.
             coords = Utils.COORD_CARTESIAN
 
@@ -694,9 +661,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
-
-        elif i == 11:
-
+        elif name == '1obs':
             v_a = 23.
 
             sf = 3e6
@@ -767,7 +732,7 @@ class IndexedProblem(NavigationProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  phi_obs=phi_obs)
-        elif i == 12:
+        elif name == 'movobs':
 
             v_a = 23.
 
@@ -830,8 +795,7 @@ class IndexedProblem(NavigationProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, phi_obs=phi_obs)
             # phi_obs=phi_obs)
-
-        elif i == 13:
+        elif name == 'tvlinear':
             v_a = 23.
             coords = Utils.COORD_CARTESIAN
 
@@ -859,7 +823,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(linear_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
-        elif i == 14:
+        elif name == 'movors':
             v_a = 23.
             coords = Utils.COORD_CARTESIAN
 
@@ -903,7 +867,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
-        elif i == 15:
+        elif name == 'gyre-rhoads2010':
             v_a = 23.
 
             sf = 3e6
@@ -922,7 +886,7 @@ class IndexedProblem(NavigationProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  autodomain=False)
             self.time_scale = 3. * self.geod_l / v_a
-        elif i == 16:
+        elif name == 'gyre-transver':
             v_a = 0.6
 
             sf = 1.
@@ -941,7 +905,7 @@ class IndexedProblem(NavigationProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  autodomain=False)
             self.time_scale = 3. * self.geod_l / v_a
-        elif i == 17:
+        elif name == 'band':
             v_a = 20.7
 
             sf = 1.
@@ -962,7 +926,7 @@ class IndexedProblem(NavigationProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  autodomain=False)
             self.time_scale = 1. * self.geod_l / v_a
-        elif i == 18:
+        elif name == 'lva':
             v_a = 23.
 
             sf = 3e6
@@ -980,8 +944,7 @@ class IndexedProblem(NavigationProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords)
             self.time_scale = time_scale
-
-        elif i == 19:
+        elif name == 'double-gyre-scaled':
             v_a = 23.
 
             sf = 3e6
@@ -998,8 +961,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(total_wind)
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=True)
-
-        elif i == 20:
+        elif name == 'trap':
             v_a = 23.
 
             sf = 3e6
@@ -1024,8 +986,7 @@ class IndexedProblem(NavigationProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
                                                  autodomain=False)
-
-        elif i == 21:
+        elif name == 'sanjuan-dublin-ortho-tv':
             v_a = 23.
 
             x_init = np.array((1.6e6, 1.6e6))
@@ -1040,8 +1001,7 @@ class IndexedProblem(NavigationProblem):
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=True,
                                                  autodomain=False)
-
-        elif i == 22:
+        elif name == 'obs':
             v_a = 23.
 
             sf = 3e6
@@ -1060,7 +1020,7 @@ class IndexedProblem(NavigationProblem):
             obstacles.append(FrameObs(sf * np.array((0.05, -0.45)), sf * np.array((0.95, 0.45))))
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles)
-        elif i == 23:
+        elif name == 'chertovskih2020':
             v_a = 1
             x_init = np.array((0.5, 0))
             x_target = np.array((-0.7, -6))
@@ -1075,7 +1035,7 @@ class IndexedProblem(NavigationProblem):
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles,
                                                  bl=np.array((-1.5, -6.05)),
                                                  tr=np.array((1.5, 0.05)), autodomain=False)
-        elif i == 24:
+        elif name == 'natal-dakar-constr':
             # v_a = 18
             # x_init = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
             # x_target = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
