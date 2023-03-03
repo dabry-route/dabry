@@ -997,7 +997,9 @@ class IndexedProblem(NavigationProblem):
             tr = np.array((2e6, 2e6))
             coords = Utils.COORD_CARTESIAN
             wind = DiscreteWind(interp='pwc')
-            wind.load('/home/bastien/Documents/data/wind/ncdc/san-juan-dublin-flattened-ortho-tv.mz/wind.h5')
+            wind_fpath = os.path.join(os.environ.get('DABRYPATH'),
+                                      'data_demo/ncdc/san-juan-dublin-flattened-ortho-tv.mz/wind.h5')
+            wind.load(wind_fpath)
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(wind)
 
