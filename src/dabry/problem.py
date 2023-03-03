@@ -380,7 +380,7 @@ class IndexedProblem(NavigationProblem):
               'double-gyre-ku2016',
               'sanjuan-dublin-ortho',
               'gyre-transver',
-              'obs', 
+              'obs',
               'movobs']
 
     def __init__(self, i, seed=0):
