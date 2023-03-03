@@ -58,6 +58,9 @@ class Test:
                     pb_nok.append(int(fname))
         print(f'Passed ({len(pb_ok)}) : {sorted(pb_ok)}')
         print(f'Failed ({len(pb_nok)}) : {sorted(pb_nok)}')
+        if len(pb_nok) > 0:
+            return 1
+        return 0
 
 
 if __name__ == '__main__':
@@ -84,8 +87,7 @@ if __name__ == '__main__':
         pass
     test = Test(os.path.join(test_dir, 'out'))
     if args.sumup:
-        test.sumup()
-        exit(0)
+        exit(test.sumup())
     if args.idtest != -1:
         unit_pb = int(sys.argv[1])
     else:

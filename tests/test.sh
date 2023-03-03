@@ -22,9 +22,9 @@ if [[ -n "$(ls -A $DABRYPATH/tests/out 2>/dev/null)" ]]; then
 fi
 for ((i=0 ; i < $N; i++)); do
   if [[ $SAVE ]]; then
-    python "$DABRYPATH"/tests/test_module.py $i -mqo &
+    python "$DABRYPATH"/tests/test_module.py $i -mqdo &
   else
-    python "$DABRYPATH"/tests/test_module.py $i -mq &
+    python "$DABRYPATH"/tests/test_module.py $i -mqd &
   fi
 done
 time wait
