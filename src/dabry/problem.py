@@ -380,7 +380,7 @@ class IndexedProblem(NavigationProblem):
               'double-gyre-ku2016',
               'sanjuan-dublin-ortho',
               'gyre-transver',
-              'obs', 
+              'obs',
               'movobs']
 
     def __init__(self, i, seed=0):
@@ -559,7 +559,9 @@ class IndexedProblem(NavigationProblem):
             v_a = 23.
             coords = Utils.COORD_CARTESIAN
             total_wind = DiscreteWind()
-            total_wind.load('/home/bastien/Documents/data/wind/ncdc/san-juan-dublin-flattened-ortho.mz/wind.h5')
+            wind_fpath = os.path.join(os.environ.get('DABRYPATH'),
+                                      'data_demo/ncdc/san-juan-dublin-flattened-ortho.mz/wind.h5')
+            total_wind.load(wind_fpath)
 
             bl = total_wind.grid[0, 0]
             tr = total_wind.grid[-1, -1]
@@ -1059,7 +1061,7 @@ class IndexedProblem(NavigationProblem):
             coords = Utils.COORD_GCS
             zermelo_model = ZermeloGeneralModel(v_a, coords)
             wind = DiscreteWind(interp='linear')
-            wind_fpath = os.path.join(os.environ.get('DABRYPATH'), 'data/ncdc/44W_16S_9W_25N_20210929_00/wind.h5')
+            wind_fpath = os.path.join(os.environ.get('DABRYPATH'), 'data_demo/ncdc/44W_16S_9W_25N_20210929_00/wind.h5')
             wind.load(wind_fpath)
             zermelo_model.update_wind(wind)
 

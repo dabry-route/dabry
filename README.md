@@ -44,7 +44,7 @@ The variable `PYTHONPATH` shall also point to the `src` folder for Python to fin
 
 1) If you run the scripts from the shell, first load paths using
 ```sh
-source activate
+source ./activate
 ```
 2) If you run from IDE, make sure the variables are set appropriately
 

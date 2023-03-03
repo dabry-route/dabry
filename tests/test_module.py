@@ -1,9 +1,8 @@
 import argparse
 import os.path
-import shutil
 import sys
 
-from dabry.misc import Utils, Chrono
+from dabry.misc import Chrono
 from dabry.problem import IndexedProblem
 from dabry.solver_ef import SolverEF
 from dabry.ddf_manager import DDFmanager
@@ -59,6 +58,9 @@ class Test:
                     pb_nok.append(int(fname))
         print(f'Passed ({len(pb_ok)}) : {sorted(pb_ok)}')
         print(f'Failed ({len(pb_nok)}) : {sorted(pb_nok)}')
+        if len(pb_nok) > 0:
+            return 1
+        return 0
 
 
 if __name__ == '__main__':
@@ -74,24 +76,22 @@ if __name__ == '__main__':
                         const=True, default=False)
     parser.add_argument('-o', '--output', help='Output folder', action='store_const', const=True, default=False)
     args = parser.parse_args(sys.argv[1:])
+    test_dir = os.path.dirname(__file__)
     unit_pb = -1
     pb_ok = []
     pb_nok = []
     problems = []
     try:
-        os.mkdir('tests/out')
+        os.mkdir(os.path.join(test_dir, 'out'))
     except FileExistsError:
         pass
-    test = Test('tests/out')
+    test = Test(os.path.join(test_dir, 'out'))
     if args.sumup:
-        test.sumup()
-        exit(0)
+        exit(test.sumup())
     if args.idtest != -1:
         unit_pb = int(sys.argv[1])
     else:
-        problems = list(IndexedProblem.problems.keys())
-        for pb_id in IndexedProblem.exclude_from_test:
-            problems.remove(pb_id)
+        problems = list(range(len(IndexedProblem.problems)))
 
     if unit_pb >= 0:
         test.solve(unit_pb, args.debug, args.output)

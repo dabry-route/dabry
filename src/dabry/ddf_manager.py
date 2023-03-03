@@ -60,7 +60,13 @@ class DDFmanager:
                 continue
             if filename.endswith('rff.h5') and self.cache_rff:
                 continue
-            os.remove(os.path.join(self.case_dir, filename))
+            path = os.path.join(self.case_dir, filename)
+            if os.path.isdir(path):
+                for file in os.listdir(path):
+                    os.remove(os.path.join(path, file))
+                os.rmdir(path)
+            else:
+                os.remove(path)
 
     def save_script(self, script_path):
         shutil.copy(script_path, self.case_dir)
