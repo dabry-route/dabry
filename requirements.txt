@@ -1,5 +1,5 @@
 basemap
-ecmwfapi
+ecmwf-api-client
 geopy
 h5py
 Markdown
