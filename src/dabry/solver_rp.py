@@ -49,7 +49,7 @@ class SolverRP:
         self.opti_ceil = self.geod_l / 50
         self.neighb_ceil = self.opti_ceil / 2.
 
-        self.reach_time = None
+        self.t_target = None
 
         bl_rft = np.zeros(2)
         tr_rft = np.zeros(2)
@@ -66,9 +66,10 @@ class SolverRP:
         self.rft.compute()
         status = 2 if self.rft.has_reached() else 0
         if status:
-            self.reach_time = self.rft.get_time(self.mp.x_target) - self.mp.model.wind.t_start
+            self.t_target = self.rft.get_time(self.mp.x_target)
+            duration = self.t_target - self.mp.model.wind.t_start
             traj = self.get_opti_traj()
-            fake_pcl = Particle(0, 0, self.reach_time, traj.points[-1], np.zeros(2), self.reach_time)
+            fake_pcl = Particle(0, 0, self.t_target, traj.points[-1], np.zeros(2), duration)
             bests = {0: fake_pcl}
             trajs = {0: traj}
         else:
@@ -79,8 +80,10 @@ class SolverRP:
     def get_opti_traj(self, int_step=100):
         self.mp.load_feedback(FunFB(lambda x: self.control(x, backward=True), no_time=True))
         sc = DistanceSC(lambda x: self.mp.distance(x, self.mp.x_init), self.mp.geod_l * 0.001)
-        traj = self.mp.integrate_trajectory(self.mp.x_target, sc, int_step=self.reach_time / int_step,
-                                            t_init=self.mp.model.wind.t_start + self.reach_time,
+        duration = self.t_target - self.mp.model.wind.t_start
+        traj = self.mp.integrate_trajectory(self.mp.x_target, sc, int_step=duration / int_step,
+                                            t_init=self.t_target,
+                                            max_iter=100,
                                             backward=True)
         traj.timestamps = traj.timestamps[:traj.last_index + 1]
         traj.points = traj.points[:traj.last_index + 1]

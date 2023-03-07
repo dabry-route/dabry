@@ -111,7 +111,7 @@ class ExtremalField:
             pcl_new.idf = i_new
 
         self.trajs[i_new] = PartialTraj(pcl_new.idt, [pcl_new])
-        self.parents[i_new] = tuple(sorted((i1, i2)))
+        self.parents[i_new] = (i1, i2)
         self.index += 1
         return pcl_new
 

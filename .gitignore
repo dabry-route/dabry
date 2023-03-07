@@ -173,3 +173,6 @@ data/*
 /local/
 /utils/
 
+/ze_pipeline.sh
+/DABRYPATH
+/DVISUPATH

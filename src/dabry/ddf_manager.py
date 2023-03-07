@@ -9,6 +9,7 @@ import pyproj
 from time import strftime
 
 from ecmwfapi import ECMWFDataServer
+import cdsapi
 
 from dabry.misc import Utils
 from dabry.params_summary import ParamsSummary
@@ -157,7 +158,8 @@ class DDFmanager:
                 for attr, val in traj.attrs.items():
                     print(f'{attr} : {val}')
 
-    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None, coords=Utils.COORD_CARTESIAN,
+    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None,
+                  coords=Utils.COORD_CARTESIAN,
                   force_analytical=False):
         if wind.is_dumpable == 0:
             print('Error : Wind is not dumpable to file', file=sys.stderr)
@@ -205,7 +207,7 @@ class DDFmanager:
         def process(grbfile, setup=False, nx=None, ny=None):
             grbs = pygrib.open(grbfile)
             grb = grbs.select(name='U component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
-            lon_b = (bl[0], tr[0]) #Utils.rectify(bl[0], tr[0])
+            lon_b = (bl[0], tr[0])  # Utils.rectify(bl[0], tr[0])
             U, lats, lons = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
             grb = grbs.select(name='V component of wind', typeOfLevel='isobaricInhPa', level=1000)[0]
             V, _, _ = grb.data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
@@ -338,26 +340,49 @@ class DDFmanager:
             print(f'Shall retrieve {len(days_required)} : {days_required}')
 
         for day_required in days_required:
-            server = ECMWFDataServer()
+
+            # server = ECMWFDataServer()
+            server = cdsapi.Client()
             kwargs = {
-                'dataset': 'era20c',
-                'stream': 'oper',
-                'levtype': 'pl',
-                'levelist': level,
-                'param': '131.128/132.128',
-                'step': '1',
-                'type': 'an',
-                'grid': f'{res}/{res}',
+                "variable": ['u_component_of_wind', 'v_component_of_wind'],
+                "pressure_level": "1000",
+                "product_type": "reanalysis",
+                "year": day_required[:4],
+                "month": day_required[4:6],
+                "day": day_required[6:8],
+                'time': [
+                    '00:00',  # '01:00', '02:00',
+                    '03:00',  # '04:00', '05:00',
+                    '06:00',  # '07:00', '08:00',
+                    '09:00',  # '10:00', '11:00',
+                    '12:00',  # '13:00', '14:00',
+                    '15:00',  # '16:00', '17:00',
+                    '18:00',  # '19:00', '20:00',
+                    '21:00',  # '22:00', '23:00',
+                ],
+                "grid": ['0.5', '0.5'],
+                "format": "grib"
             }
-            kwargs['date'] = day_required
-            kwargs['time'] = f'00/to/21/by/3'
+            # kwargs = {
+            #     'dataset': 'era20c',
+            #     'stream': 'oper',
+            #     'levtype': 'pl',
+            #     'levelist': level,
+            #     'param': '131.128/132.128',
+            #     'step': '1',
+            #     'type': 'an',
+            #     'grid': f'{res}/{res}',
+            # }
+            # kwargs['date'] = day_required
+            # kwargs['time'] = f'00/to/21/by/3'
+            # kwargs['target'] = os.path.join(res_path, wind_name)
+
             wind_name = f'{day_required}.grb2'
             res_path = os.path.join(self.ecmwf_wind_db_dir, res)
             if not os.path.exists(res_path):
                 os.mkdir(res_path)
-            kwargs['target'] = os.path.join(res_path, wind_name)
-
-            server.retrieve(kwargs)
+            server.retrieve("reanalysis-era5-pressure-levels", kwargs, os.path.join(res_path, wind_name))
+            # server.retrieve(kwargs)
 
 
 if __name__ == '__main__':

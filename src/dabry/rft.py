@@ -504,6 +504,7 @@ class RFT:
             # It has to be rotated to fit to spherical space
             tmp = Utils.d_proj_ortho_inv(xp[0], xp[1], self.lon_0, self.lat_0) @ s
             s_new = s  # / np.linalg.norm(tmp)
+            # s_new = tmp / np.linalg.norm(tmp)
             return np.pi / 2. - atan2(s_new[1], s_new[0])
 
     def backward_traj(self, point, new_target, ceil, T, model, N_disc=100):

@@ -49,7 +49,7 @@ class NavigationProblem:
                  bl=None,
                  tr=None,
                  autodomain=True,
-                 autoframe=False,
+                 autoframe=True,
                  descr=None,
                  time_scale=None,
                  t_init=None,
@@ -86,15 +86,9 @@ class NavigationProblem:
 
         self.descr = 'Problem' if descr is None else descr
 
-        if not domain:
-            if not autodomain:
-                if self.bl is not None and self.tr is not None:
-                    self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
-                    self.geod_l = self.distance(self.bl, self.tr)
-                else:
-                    self.domain = lambda _: True
-            else:
-                # Bound computation domain on wind grid limits
+        if autodomain:
+            # Bound computation domain on wind grid limits
+            if bl is None or tr is None:
                 wind = self.model.wind
                 if type(wind) == DiscreteWind:
                     self.bl = np.array((wind.x_min, wind.y_min))
@@ -103,14 +97,20 @@ class NavigationProblem:
                     w = 1.15 * self.geod_l
                     self.bl = (self.x_init + self.x_target) / 2. - np.array((w / 2., w / 2.))
                     self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
-                if self.coords == Utils.COORD_GCS:
-                    factor = 1. if wind.units_grid == Utils.U_DEG else Utils.RAD_TO_DEG
-                self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
-        else:
-            if self.bl is not None and self.tr is not None:
-                self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1] and domain(x)
             else:
-                self.domain = domain
+                self.bl = np.array(bl)
+                self.tr = np.array(tr)
+            if self.coords == Utils.COORD_GCS:
+                self._domain_obs = DatabaseProblem.spherical_frame(bl, tr, offset_rel=0.)
+                self._domain = lambda x: np.all([obs.value(x) > 0. for obs in self._domain_obs])
+            else:
+                self._domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
+            if domain is not None:
+                self.domain = lambda x: self._domain(x) and domain(x)
+            else:
+                self.domain = self._domain
+        else:
+            self.domain = domain
 
         if self.bl is not None and self.tr is not None:
             self.l_ref = self.distance(self.bl, self.tr)
@@ -301,6 +301,7 @@ class DatabaseProblem(NavigationProblem):
                     offset = (tr - bl) * 0.1
                     x_init = bl + offset
                     x_target = tr - offset
+            print(f'Problem from database : {wind_db_path if wind_fpath is None else wind_fpath}')
         else:
             wind_db_path = os.path.join(os.environ.get('DABRYPATH'), 'data', 'ecmwf', '0.5')
             bl_lon = Utils.RAD_TO_DEG * min(x_init[0], x_target[0])
@@ -315,7 +316,6 @@ class DatabaseProblem(NavigationProblem):
             tr = Utils.DEG_TO_RAD * np.array((tr_lon, tr_lat))
             total_wind.load_from_ecmwf(wind_db_path, Utils.RAD_TO_DEG * bl, Utils.RAD_TO_DEG * tr,
                                        t_start=t_start, t_end=t_end)
-        print(f'Problem from database : {wind_db_path if wind_fpath is None else wind_fpath}')
 
         if obstacles is None:
             obstacles = []
@@ -365,11 +365,9 @@ class IndexedProblem(NavigationProblem):
         ['Big Rankine vortex', 'big_rankine'],
         ['Moving vortices', 'movors'],
         ['Four vortices', '4vor'],
-        ['One obstacle', '1obs'],
         ['Time-varying linear wind', 'tvlinear'],
         ['Gyre Rhoads 2010', 'gyre-rhoads2010'],
         ['Band wind', 'band'],
-        ['Linearly varying wind', 'lva'],
         ['Three obstacles', '3obs'],
         ['Trap wind', 'trap'],
         ['Point symmetric Techy2011', 'pointsym-techy2011'],
@@ -381,7 +379,8 @@ class IndexedProblem(NavigationProblem):
               'sanjuan-dublin-ortho',
               'gyre-transver',
               'obs',
-              'movobs']
+              'movobs',
+              '1obs']
 
     def __init__(self, i, seed=0):
         name = IndexedProblem.problems[i][1]
@@ -1023,10 +1022,11 @@ class IndexedProblem(NavigationProblem):
                                       CircleObs(sf * np.array((0.5, 0.)), sf * 0.1)]))
             obstacles.append(FrameObs(sf * np.array((0.05, -0.45)), sf * np.array((0.95, 0.45))))
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles,
+                                                 autoframe=False)
         elif name == 'chertovskih2020':
             v_a = 1
-            x_init = np.array((0.5, 0))
+            x_init = np.array((0.5, 0.))
             x_target = np.array((-0.7, -6))
             coords = Utils.COORD_CARTESIAN
             wind = ChertovskihWind()
@@ -1034,11 +1034,11 @@ class IndexedProblem(NavigationProblem):
             zermelo_model.update_wind(wind)
 
             obstacles = []
-            obstacles.append(FrameObs(np.array((-1, -6.01)), np.array((1, 0.01))))
+            # obstacles.append(FrameObs(np.array((-1, -6.2)), np.array((1, 0.2))))
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles,
-                                                 bl=np.array((-1.5, -6.05)),
-                                                 tr=np.array((1.5, 0.05)), autodomain=False)
+                                                 bl=np.array((-1.5, -6.2)),
+                                                 tr=np.array((1.5, 0.2)), autodomain=False)
         elif name == 'natal-dakar-constr':
             # v_a = 18
             # x_init = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
