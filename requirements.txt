@@ -1,4 +1,5 @@
 basemap
+cdsapi
 ecmwf-api-client
 geopy
 h5py
