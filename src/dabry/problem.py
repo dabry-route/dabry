@@ -39,21 +39,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 class NavigationProblem:
 
-    def __init__(self,
-                 model: Model,
-                 x_init,
-                 x_target,
-                 coords,
-                 domain=None,
-                 obstacles=None,
-                 bl=None,
-                 tr=None,
-                 autodomain=True,
-                 autoframe=True,
-                 descr=None,
-                 time_scale=None,
-                 t_init=None,
-                 **kwargs):
+    def __init__(self, model: Model, x_init, x_target, coords, domain=None, obstacles=None, bl=None, tr=None,
+                 autoframe=True, descr=None, time_scale=None, t_init=None, **kwargs):
         self.model = model
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
@@ -86,7 +73,7 @@ class NavigationProblem:
 
         self.descr = 'Problem' if descr is None else descr
 
-        if autodomain:
+        if domain is None:
             # Bound computation domain on wind grid limits
             if bl is None or tr is None:
                 wind = self.model.wind
@@ -553,7 +540,7 @@ class IndexedProblem(NavigationProblem):
 
                 phi_obs[j] = f
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, phi_obs=phi_obs, bl=bl, tr=tr)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, phi_obs=phi_obs)
         elif name == 'sanjuan-dublin-ortho':
             v_a = 23.
             coords = Utils.COORD_CARTESIAN
@@ -731,8 +718,7 @@ class IndexedProblem(NavigationProblem):
             # phi_obs[0] = lambda x: (x - c) @ np.diag((1., 1.)) @ (x - c) - r ** 2
             # phi_obs[1] = lambda x: (x - c2) @ np.diag((2., 1.)) @ (x - c2) - r2 ** 2
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
-                                                 phi_obs=phi_obs)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, phi_obs=phi_obs)
         elif name == 'movobs':
 
             v_a = 23.
@@ -884,8 +870,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
-                                                 autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
             self.time_scale = 3. * self.geod_l / v_a
         elif name == 'gyre-transver':
             v_a = 0.6
@@ -903,8 +888,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
-                                                 autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
             self.time_scale = 3. * self.geod_l / v_a
         elif name == 'band':
             v_a = 20.7
@@ -924,8 +908,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
-                                                 autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
             self.time_scale = 1. * self.geod_l / v_a
         elif name == 'lva':
             v_a = 23.
@@ -985,8 +968,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr,
-                                                 autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr)
         elif name == 'sanjuan-dublin-ortho-tv':
             v_a = 23.
 
@@ -1002,8 +984,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=True,
-                                                 autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=True)
         elif name == 'obs':
             v_a = 23.
 
@@ -1037,8 +1018,7 @@ class IndexedProblem(NavigationProblem):
             # obstacles.append(FrameObs(np.array((-1, -6.2)), np.array((1, 0.2))))
 
             super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles,
-                                                 bl=np.array((-1.5, -6.2)),
-                                                 tr=np.array((1.5, 0.2)), autodomain=False)
+                                                 bl=np.array((-1.5, -6.2)), tr=np.array((1.5, 0.2)))
         elif name == 'natal-dakar-constr':
             # v_a = 18
             # x_init = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
@@ -1079,8 +1059,8 @@ class IndexedProblem(NavigationProblem):
             #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-30, 7)),
             #                    Utils.DEG_TO_RAD * np.array((-20, 5)))
             # ]))
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles,
-                                                 bl=bl, tr=tr, autodomain=False)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, obstacles=obstacles, bl=bl,
+                                                 tr=tr)
 
         else:
             raise IndexError(f'No problem with index {i}')
