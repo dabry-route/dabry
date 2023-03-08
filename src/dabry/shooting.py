@@ -1,13 +1,35 @@
 import warnings
 from abc import ABC
-from scipy.integrate import ode, odeint
+
 import numpy as np
 from numpy import ndarray
+from scipy.integrate import ode, odeint
 
 from dabry.dynamics import Dynamics
-from dabry.stoppingcond import PrecisionSC, TimedSC
-from dabry.trajectory import AugmentedTraj
 from dabry.misc import Utils
+from dabry.stoppingcond import PrecisionSC
+from dabry.trajectory import AugmentedTraj
+
+"""
+shooting.py
+Handles shooting of trajectories for navigation problems.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class DomainException(Exception):
@@ -157,7 +179,7 @@ class Shooting(ABC):
                     if verbose:
                         print(sumup(i, t, x, p, u))
                 if interrupted:
-                    i = i-1
+                    i = i - 1
                 return AugmentedTraj(timestamps, states, adjoints, controls, i, optimal=optimal, type=Utils.TRAJ_PMP,
                                      interrupted=interrupted, coords=self.coords, info=self.mode, airspeed=airspeed)
             else:
@@ -226,7 +248,8 @@ class Shooting(ABC):
                         last_index = i + 1
                         break
                 controls = np.array(list(map(lambda z: Utils.heading_opti(z[:2], z[2:], 0, self.coords), zz)))
-                return AugmentedTraj(timestamps, zz[:, :2], zz[:, 2:], controls, last_index=last_index, type=Utils.TRAJ_PMP,
+                return AugmentedTraj(timestamps, zz[:, :2], zz[:, 2:], controls, last_index=last_index,
+                                     type=Utils.TRAJ_PMP,
                                      interrupted=(last_index != self.N_iter), coords=self.coords)
             else:
                 def f(t, z):
@@ -270,6 +293,8 @@ class Shooting(ABC):
                     controls[last_index] = Utils.heading_opti(z[:2], z[2:], solver.t, self.coords)
                     if last_index == self.N_iter - 1:
                         break
-                controls = np.array(list(map(lambda z: Utils.heading_opti(z[:2], z[2:], 0, self.coords), np.concatenate((states, adjoints), axis=0))))
-                return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter, type=Utils.TRAJ_PMP,
+                controls = np.array(list(map(lambda z: Utils.heading_opti(z[:2], z[2:], 0, self.coords),
+                                             np.concatenate((states, adjoints), axis=0))))
+                return AugmentedTraj(timestamps, states, adjoints, controls, last_index=self.N_iter,
+                                     type=Utils.TRAJ_PMP,
                                      interrupted=False, coords=self.coords)

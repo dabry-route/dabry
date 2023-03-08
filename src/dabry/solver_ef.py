@@ -1,14 +1,13 @@
-# from heapq import heappush, heappop
+import csv
 import os
 import sys
 
 import numpy as np
-from numpy import sin, cos, pi
+import scipy.integrate
 from numpy import arcsin as asin
 from numpy import arctan2 as atan2
+from numpy import sin, cos, pi
 from shapely.geometry import Polygon
-import csv
-import scipy.integrate
 
 from dabry.misc import Utils, Chrono
 from dabry.problem import NavigationProblem
@@ -19,6 +18,7 @@ solver_ef.py
 Solver for time-optimal or energy-optimal path planning problems
 in a flow field using an extremal-based method (shooting method
 over Pontryagin's Maximum Principle)
+
 Copyright (C) 2021 Bastien Schnitzler 
 (bastien dot schnitzler at live dot fr)
 

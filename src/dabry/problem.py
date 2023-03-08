@@ -2,23 +2,24 @@ import math
 import os
 
 import h5py
-from pyproj import Proj
 import numpy as np
 from numpy import ndarray, pi
+from pyproj import Proj
 
-from dabry.aero import LLAero, MermozAero
+from dabry.aero import MermozAero
 from dabry.feedback import Feedback, AirspeedLaw, MultiFeedback, GSTargetFB
 from dabry.integration import IntEulerExpl
+from dabry.misc import Utils
+from dabry.model import Model, ZermeloGeneralModel
+from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, MeanObs
+from dabry.stoppingcond import StoppingCond, TimedSC, DistanceSC
 from dabry.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
     PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind, LVWind, TrapWind, ChertovskihWind
-from dabry.model import Model, ZermeloGeneralModel
-from dabry.stoppingcond import StoppingCond, TimedSC, DistanceSC
-from dabry.misc import Utils
-from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, LSEMaxiObs, MeanObs, MaxiObs
 
 """
 problem.py
-Handles navigation problem data
+Handles navigation problem data.
+
 Copyright (C) 2021 Bastien Schnitzler 
 (bastien dot schnitzler at live dot fr)
 

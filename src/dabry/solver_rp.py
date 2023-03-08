@@ -1,20 +1,38 @@
 import numpy as np
 
+from dabry.feedback import FunFB
+from dabry.misc import Utils
 from dabry.problem import NavigationProblem
 from dabry.rft import RFT
-from dabry.feedback import FunFB
 from dabry.solver_ef import EFOptRes, Particle
 from dabry.stoppingcond import DistanceSC
-from dabry.misc import Utils
+
+"""
+solver_rp.py
+Solver for navigation problems using reachability front tracking.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class SolverRP:
     """
     Minimum time trajectory planning solver
     using rough Reachability Front Tracking (RFT)
-    to guess arrival time and arrival heading at destination
-    and then Pontryagin's Maximum Principle to cheaply shoot extremal
-    trajectories on previous parameters
     """
 
     def __init__(self,

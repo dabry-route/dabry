@@ -1,20 +1,41 @@
-from datetime import datetime, timedelta
 import os
 import shutil
-import numpy as np
 import sys
-import pygrib
-import h5py
-import pyproj
+from datetime import datetime, timedelta
 from time import strftime
 
-from ecmwfapi import ECMWFDataServer
 import cdsapi
+import h5py
+import numpy as np
+import pygrib
+import pyproj
 
 from dabry.misc import Utils
 from dabry.params_summary import ParamsSummary
 from dabry.problem import NavigationProblem
 from dabry.wind import Wind, DiscreteWind
+
+"""
+ddf_manager.py
+Handles the writing and reading of special data format for trajectories, 
+wind, reachability functions and obstacles.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class DDFmanager:

@@ -5,11 +5,32 @@ from datetime import datetime
 
 import numpy as np
 
+from dabry.ddf_manager import DDFmanager
 from dabry.misc import Utils, Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem
 from dabry.solver_ef import SolverEF
-from dabry.ddf_manager import DDFmanager
 from dabry.solver_rp import SolverRP
+
+"""
+__main__.py
+Module interface to CLI usage.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Dabry trajectory planning', prog='dabry')
@@ -100,8 +121,6 @@ if __name__ == '__main__':
         nx_rft = 101
         ny_rft = 101
         nt_rft = 20
-
-        name = os.path.join('cdc', '0.5')
 
         pb = DatabaseProblem(x_init=Utils.DEG_TO_RAD * x_init,
                              x_target=Utils.DEG_TO_RAD * x_target, airspeed=airspeed,

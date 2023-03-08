@@ -1,21 +1,38 @@
 import os
 import sys
-import warnings
-
-import numpy as np
-import pygrib
-from numpy import ndarray, pi, sin, cos
-import scipy.interpolate as itp
 from datetime import datetime, timedelta
-from tqdm import tqdm
+from math import exp, log
 
 import h5py
-from math import exp, log
+import numpy as np
+import pygrib
+import scipy.interpolate as itp
+from mpl_toolkits.basemap import Basemap
+from numpy import ndarray, pi, sin, cos
 from pyproj import Proj
 
-from mpl_toolkits.basemap import Basemap
-
 from dabry.misc import Utils
+
+"""
+wind.py
+Flow fields for navigation problems.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class Wind:

@@ -1,10 +1,33 @@
-import os
 import json
-from pathlib import Path
-from geopy import Nominatim
-import geopy
-from math import pi
+import os
 import sys
+from math import pi
+from pathlib import Path
+
+import geopy
+from geopy import Nominatim
+
+"""
+geodata.py
+Handles translation from natural language to coordinates on Earth.
+Handles the retrieval and caching of data.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class GeoData:

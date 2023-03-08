@@ -1,4 +1,6 @@
 import os
+from datetime import datetime
+
 import numpy as np
 
 from dabry.ddf_manager import DDFmanager
@@ -12,9 +14,9 @@ from dabry.stoppingcond import DistanceSC
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 24
+    pb_id = 5
     # Or choose database problem. If empty, will use previous ID
-    dbpb = ''
+    dbpb = True
     # When running several times, wind data or reachability fronts data can be cached
     cache_wind = False
     cache_rff = False
@@ -25,11 +27,7 @@ if __name__ == '__main__':
     # Create a file manager to dump problem data
     mdfm = DDFmanager(cache_wind=cache_wind, cache_rff=cache_rff)
     mdfm.setup()
-    if len(dbpb) > 0:
-        case_name = f'example_{dbpb.split("/")[-1]}'
-    else:
-        case_name = f'example_{IndexedProblem.problems[pb_id][1]}'
-    mdfm.set_case(case_name)
+    mdfm.set_case('solver_example')
     mdfm.clean_output_dir()
 
     # Space and time discretization
@@ -40,9 +38,12 @@ if __name__ == '__main__':
     nt_rft = 20
 
     # Create problem
-    if len(dbpb) > 0:
-        pb = DatabaseProblem(dbpb, x_init=Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425]),
-                             x_target=Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398]), airspeed=23)
+    if dbpb:
+        pb = DatabaseProblem(x_init=Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425]),
+                             x_target=Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398]),
+                             airspeed=23,
+                             t_start=datetime(2021, 11, 1, 12, 0).timestamp(),
+                             t_end=datetime(2021, 11, 3, 12, 0).timestamp())
     else:
         pb = IndexedProblem(pb_id)
 

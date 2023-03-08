@@ -6,7 +6,7 @@ from dabry.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Create a navigation problem from list of reference problems
-    pb_id = 19
+    pb_id = 4
     pb = IndexedProblem(pb_id)
 
     # Create the logger which will save solver information
