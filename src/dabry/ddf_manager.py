@@ -346,7 +346,7 @@ class DDFmanager:
         days_required = self.days_between(start_date, stop_date)
         db_path = os.path.join(self.ecmwf_wind_db_dir, res)
         if not os.path.exists(db_path):
-            os.mkdir(db_path)
+            os.makedirs(db_path)
         for wind_file in os.listdir(db_path):
             wf_date = wind_file.split('.')[0]
             if wf_date in days_required:
