@@ -45,7 +45,7 @@ class DDFmanager:
 
     def __init__(self, cache_wind=False, cache_rff=False):
         self.module_dir = None
-        self.ecmwf_wind_db_dir = None
+        self.cds_wind_db_dir = None
         self.case_dir = None
         self.trajs_filename = 'trajectories.h5'
         self.wind_filename = 'wind.h5'
@@ -63,7 +63,7 @@ class DDFmanager:
             if path is None:
                 raise Exception('Unable to set output dir automatically. Please set DABRYPATH variable.')
             self.module_dir = path
-        self.ecmwf_wind_db_dir = os.path.join(self.module_dir, 'data', 'ecmwf')
+        self.cds_wind_db_dir = os.path.join(self.module_dir, 'data', 'cds')
 
     def set_case(self, case_name):
         self.case_name = case_name.split('/')[-1]
@@ -344,7 +344,7 @@ class DDFmanager:
     def retrieve_wind(self, start_date, stop_date, level='1000', res='0.5'):
         in_cache = []
         days_required = self.days_between(start_date, stop_date)
-        db_path = os.path.join(self.ecmwf_wind_db_dir, res)
+        db_path = os.path.join(self.cds_wind_db_dir, res, level)
         if not os.path.exists(db_path):
             os.makedirs(db_path)
         for wind_file in os.listdir(db_path):
@@ -399,7 +399,7 @@ class DDFmanager:
             # kwargs['target'] = os.path.join(res_path, wind_name)
 
             wind_name = f'{day_required}.grb2'
-            res_path = os.path.join(self.ecmwf_wind_db_dir, res)
+            res_path = os.path.join(self.cds_wind_db_dir, res)
             if not os.path.exists(res_path):
                 os.mkdir(res_path)
             server.retrieve("reanalysis-era5-pressure-levels", kwargs, os.path.join(res_path, wind_name))
