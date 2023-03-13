@@ -399,10 +399,7 @@ class DDFmanager:
             # kwargs['target'] = os.path.join(res_path, wind_name)
 
             wind_name = f'{day_required}.grb2'
-            res_path = os.path.join(self.cds_wind_db_dir, res)
-            if not os.path.exists(res_path):
-                os.mkdir(res_path)
-            server.retrieve("reanalysis-era5-pressure-levels", kwargs, os.path.join(res_path, wind_name))
+            server.retrieve("reanalysis-era5-pressure-levels", kwargs, os.path.join(db_path, wind_name))
             # server.retrieve(kwargs)
 
 
