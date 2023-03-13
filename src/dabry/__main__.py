@@ -47,6 +47,8 @@ if __name__ == '__main__':
     parser_real.add_argument('start_date', help='Start date')
     parser_real.add_argument('airspeed', help='Airspeed in meters per seconds')
     parser_real.add_argument('altitude', help='Pressure level in hPa')
+    parser_real.add_argument('--rft', help='Perform front tracking', action='store_const', const=True,
+                             default=False)
 
     args = parser.parse_args(sys.argv[1:])
     if 'test_id' in args.__dict__:
@@ -158,21 +160,22 @@ if __name__ == '__main__':
         # pb.flatten()
 
         # Setting the front tracking solver
-        solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft)
-        if cache_rff:
-            solver_rp.rft.load_cache(os.path.join(mdfm.case_dir, 'rff.h5'))
+        if args.rft:
+            solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft)
+            if cache_rff:
+                solver_rp.rft.load_cache(os.path.join(mdfm.case_dir, 'rff.h5'))
 
-        chrono.start('Solving problem using reachability front tracking (RFT)')
-        res_rp = solver_rp.solve()
-        chrono.stop()
-        if res_rp.status:
-            # Save optimal trajectory
-            mdfm.dump_trajs([res_rp.traj])
-            print(f'Target reached in : {Utils.time_fmt(res_rp.duration)}')
+            chrono.start('Solving problem using reachability front tracking (RFT)')
+            res_rp = solver_rp.solve()
+            chrono.stop()
+            if res_rp.status:
+                # Save optimal trajectory
+                mdfm.dump_trajs([res_rp.traj])
+                print(f'Target reached in : {Utils.time_fmt(res_rp.duration)}')
 
-        # Save fronts for display purposes
-        if not cache_rff:
-            solver_rp.rft.dump_rff(mdfm.case_dir)
+            # Save fronts for display purposes
+            if not cache_rff:
+                solver_rp.rft.dump_rff(mdfm.case_dir)
 
         # Extract information for display and write it to output
         mdfm.ps.load_from_problem(pb)
