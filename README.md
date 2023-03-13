@@ -20,21 +20,27 @@ The module supports 2D planar environment as well as spherical problems.
 
 ## Installation
 
-Clone this repo and open a shell in the directory where it has been cloned
+Open an appropriate working directory and clone this repo using `git clone [repo-url]`.
 
 ### Virtual environment
 
-Create a new virtual environment
+A virtual environement is recommended to install the module.
+If you don't want to use it, go to next section.
+
+To create a virtual environment, run
 ```sh
 python3 -m venv env
 ```
-Activate it
+Then activate the environment using
 ```sh
 source env/bin/activate
 ```
-Now install dependencies
+
+### Module
+
+Install the project as a Python module using
 ```sh
-python3 -m pip install -r requirements.txt
+python3 -m pip install ./dabry
 ```
 
 ### Configuration

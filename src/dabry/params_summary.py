@@ -77,7 +77,7 @@ class ParamsSummary:
         for k, v in d.items():
             self.params[k] = v
 
-    def dump(self, fname=None, nohtml=False):
+    def dump(self, fname=None, nohtml=True):
         # self.add_param('gen_time', time.time())
         self.process_params()
         fname = self.params_fname if fname is None else fname
