@@ -273,7 +273,8 @@ class NavigationProblem:
 class DatabaseProblem(NavigationProblem):
 
     def __init__(self, x_init=None, x_target=None, airspeed=Utils.AIRSPEED_DEFAULT,
-                 obstacles=None, ncdc='', t_start=None, t_end=None):
+                 obstacles=None, ncdc='', t_start=None, t_end=None,
+                 altitude='', resolution=''):
         total_wind = DiscreteWind(interp='linear')
         wind_fpath = None
         wind_db_path = None
@@ -291,7 +292,7 @@ class DatabaseProblem(NavigationProblem):
                     x_target = tr - offset
             print(f'Problem from database : {wind_db_path if wind_fpath is None else wind_fpath}')
         else:
-            wind_db_path = os.path.join(os.environ.get('DABRYPATH'), 'data', 'ecmwf', '0.5')
+            wind_db_path = os.path.join(os.environ.get('DABRYPATH'), 'data', 'cds', resolution, altitude)
             bl_lon = Utils.RAD_TO_DEG * min(x_init[0], x_target[0])
             bl_lat = Utils.RAD_TO_DEG * min(x_init[1], x_target[1])
             bl_lon = math.floor((bl_lon - 5) / 10) * 10
