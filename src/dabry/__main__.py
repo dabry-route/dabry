@@ -126,7 +126,9 @@ if __name__ == '__main__':
 
         pb = DatabaseProblem(x_init=Utils.DEG_TO_RAD * x_init,
                              x_target=Utils.DEG_TO_RAD * x_target, airspeed=airspeed,
-                             t_start=start_date.timestamp(), t_end=stop_date.timestamp())
+                             t_start=start_date.timestamp(), t_end=stop_date.timestamp(),
+                             altitude=args.altitude,
+                             resolution='0.5')
 
         # pb.flatten()
 
