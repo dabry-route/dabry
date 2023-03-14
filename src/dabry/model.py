@@ -1,9 +1,31 @@
 from abc import ABC
+
 import numpy as np
 
+from dabry.misc import Utils
 from .dynamics import ZermeloDyn, PCZermeloDyn
 from .wind import UniformWind, Wind
-from dabry.misc import Utils
+
+"""
+model.py
+Navigation problem model.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class Model(ABC):
@@ -25,6 +47,7 @@ class Model(ABC):
 
     def update_airspeed(self, v_a):
         self.v_a = v_a
+
 
 class ZermeloGeneralModel(Model):
 

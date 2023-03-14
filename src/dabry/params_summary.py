@@ -1,15 +1,33 @@
+import datetime
 import json
 import os
 import shutil
-import time
 
 import markdown
-import datetime
 
 from dabry.problem import NavigationProblem
-from dabry.solver import Solver
 from dabry.solver_rp import SolverRP
-from dabry.misc import Utils
+
+"""
+params_summary.py
+Handles the logging of computation parameters.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class ParamsSummary:
@@ -59,12 +77,12 @@ class ParamsSummary:
         for k, v in d.items():
             self.params[k] = v
 
-    def dump(self, fname=None, nohtml=False):
+    def dump(self, fname=None, nohtml=True):
         # self.add_param('gen_time', time.time())
         self.process_params()
         fname = self.params_fname if fname is None else fname
         with open(os.path.join(self.output_dir, fname), 'w') as f:
-            json.dump(self.params, f)
+            json.dump(self.params, f, indent=2)
         if not nohtml:
             path = os.path.join(self.output_dir, self.params_fname_formatted)
             with open(path, "w", encoding="utf-8", errors="xmlcharrefreplace") as output_file:
@@ -80,19 +98,6 @@ class ParamsSummary:
 
     def _fcomptime(self, comptime):
         return f'{comptime:.3f}'
-
-    def load_from_solver(self, sv: Solver):
-        T = sv.T
-        factor = Utils.RAD_TO_DEG if sv.mp.coords == Utils.COORD_GCS else 1.
-        self.params = {
-            'coords': sv.mp.coords,
-            'point_init': (factor * sv.x_init[0], factor * sv.x_init[1]),
-            'max_time': T,
-            'airspeed': sv.mp.model.v_a,
-            'point_target': (factor * sv.x_target[0], factor * sv.x_target[1]),
-            'target_radius': sv.opti_ceil,
-            'nt_pmp': sv.nt_pmp,
-        }
 
     def load_from_solver_rp(self, sv: SolverRP):
         self.load_from_problem(sv.mp)

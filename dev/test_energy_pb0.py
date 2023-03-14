@@ -10,7 +10,7 @@ import scipy.optimize
 from tqdm import tqdm
 
 from dabry.feedback import FunFB, ConstantFB, GSTargetFB, GreatCircleFB, HTargetFB, FixedHeadingFB
-from dabry.mdf_manager import DDFmanager
+from dabry.ddf_manager import DDFmanager
 from dabry.params_summary import ParamsSummary
 from dabry.misc import Utils, Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem

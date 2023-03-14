@@ -1,7 +1,28 @@
 import numpy as np
+from scipy.optimize import Bounds, minimize
+
 from dabry.problem import NavigationProblem
-from scipy.optimize import Bounds, NonlinearConstraint, minimize
-from math import atan2
+
+"""
+solver_nlp.py
+Solver for navigation problems using non-linear programming.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class SolverNLP:
@@ -63,7 +84,7 @@ class SolverNLP:
         res = minimize(self.loss,
                        self.i_guess,
                        method='SLSQP',
-                       #constraints=constraints,
+                       # constraints=constraints,
                        options={'ftol': 1e-8, 'disp': True, 'maxiter': 200},
                        bounds=[(-6.28, 6.28) for _ in range(self.nt - 1)])
         return res, self.shoot(res.x)

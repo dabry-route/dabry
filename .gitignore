@@ -169,3 +169,10 @@ output/*
 /LICENSE_HEADER
 /tests/out
 data/*
+/misc/
+/local/
+/utils/
+
+/ze_pipeline.sh
+/DABRYPATH
+/DVISUPATH

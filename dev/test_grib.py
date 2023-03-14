@@ -13,7 +13,7 @@ from dabry.model import ZermeloGeneralModel
 from dabry.rft import RFT
 from dabry.shooting import Shooting
 from dabry.wind import DiscreteWind
-from dabry.mdf_manager import DDFmanager
+from dabry.ddf_manager import DDFmanager
 
 mpl.style.use('seaborn-notebook')
 
@@ -66,7 +66,7 @@ def run():
     x_init = 0.5 * (bl + tr)
 
     # Creates the navigation problem on top of the previous model
-    mp = NavigationProblem(zermelo_model, T=T, visual_mode='only-map')
+    mp = NavigationProblem(zermelo_model,,
 
     t_end = time.time()
     print(f"Done ({t_end - t_start:.3f} s)")

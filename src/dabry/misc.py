@@ -1,9 +1,31 @@
 import sys
 import time
+from math import pi, acos, cos, sin, floor, atan2
 
 import numpy as np
-from math import pi, acos, cos, sin, floor, atan2
 from numpy import ndarray
+
+"""
+misc.py
+Defines various procedures for distance computation, time formatting,
+cpu time measurement.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class Utils:
@@ -34,6 +56,10 @@ class Utils:
         :return: Same angle in 0-360
         """
         return angle - 360. * floor(angle / 360.)
+
+    @staticmethod
+    def to_m180_180(angle):
+        return angle - 360. * floor((angle + 180) / 360.)
 
     @staticmethod
     def rectify(a, b):
@@ -178,7 +204,8 @@ class Utils:
         :return: Projection in meters
         """
         return Utils.EARTH_RADIUS * np.array((np.cos(lat) * np.sin(lon - lon0),
-                                        np.cos(lat0) * np.sin(lat) - np.sin(lat0) * np.cos(lat) * np.cos(lon - lon0)))
+                                              np.cos(lat0) * np.sin(lat) - np.sin(lat0) * np.cos(lat) * np.cos(
+                                                  lon - lon0)))
 
     @staticmethod
     def proj_ortho_inv(x, y, lon0, lat0):
@@ -199,7 +226,7 @@ class Utils:
     def d_proj_ortho_inv(x, y, lon0, lat0):
         lon, lat = tuple(Utils.proj_ortho_inv(x, y, lon0, lat0))
         det = Utils.EARTH_RADIUS ** 2 * (np.cos(lat0) * np.cos(lat) ** 2 * np.cos(lon - lon0) +
-                                   np.sin(lat0) * np.sin(lat) * np.cos(lat))
+                                         np.sin(lat0) * np.sin(lat) * np.cos(lat))
         dp = Utils.d_proj_ortho(lon, lat, lon0, lat0)
         return 1 / det * np.array(((dp[1, 1], -dp[0, 1]), (-dp[1, 0], dp[0, 0])))
 

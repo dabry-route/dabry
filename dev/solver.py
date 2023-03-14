@@ -1,7 +1,7 @@
 import os
 import numpy as np
 
-from dabry.mdf_manager import DDFmanager
+from dabry.ddf_manager import DDFmanager
 from dabry.obstacle import GreatCircleObs, ParallelObs, MaxiObs, LSEMaxiObs
 from dabry.misc import Utils, Chrono
 from dabry.problem import IndexedProblem, DatabaseProblem
@@ -10,9 +10,9 @@ from dabry.solver_rp import SolverRP
 
 if __name__ == '__main__':
     # Choose problem ID for IndexedProblem
-    pb_id = 0
+    pb_id = 21
     # Or choose database problem. If empty, will use previous ID
-    dbpb = 'ncdc/44W_16S_9W_25S_20220301_12'
+    dbpb = 'ncdc/16E_57S_130E_31N_20220301_12'
     suffix = ''
     # When running several times, wind data or reachability fronts data can be cached
     cache_wind = True
@@ -25,7 +25,7 @@ if __name__ == '__main__':
     mdfm = DDFmanager(cache_wind, cache_rff)
     mdfm.setup()
     if len(dbpb) > 0:
-        case_name = f'example_solver-ef_{dbpb}' + (f'_{suffix}' if len(suffix) > 0 else '')
+        case_name = dbpb + (f'_{suffix}' if len(suffix) > 0 else '')
     else:
         case_name = f'{pb_id}_{IndexedProblem.problems[pb_id][1]}' + (f'_{suffix}' if len(suffix) > 0 else '')
     mdfm.set_case(case_name)
@@ -51,11 +51,11 @@ if __name__ == '__main__':
         # obs2 = GreatCircleObs(np.array((-30 * DEG_TO_RAD, 10 * DEG_TO_RAD)),
         #                           np.array((-31 * DEG_TO_RAD, 10 * DEG_TO_RAD)))
         # obs.append(LSEMaxiObs([obs1, obs2]))
-        pb = DatabaseProblem(os.path.join(os.environ.get('DABRYPATH'), 'data', dbpb, 'wind.h5'),
+        pb = DatabaseProblem(dbpb,
                              airspeed=23.,
                              obstacles=obs,
-                             x_init=Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398]),
-                             x_target=Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425]))
+                             x_init=np.array([0.96, -0.35]),
+                             x_target=Utils.DEG_TO_RAD * np.array([114, -24]))
     else:
         pb = IndexedProblem(pb_id)
 

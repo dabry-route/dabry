@@ -1,15 +1,37 @@
-from abc import ABC, abstractmethod
 import random
+from abc import ABC, abstractmethod
+
+import numpy as np
+import scipy.optimize
 from numpy import arctan2 as atan2
 from numpy import ndarray
-import numpy as np
 from numpy import pi, sin, cos
-import scipy.optimize
-
 
 from dabry.aero import Aero
-from dabry.wind import Wind, UniformWind
 from dabry.misc import Utils
+from dabry.wind import Wind, UniformWind
+
+"""
+feedback.py
+Feedback control laws for vehicles in flow fields controlled both
+in heading and airspeed.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class Feedback(ABC):
@@ -406,6 +428,7 @@ class E_GSTargetFB(MultiFeedback):
     def value(self, t, x):
         self.update(t, x)
         asp_opti = scipy.optimize.brentq(
-            lambda asp: self.aero.d_power(asp) * (asp + self._heading(asp)[1] @ self.wind.value(t, x)) - self.aero.power(
+            lambda asp: self.aero.d_power(asp) * (
+                    asp + self._heading(asp)[1] @ self.wind.value(t, x)) - self.aero.power(
                 asp), max(self.wind_ortho, self.aero.v_minp), 100.)
         return self._heading(asp_opti)[0], asp_opti

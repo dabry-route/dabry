@@ -1,9 +1,29 @@
 from abc import ABC
 
 import numpy as np
+import scipy.optimize
 from numpy import ndarray
 
-import scipy.optimize
+"""
+aero.py
+Models aerodynamics for flight power consumption.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class Aero(ABC):
@@ -96,7 +116,7 @@ class MermozAero(Aero):
         self.A1 = -6.1139
         self.A2 = 1782
         self._B0 = 12 * self.A2 / self.A0
-        self.v_minp = np.sqrt(1/(6 * self.A0) * (-self.A1 + np.sqrt(self.A1 ** 2 + 12 * self.A0 * self.A2)))
+        self.v_minp = np.sqrt(1 / (6 * self.A0) * (-self.A1 + np.sqrt(self.A1 ** 2 + 12 * self.A0 * self.A2)))
         self.v_fmax = (self.A2 / self.A0) ** (1 / 4)
         self.mode = 'mermoz_fitted'
 

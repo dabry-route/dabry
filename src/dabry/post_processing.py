@@ -1,22 +1,40 @@
 import csv
 import datetime
+import json
 import os
 import sys
-import numpy as np
-from numpy import sin, ndarray
-from numpy import arctan2 as atan2
 import time
-import h5py
-import json
 
+import h5py
 import matplotlib.pyplot as plt
+import numpy as np
+from numpy import arctan2 as atan2
+from numpy import sin, ndarray
 
 from dabry.aero import LLAero, Aero, MermozAero
-
-from dabry.wind import DiscreteWind
 from dabry.misc import Utils
+from dabry.wind import DiscreteWind
 
-path_colors = ['b', 'g', 'r', 'c', 'm', 'y']
+"""
+post_processing.py
+Processes computation output for further analyses.
+
+Copyright (C) 2021 Bastien Schnitzler 
+(bastien dot schnitzler at live dot fr)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 
 
 class TrajStats:
@@ -54,6 +72,7 @@ class TrajStats:
 
 
 class PostProcessing:
+    path_colors = ['b', 'g', 'r', 'c', 'm', 'y']
 
     def __init__(self, output_dir, traj_fn=None, wind_fn=None, param_fn=None):
         self.output_dir = output_dir
@@ -198,7 +217,7 @@ class PostProcessing:
             if abs(ts[1] - ts[0]) < 1e-8:
                 continue
             nt = traj['last_index']
-            color = path_colors[k % len(path_colors)]
+            color = PostProcessing.path_colors[k % len(PostProcessing.path_colors)]
             tstats = self.point_stats(ts, points, last_index=nt)
             nt = tstats.imax + 2
             if 'adjoints' in traj.keys() and 'm0' not in traj['info']:
@@ -255,7 +274,7 @@ class PostProcessing:
         fig.tight_layout()
         times = list(map(lambda x: x[1] / 3.6e3, ets.values()))
         energies = list(map(lambda x: x[0] / 3.6e6, ets.values()))
-        colors = [path_colors[k % len(path_colors)] for k in range(len(energies))]
+        colors = [PostProcessing.path_colors[k % len(PostProcessing.path_colors)] for k in range(len(energies))]
         markers = list(map(lambda x: 'o' if np.bool(x[2]) else 'x', ets.values()))
         for k, t in enumerate(times):
             ax.scatter(t, energies[k], c=colors[k], marker=markers[k])
@@ -332,7 +351,8 @@ class PostProcessing:
             p2 = np.zeros(2)
             p[:] = points[i]
             p2[:] = points[i + 1]
-            corr_mat = Utils.EARTH_RADIUS * np.diag((np.cos(p[1]), 1.)) if self.coords == Utils.COORD_GCS else np.diag((1., 1.))
+            corr_mat = Utils.EARTH_RADIUS * np.diag((np.cos(p[1]), 1.)) if self.coords == Utils.COORD_GCS else np.diag(
+                (1., 1.))
             delta_x = (p2 - p)
             dx_norm = np.linalg.norm(delta_x)
             e_dx = delta_x / dx_norm
