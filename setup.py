@@ -10,7 +10,6 @@ setup(
     package_dir={'': 'src'},
     install_requires=['basemap',
                       'cdsapi',
-                      'ecmwf-api-client',
                       'geopy',
                       'h5py',
                       'Markdown',
