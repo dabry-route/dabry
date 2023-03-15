@@ -937,8 +937,8 @@ class IndexedProblem(NavigationProblem):
 
             x_init = sf * np.array((0.6, 0.6))
             x_target = sf * np.array((2.4, 2.4))
-            bl = sf * np.array((0.5, 0.5))
-            tr = sf * np.array((2.5, 2.5))
+            bl = sf * np.array((0., 0.))
+            tr = sf * np.array((3., 3.))
             coords = Utils.COORD_CARTESIAN
 
             total_wind = DoubleGyreWind(sf * 0.5, sf * 0.5, sf * 2., sf * 2., v_a / 2 * pi)
@@ -946,7 +946,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=True)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=False)
         elif name == 'trap':
             v_a = 23.
 
