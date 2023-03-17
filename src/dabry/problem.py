@@ -89,7 +89,7 @@ class NavigationProblem:
                 self.bl = np.array(bl)
                 self.tr = np.array(tr)
             if self.coords == Utils.COORD_GCS:
-                self._domain_obs = DatabaseProblem.spherical_frame(bl, tr, offset_rel=0.)
+                self._domain_obs = DatabaseProblem.spherical_frame(bl, tr, offset_rel=0)
                 self._domain = lambda x: np.all([obs.value(x) > 0. for obs in self._domain_obs])
             else:
                 self._domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
@@ -303,8 +303,8 @@ class DatabaseProblem(NavigationProblem):
             tr_lon = math.ceil((tr_lon + 5) / 10) * 10
             tr_lat = math.ceil((tr_lat + 5) / 10) * 10
             tr = Utils.DEG_TO_RAD * np.array((tr_lon, tr_lat))
-            total_wind.load_from_ecmwf(wind_db_path, Utils.RAD_TO_DEG * bl, Utils.RAD_TO_DEG * tr,
-                                       t_start=t_start, t_end=t_end)
+            total_wind.load_from_cds(wind_db_path, Utils.RAD_TO_DEG * bl, Utils.RAD_TO_DEG * tr,
+                                     t_start=t_start, t_end=t_end)
 
         if obstacles is None:
             obstacles = []

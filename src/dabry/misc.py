@@ -59,7 +59,8 @@ class Utils:
 
     @staticmethod
     def to_m180_180(angle):
-        return angle - 360. * floor((angle + 180) / 360.)
+        angle = np.asarray(angle)
+        return angle - 360. * np.floor((angle + 180) / 360.)
 
     @staticmethod
     def rectify(a, b):

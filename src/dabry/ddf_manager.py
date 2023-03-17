@@ -366,7 +366,7 @@ class DDFmanager:
             server = cdsapi.Client()
             kwargs = {
                 "variable": ['u_component_of_wind', 'v_component_of_wind'],
-                "pressure_level": "1000",
+                "pressure_level": level,
                 "product_type": "reanalysis",
                 "year": day_required[:4],
                 "month": day_required[4:6],

@@ -88,7 +88,6 @@ if __name__ == '__main__':
         x_init = np.array([Utils.to_m180_180(float(args.x_init_lon)), float(args.x_init_lat)])
         x_target = np.array([Utils.to_m180_180(float(args.x_target_lon)), float(args.x_target_lat)])
         airspeed = float(args.airspeed)
-        print('WARNING : Altitude not read yet. Always assumed at 1000hPa.')
 
         duration = 2 * Utils.distance(Utils.DEG_TO_RAD * x_init, Utils.DEG_TO_RAD * x_target,
                                       coords=Utils.COORD_GCS) / airspeed
@@ -98,10 +97,11 @@ if __name__ == '__main__':
         aargs = [int(st_d[4 + 2 * i:4 + 2 * (i + 1)]) for i in range(4)]
         start_date = datetime(year, *aargs)
         stop_date = datetime.fromtimestamp(start_date.timestamp() + duration)
+        level = str(int(args.altitude))
         ddf = DDFmanager()
         ddf.setup()
 
-        ddf.retrieve_wind(start_date, stop_date, level='1000', res='0.5')
+        ddf.retrieve_wind(start_date, stop_date, level=level, res='0.5')
         case_name = ddf.format_cname(x_init, x_target, start_date.timestamp())
 
         cache_wind = False
