@@ -1,5 +1,6 @@
 import sys
 import time
+from datetime import datetime
 from math import pi, acos, cos, sin, floor, atan2
 
 import numpy as np
@@ -425,6 +426,36 @@ class Utils:
             hours = int(duration / 3600)
             minutes = int(60 * (duration / 3600 - hours))
             return f'{hours}h{minutes}m'
+
+    @staticmethod
+    def read_pb_params(s):
+        return Utils.process_pb_params(*s.strip().split(' ')[:7])
+
+    @staticmethod
+    def process_pb_params(x_init_lon, x_init_lat, x_target_lon, x_target_lat, start_date, airspeed, altitude):
+        x_init = np.array([Utils.to_m180_180(float(x_init_lon)), float(x_init_lat)])
+        x_target = np.array([Utils.to_m180_180(float(x_target_lon)), float(x_target_lat)])
+        airspeed = float(airspeed)
+
+        st_d = start_date
+        year = int(st_d[:4])
+        aargs = [int(st_d[4 + 2 * i:4 + 2 * (i + 1)]) for i in range(4)]
+        start_date = datetime(year, *aargs)
+        level = str(int(altitude))
+        return x_init, x_target, start_date, airspeed, level
+
+    @staticmethod
+    def in_lonlat_box(bl, tr, p):
+        """
+        Returns True if p is in the specified box
+        :param bl: Bottom left corner (lon, lat) in radians
+        :param tr: Top right corner (lon, lat) in radians
+        :param p: Point to check in format (lon, lat) in radians
+        :return: True if point in box, False else
+        """
+        bl_lon, tr_lon = Utils.rectify(Utils.RAD_TO_DEG * bl[0], Utils.RAD_TO_DEG * tr[0])
+        p_lon = Utils.to_0_360(Utils.RAD_TO_DEG * p[0])
+        return (bl_lon < p_lon < tr_lon or bl_lon < p_lon + 360 < tr_lon) and bl[1] < p[1] < tr[1]
 
 
 class Chrono:

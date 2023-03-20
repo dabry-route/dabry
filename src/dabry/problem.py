@@ -293,12 +293,12 @@ class DatabaseProblem(NavigationProblem):
             print(f'Problem from database : {wind_db_path if wind_fpath is None else wind_fpath}')
         else:
             wind_db_path = os.path.join(os.environ.get('DABRYPATH'), 'data', 'cds', resolution, altitude)
-            bl_lon = Utils.RAD_TO_DEG * min(x_init[0], x_target[0])
+            bl_lon = Utils.RAD_TO_DEG * min(Utils.ang_principal(x_init[0]), Utils.ang_principal(x_target[0]))
             bl_lat = Utils.RAD_TO_DEG * min(x_init[1], x_target[1])
             bl_lon = math.floor((bl_lon - 5) / 10) * 10
             bl_lat = math.floor((bl_lat - 5) / 10) * 10
             bl = Utils.DEG_TO_RAD * np.array((bl_lon, bl_lat))
-            tr_lon = Utils.RAD_TO_DEG * max(x_init[0], x_target[0])
+            tr_lon = Utils.RAD_TO_DEG * max(Utils.ang_principal(x_init[0]), Utils.ang_principal(x_target[0]))
             tr_lat = Utils.RAD_TO_DEG * max(x_init[1], x_target[1])
             tr_lon = math.ceil((tr_lon + 5) / 10) * 10
             tr_lat = math.ceil((tr_lat + 5) / 10) * 10
@@ -328,16 +328,16 @@ class DatabaseProblem(NavigationProblem):
         obstacles.append(MeridianObs(tr_obs[0], False))
         obstacles.append(ParallelObs(bl_obs[1], True))
         obstacles.append(ParallelObs(tr_obs[1], False))
-        eps_lon = (tr_obs[0] - bl_obs[0]) / 30
-        eps_lat = (tr_obs[1] - bl_obs[1]) / 30
+        eps_lon = Utils.angular_diff(bl_obs[0], tr_obs[0]) / 30
+        eps_lat = Utils.angular_diff(bl_obs[1], tr_obs[1]) / 30
         obstacles.append(GreatCircleObs(np.array((bl_obs[0], bl_obs[1])) + np.array((eps_lon, 0)),
-                                        np.array((bl_obs[0], bl_obs[1])) + np.array((0, eps_lat))))
+                                        np.array((bl_obs[0], bl_obs[1])) + np.array((0, eps_lat)), autobox=True))
         obstacles.append(GreatCircleObs(np.array((tr_obs[0], bl_obs[1])) + np.array((0, eps_lat)),
-                                        np.array((tr_obs[0], bl_obs[1])) + np.array((-eps_lon, 0))))
+                                        np.array((tr_obs[0], bl_obs[1])) + np.array((-eps_lon, 0)), autobox=True))
         obstacles.append(GreatCircleObs(np.array((tr_obs[0], tr_obs[1])) + np.array((-eps_lon, 0)),
-                                        np.array((tr_obs[0], tr_obs[1])) + np.array((0, -eps_lat))))
+                                        np.array((tr_obs[0], tr_obs[1])) + np.array((0, -eps_lat)), autobox=True))
         obstacles.append(GreatCircleObs(np.array((bl_obs[0], tr_obs[1])) + np.array((0, -eps_lat)),
-                                        np.array((bl_obs[0], tr_obs[1])) + np.array((eps_lon, 0))))
+                                        np.array((bl_obs[0], tr_obs[1])) + np.array((eps_lon, 0)), autobox=True))
         obstacles.append(ParallelObs(-80 * Utils.DEG_TO_RAD, True))
         obstacles.append(ParallelObs(80 * Utils.DEG_TO_RAD, False))
         return obstacles
