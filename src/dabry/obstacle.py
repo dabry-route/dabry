@@ -122,25 +122,43 @@ class FrameObs(Obstacle):
 
 class GreatCircleObs(Obstacle):
 
-    def __init__(self, p1, p2):
+    def __init__(self, p1, p2, z1=None, z2=None, autobox=False):
         # Cross product of p1 and p2 points TOWARDS obstacle
+        # z1 and z2 are zone limiters
         X1 = np.array((Utils.EARTH_RADIUS * np.cos(p1[0]) * np.cos(p1[1]),
                        Utils.EARTH_RADIUS * np.sin(p1[0]) * np.cos(p1[1]),
                        Utils.EARTH_RADIUS * np.sin(p1[1])))
         X2 = np.array((Utils.EARTH_RADIUS * np.cos(p2[0]) * np.cos(p2[1]),
                        Utils.EARTH_RADIUS * np.sin(p2[0]) * np.cos(p2[1]),
                        Utils.EARTH_RADIUS * np.sin(p2[1])))
+        if not autobox:
+            self.z1 = z1
+            self.z2 = z2
+        else:
+            delta_lon = Utils.angular_diff(p1[0], p2[0])
+            delta_lat = p1[1] - p2[0]
+            self.z1 = np.array((min(p1[0] - delta_lon / 2., p2[0] - delta_lon / 2.),
+                                min(p1[1] - delta_lat / 2., p2[1] - delta_lat / 2.)))
+            self.z2 = np.array((max(p1[0] + delta_lon / 2., p2[0] + delta_lon / 2.),
+                                max(p1[1] + delta_lat / 2., p2[1] + delta_lat / 2.)))
+
         self.dir_vect = -np.cross(X1, X2)
         self.dir_vect /= np.linalg.norm(self.dir_vect)
         super().__init__(self.value, np.zeros(2), self.d_value)
 
     def value(self, x):
+        if self.z1 is not None:
+            if not Utils.in_lonlat_box(self.z1, self.z2, x):
+                return 1.
         X = np.array((Utils.EARTH_RADIUS * np.cos(x[0]) * np.cos(x[1]),
                       Utils.EARTH_RADIUS * np.sin(x[0]) * np.cos(x[1]),
                       Utils.EARTH_RADIUS * np.sin(x[1])))
         return X @ self.dir_vect
 
     def d_value(self, x):
+        if self.z1 is not None:
+            if not Utils.in_lonlat_box(self.z1, self.z2, x):
+                return np.array((1., 1.))
         d_dphi = np.array((-Utils.EARTH_RADIUS * np.sin(x[0]) * np.cos(x[1]),
                            Utils.EARTH_RADIUS * np.cos(x[0]) * np.cos(x[1]),
                            0))

@@ -34,10 +34,10 @@ if __name__ == '__main__':
     nt_rft = 20
 
     wind = DiscreteWind()
-    wind.load_from_ecmwf('/home/bastien/Documents/work/zermelo_earth/test.grb2',
-                         np.array([140, -60]),
-                         np.array([175, -30])
-                         )
+    wind.load_from_cds('/home/bastien/Documents/work/zermelo_earth/test.grb2',
+                       np.array([140, -60]),
+                       np.array([175, -30])
+                       )
     zermelo_model = ZermeloGeneralModel(23, coords=Utils.COORD_GCS)
     zermelo_model.update_wind(wind)
     pb = NavigationProblem(zermelo_model, Utils.DEG_TO_RAD * np.array([150, -50]),

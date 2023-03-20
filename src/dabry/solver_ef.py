@@ -850,7 +850,7 @@ class SolverEF:
                 x_prev = np.zeros(x.shape)
                 x_prev[:] = x
                 x += self.dt * dyn_x
-                p[:] = - np.array((np.cos(u), np.sin(u)))
+                p[:] = - 1. * np.array((np.cos(np.pi / 2. - u), np.sin(np.pi / 2 - u)))
                 t += self.dt
                 arg_ref_x = atan2(*(x - self.mp.obstacles[pcl.i_obs].ref_point)[::-1])
                 arg_ref_x_prev = atan2(*(x_prev - self.mp.obstacles[pcl.i_obs].ref_point)[::-1])

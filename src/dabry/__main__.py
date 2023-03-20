@@ -85,23 +85,23 @@ if __name__ == '__main__':
         print(f'Results saved to {ddf.case_dir}')
 
     else:
-        x_init = np.array([Utils.to_m180_180(float(args.x_init_lon)), float(args.x_init_lat)])
-        x_target = np.array([Utils.to_m180_180(float(args.x_target_lon)), float(args.x_target_lat)])
-        airspeed = float(args.airspeed)
-        print('WARNING : Altitude not read yet. Always assumed at 1000hPa.')
+
+        x_init, x_target, start_date, airspeed, level = Utils.process_pb_params(args.x_init_lon,
+                                                                                args.x_init_lat,
+                                                                                args.x_target_lon,
+                                                                                args.x_target_lat,
+                                                                                args.start_date,
+                                                                                args.airspeed,
+                                                                                args.altitude)
 
         duration = 2 * Utils.distance(Utils.DEG_TO_RAD * x_init, Utils.DEG_TO_RAD * x_target,
                                       coords=Utils.COORD_GCS) / airspeed
-
-        st_d = args.start_date
-        year = int(st_d[:4])
-        aargs = [int(st_d[4 + 2 * i:4 + 2 * (i + 1)]) for i in range(4)]
-        start_date = datetime(year, *aargs)
         stop_date = datetime.fromtimestamp(start_date.timestamp() + duration)
+
         ddf = DDFmanager()
         ddf.setup()
 
-        ddf.retrieve_wind(start_date, stop_date, level='1000', res='0.5')
+        ddf.retrieve_wind(start_date, stop_date, level=level, res='0.5')
         case_name = ddf.format_cname(x_init, x_target, start_date.timestamp())
 
         cache_wind = False
@@ -127,7 +127,7 @@ if __name__ == '__main__':
         pb = DatabaseProblem(x_init=Utils.DEG_TO_RAD * x_init,
                              x_target=Utils.DEG_TO_RAD * x_target, airspeed=airspeed,
                              t_start=start_date.timestamp(), t_end=stop_date.timestamp(),
-                             altitude=args.altitude,
+                             altitude=level,
                              resolution='0.5')
 
         # pb.flatten()

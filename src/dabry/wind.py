@@ -267,7 +267,7 @@ class DiscreteWind(Wind):
         # Either 'pwc' for piecewise constant wind or 'linear' for linear interpolation
         self.interp = interp
 
-        self.clipping_tol = 1e-2
+        self.clipping_tol = 0. # 1e-2
 
         self.is_analytical = force_analytical
 
@@ -446,7 +446,7 @@ class DiscreteWind(Wind):
             else:
                 self.compute_derivatives()
 
-    def load_from_ecmwf(self, wind_db_path, bl, tr, t_start=None, t_end=None):
+    def load_from_cds(self, wind_db_path, bl, tr, t_start=None, t_end=None):
 
         # Get grid
         lon_b = Utils.rectify(bl[0], tr[0])
@@ -455,16 +455,36 @@ class DiscreteWind(Wind):
 
         grb = pygrib.open(os.path.join(wind_db_path, os.listdir(wind_db_path)[0]))
         grb_u = grb.select(name='U component of wind')
-        self.ny, self.nx = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[1].shape
+        if lon_b[1] > 360:
+            # Has to extract in two steps
+            ny, nx1 = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[1].shape
+            _, nx2 = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[1].shape
+            self.ny = ny
+            self.nx = nx1 + nx2
+            lons1 = Utils.DEG_TO_RAD * \
+                   Utils.to_m180_180(
+                       grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[2]).transpose()
+            lons2 = Utils.DEG_TO_RAD * \
+                    Utils.to_m180_180(
+                        grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[2]).transpose()
+            lats1 = Utils.DEG_TO_RAD * \
+                    grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[1].transpose()
+            lats2 = Utils.DEG_TO_RAD * \
+                    grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[1].transpose()
+            lons = np.concatenate((lons1, lons2))
+            lats = np.concatenate((lats1, lats2))
+
+        else:
+            self.ny, self.nx = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[1].shape
+            lons = Utils.DEG_TO_RAD * \
+                   Utils.to_m180_180(
+                       grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[2]).transpose()
+            lats = Utils.DEG_TO_RAD * \
+                   grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[1].transpose()
         self.grid = np.zeros((self.nx, self.ny, 2))
-        self.grid[:, :, 0] = Utils.DEG_TO_RAD * \
-                             np.vectorize(Utils.to_m180_180)(
-                                 grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
-                                 [2]).transpose()
-        self.grid[:, :, 1] = Utils.DEG_TO_RAD * \
-                             np.vectorize(Utils.to_m180_180)(
-                                 grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
-                                 [1]).transpose()
+
+        self.grid[:, ::-1, 0] = lons
+        self.grid[:, ::-1, 1] = lats
         self.x_min = np.min(self.grid[:, :, 0])
         self.x_max = np.max(self.grid[:, :, 0])
         self.y_min = np.min(self.grid[:, :, 1])
@@ -497,10 +517,18 @@ class DiscreteWind(Wind):
                 if t > stopd_rounded:
                     break
                 uv = np.zeros((self.nx, self.ny, 2))
-                U, lats, lons = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
-                V, _, _ = grb_v[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
-                uv[:, :, 0] = U.transpose()
-                uv[:, :, 1] = V.transpose()
+                if lon_b[1] > 360:
+                    U1 = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[0].transpose()
+                    V1 = grb_v[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[0].transpose()
+                    U2 = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[0].transpose()
+                    V2 = grb_v[i].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[0].transpose()
+                    U = np.concatenate((U1, U2))
+                    V = np.concatenate((V1, V2))
+                else:
+                    U = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose()
+                    V = grb_v[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose()
+                uv[:, ::-1, 0] = U
+                uv[:, ::-1, 1] = V
                 uv_frames.append(uv)
                 ts.append(t.timestamp())
 

@@ -89,7 +89,7 @@ class NavigationProblem:
                 self.bl = np.array(bl)
                 self.tr = np.array(tr)
             if self.coords == Utils.COORD_GCS:
-                self._domain_obs = DatabaseProblem.spherical_frame(bl, tr, offset_rel=0.)
+                self._domain_obs = DatabaseProblem.spherical_frame(bl, tr, offset_rel=0)
                 self._domain = lambda x: np.all([obs.value(x) > 0. for obs in self._domain_obs])
             else:
                 self._domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
@@ -293,18 +293,18 @@ class DatabaseProblem(NavigationProblem):
             print(f'Problem from database : {wind_db_path if wind_fpath is None else wind_fpath}')
         else:
             wind_db_path = os.path.join(os.environ.get('DABRYPATH'), 'data', 'cds', resolution, altitude)
-            bl_lon = Utils.RAD_TO_DEG * min(x_init[0], x_target[0])
+            bl_lon = Utils.RAD_TO_DEG * min(Utils.ang_principal(x_init[0]), Utils.ang_principal(x_target[0]))
             bl_lat = Utils.RAD_TO_DEG * min(x_init[1], x_target[1])
             bl_lon = math.floor((bl_lon - 5) / 10) * 10
             bl_lat = math.floor((bl_lat - 5) / 10) * 10
             bl = Utils.DEG_TO_RAD * np.array((bl_lon, bl_lat))
-            tr_lon = Utils.RAD_TO_DEG * max(x_init[0], x_target[0])
+            tr_lon = Utils.RAD_TO_DEG * max(Utils.ang_principal(x_init[0]), Utils.ang_principal(x_target[0]))
             tr_lat = Utils.RAD_TO_DEG * max(x_init[1], x_target[1])
             tr_lon = math.ceil((tr_lon + 5) / 10) * 10
             tr_lat = math.ceil((tr_lat + 5) / 10) * 10
             tr = Utils.DEG_TO_RAD * np.array((tr_lon, tr_lat))
-            total_wind.load_from_ecmwf(wind_db_path, Utils.RAD_TO_DEG * bl, Utils.RAD_TO_DEG * tr,
-                                       t_start=t_start, t_end=t_end)
+            total_wind.load_from_cds(wind_db_path, Utils.RAD_TO_DEG * bl, Utils.RAD_TO_DEG * tr,
+                                     t_start=t_start, t_end=t_end)
 
         if obstacles is None:
             obstacles = []
@@ -328,16 +328,16 @@ class DatabaseProblem(NavigationProblem):
         obstacles.append(MeridianObs(tr_obs[0], False))
         obstacles.append(ParallelObs(bl_obs[1], True))
         obstacles.append(ParallelObs(tr_obs[1], False))
-        eps_lon = (tr_obs[0] - bl_obs[0]) / 30
-        eps_lat = (tr_obs[1] - bl_obs[1]) / 30
+        eps_lon = Utils.angular_diff(bl_obs[0], tr_obs[0]) / 30
+        eps_lat = Utils.angular_diff(bl_obs[1], tr_obs[1]) / 30
         obstacles.append(GreatCircleObs(np.array((bl_obs[0], bl_obs[1])) + np.array((eps_lon, 0)),
-                                        np.array((bl_obs[0], bl_obs[1])) + np.array((0, eps_lat))))
+                                        np.array((bl_obs[0], bl_obs[1])) + np.array((0, eps_lat)), autobox=True))
         obstacles.append(GreatCircleObs(np.array((tr_obs[0], bl_obs[1])) + np.array((0, eps_lat)),
-                                        np.array((tr_obs[0], bl_obs[1])) + np.array((-eps_lon, 0))))
+                                        np.array((tr_obs[0], bl_obs[1])) + np.array((-eps_lon, 0)), autobox=True))
         obstacles.append(GreatCircleObs(np.array((tr_obs[0], tr_obs[1])) + np.array((-eps_lon, 0)),
-                                        np.array((tr_obs[0], tr_obs[1])) + np.array((0, -eps_lat))))
+                                        np.array((tr_obs[0], tr_obs[1])) + np.array((0, -eps_lat)), autobox=True))
         obstacles.append(GreatCircleObs(np.array((bl_obs[0], tr_obs[1])) + np.array((0, -eps_lat)),
-                                        np.array((bl_obs[0], tr_obs[1])) + np.array((eps_lon, 0))))
+                                        np.array((bl_obs[0], tr_obs[1])) + np.array((eps_lon, 0)), autobox=True))
         obstacles.append(ParallelObs(-80 * Utils.DEG_TO_RAD, True))
         obstacles.append(ParallelObs(80 * Utils.DEG_TO_RAD, False))
         return obstacles
@@ -937,8 +937,8 @@ class IndexedProblem(NavigationProblem):
 
             x_init = sf * np.array((0.6, 0.6))
             x_target = sf * np.array((2.4, 2.4))
-            bl = sf * np.array((0.5, 0.5))
-            tr = sf * np.array((2.5, 2.5))
+            bl = sf * np.array((0., 0.))
+            tr = sf * np.array((3., 3.))
             coords = Utils.COORD_CARTESIAN
 
             total_wind = DoubleGyreWind(sf * 0.5, sf * 0.5, sf * 2., sf * 2., v_a / 2 * pi)
@@ -946,7 +946,7 @@ class IndexedProblem(NavigationProblem):
             zermelo_model = ZermeloGeneralModel(v_a, coords=coords)
             zermelo_model.update_wind(total_wind)
 
-            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=True)
+            super(IndexedProblem, self).__init__(zermelo_model, x_init, x_target, coords, bl=bl, tr=tr, autoframe=False)
         elif name == 'trap':
             v_a = 23.
 
