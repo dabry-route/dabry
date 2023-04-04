@@ -10,6 +10,7 @@ import scipy.interpolate as itp
 from mpl_toolkits.basemap import Basemap
 from numpy import ndarray, pi, sin, cos
 from pyproj import Proj
+from tqdm import tqdm
 
 from dabry.misc import Utils
 
@@ -267,7 +268,7 @@ class DiscreteWind(Wind):
         # Either 'pwc' for piecewise constant wind or 'linear' for linear interpolation
         self.interp = interp
 
-        self.clipping_tol = 0. # 1e-2
+        self.clipping_tol = 0.  # 1e-2
 
         self.is_analytical = force_analytical
 
@@ -462,8 +463,8 @@ class DiscreteWind(Wind):
             self.ny = ny
             self.nx = nx1 + nx2
             lons1 = Utils.DEG_TO_RAD * \
-                   Utils.to_m180_180(
-                       grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[2]).transpose()
+                    Utils.to_m180_180(
+                        grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[2]).transpose()
             lons2 = Utils.DEG_TO_RAD * \
                     Utils.to_m180_180(
                         grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[2]).transpose()
@@ -498,12 +499,12 @@ class DiscreteWind(Wind):
         startd_rounded = datetime(start_date.year, start_date.month, start_date.day, 3 * (start_date.hour // 3), 0)
         stopd_rounded = datetime(stop_date.year, stop_date.month, stop_date.day, 0, 0) + timedelta(
             hours=3 * (1 + (stop_date.hour // 3)))
-        for wind_file in sorted(os.listdir(wind_db_path)):
+        for wind_file in tqdm(sorted(os.listdir(wind_db_path))):
             wind_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
             if wind_date < start_date_rounded:
                 continue
             if wind_date >= stop_date_rounded:
-                break
+                continue
             grb = pygrib.open(os.path.join(wind_db_path, wind_file))
             grb_u = grb.select(name='U component of wind')
             grb_v = grb.select(name='V component of wind')
@@ -515,7 +516,7 @@ class DiscreteWind(Wind):
                 if t < startd_rounded:
                     continue
                 if t > stopd_rounded:
-                    break
+                    continue
                 uv = np.zeros((self.nx, self.ny, 2))
                 if lon_b[1] > 360:
                     U1 = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[0].transpose()
@@ -1184,6 +1185,30 @@ class DoubleGyreWind(Wind):
         xx = np.diag((self.kx, self.ky)) @ (x - self.center)
         return self.ampl * np.array([[-self.kx * cos(xx[0]) * cos(xx[1]), self.ky * sin(xx[0]) * sin(xx[1])],
                                      [-self.kx * sin(xx[0]) * sin(xx[1]), self.ky * cos(xx[0]) * cos(xx[1])]])
+
+
+class DoubleGyreDampedWind(Wind):
+
+    def __init__(self,
+                 x_center: float,
+                 y_center: float,
+                 x_wl: float,
+                 y_wl: float,
+                 ampl: float,
+                 x_center_damp: float,
+                 y_center_damp: float,
+                 lambda_x_damp: float,
+                 lambda_y_damp: float):
+        super().__init__(value_func=self.value)
+        self.double_gyre = DoubleGyreWind(x_center, y_center, x_wl, y_wl, ampl)
+        self.center_damp = np.array((x_center_damp, y_center_damp))
+        self.lambda_x_damp = lambda_x_damp
+        self.lambda_y_damp = lambda_y_damp
+
+    def value(self, t, x):
+        xx = np.diag((1/self.lambda_x_damp, 1/self.lambda_y_damp)) @ (x - self.center_damp)
+        damp = 1 / (1 + xx[0] ** 2 + xx[1] ** 2)
+        return self.double_gyre.value(t, x) * damp
 
 
 class RadialGaussWind(Wind):

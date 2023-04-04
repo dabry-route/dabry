@@ -7,7 +7,7 @@ from numpy import ndarray, pi
 from pyproj import Proj
 
 from dabry.aero import MermozAero
-from dabry.feedback import Feedback, AirspeedLaw, MultiFeedback, GSTargetFB
+from dabry.feedback import Feedback, AirspeedLaw, MultiFeedback, GSTargetFB, HTargetFB
 from dabry.integration import IntEulerExpl
 from dabry.misc import Utils
 from dabry.model import Model, ZermeloGeneralModel
@@ -41,7 +41,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 class NavigationProblem:
 
     def __init__(self, model: Model, x_init, x_target, coords, domain=None, obstacles=None, bl=None, tr=None,
-                 autoframe=True, descr=None, time_scale=None, t_init=None, **kwargs):
+                 autoframe=True, descr=None, time_scale=None, t_init=None, aero=None, **kwargs):
         self.model = model
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
@@ -50,7 +50,7 @@ class NavigationProblem:
         self.coords = coords
         self.t_init = t_init
         # self.aero = LLAero(mode='dabry')
-        self.aero = MermozAero()
+        self.aero = MermozAero() if aero is None else aero
 
         # Domain bounding box corners
         if bl is not None:
@@ -260,6 +260,17 @@ class NavigationProblem:
 
     def orthodromic(self):
         fb = GSTargetFB(self.model.wind, self.model.v_a, self.x_target, self.coords)
+        self.load_feedback(fb)
+        sc = DistanceSC(lambda x: self.distance(x, self.x_target), self.geod_l * 0.01)
+        traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale / 2000, max_iter=6000,
+                                         t_init=self.model.wind.t_start)
+        if sc.value(0, traj.points[traj.last_index]):
+            return traj.timestamps[traj.last_index] - self.model.wind.t_start
+        else:
+            return -1
+
+    def htarget(self):
+        fb = HTargetFB(self.x_target, self.coords)
         self.load_feedback(fb)
         sc = DistanceSC(lambda x: self.distance(x, self.x_target), self.geod_l * 0.01)
         traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale / 2000, max_iter=6000,

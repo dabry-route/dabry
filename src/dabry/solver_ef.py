@@ -2,6 +2,7 @@ import csv
 import os
 import sys
 
+import h5py
 import numpy as np
 import scipy.integrate
 from numpy import arcsin as asin
@@ -198,6 +199,27 @@ class Pareto:
         else:
             print('Pareto : nothing to load')
 
+    def load_from_trajs(self, directory, filename=None, aero=None):
+        if filename is None:
+            names = os.listdir(directory)
+            for name in names:
+                if 'trajectories' in name:
+                    filename = name
+                    break
+        with h5py.File(os.path.join(directory, filename)) as f:
+            for k, traj in enumerate(f.values()):
+                # Filter extremal fields
+                if 'info' in traj.attrs.keys() and 'ef_' in traj.attrs['info']:
+                    continue
+                duration = traj['ts'][-1] - traj['ts'][0]
+                if 'constant_airspeed' in traj.attrs.keys() and aero is not None:
+                    asp = traj.attrs['constant_airspeed']
+                    energy = duration * aero.power(asp)
+                    self.add((duration, energy))
+                else:
+                    energy = traj['energy'][-1] - traj['energy'][0]
+                    self.add((duration, energy))
+
     def dump(self, directory):
         with open(os.path.join(directory, self.filename), 'w') as f:
             w = csv.writer(f)
@@ -274,8 +296,8 @@ class Pareto:
                 i += 1
             # Now points from first index to last index excluded shall be removed from front
             # because they are Pareto-dominated by new point
-            self.durations = self.durations[:i0 + 1] + self.durations[i:]
-            self.energies = self.energies[:i0 + 1] + self.energies[i:]
+            self.durations = self.durations[:i0 + 1] + [t] + self.durations[i:]
+            self.energies = self.energies[:i0 + 1] + [e] + self.energies[i:]
 
 
 class EFOptRes:
@@ -536,7 +558,7 @@ class SolverEF:
 
     def __init__(self,
                  mp: NavigationProblem,
-                 max_time,
+                 max_time=None,
                  mode=0,
                  N_disc_init=20,
                  rel_nb_ceil=0.02,
@@ -548,7 +570,8 @@ class SolverEF:
                  asp_init=None,
                  no_coll_filtering=False,
                  quick_solve=False,
-                 pareto=None):
+                 pareto=None,
+                 max_active_ext=None):
         self.mp_primal = mp
         self.mp_dual = NavigationProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
@@ -556,6 +579,13 @@ class SolverEF:
         self.mp_dual.x_target = np.array(mem)
 
         self.mode = mode
+
+        # Solve time arguments
+        if sum([max_time is None, dt is None, max_steps is None]) >= 2:
+            raise Exception('Please provide at least two arguments among "max_time", "max_steps" and "dt"')
+
+        if max_time is None:
+            max_time = dt * max_steps
 
         self.N_disc_init = N_disc_init
         # Neighbouring distance ceil
@@ -568,6 +598,9 @@ class SolverEF:
             else:
                 self.dt = -.005 * mp.l_ref / mp.aero.v_minp
 
+        if max_steps is None:
+            max_steps = int(abs(max_time/dt))
+
         # This group shall be reinitialized before new resolution
         self.active = []
         self.new_points = []
@@ -577,6 +610,8 @@ class SolverEF:
         self.lsets = []
         self.rel = Relations()
         self.n_points = 0
+
+        self.max_active_ext = max_active_ext
 
         self.trajs_control = {}
         self.trajs_add_info = {}
@@ -765,7 +800,8 @@ class SolverEF:
         # Trimming procedure
         if self.no_coll_filtering and self.mode == 0:
             if self.it % self.trimming_rate == 0:
-                self.trim()
+                #self.trim()
+                pass
 
         self.active.clear()
         for pcl in self.new_points:
@@ -997,7 +1033,8 @@ class SolverEF:
                self.step_algo >= self.max_steps or \
                len(self.ef.trajs) >= self.max_extremals or \
                (self.quick_solve and self.quick_traj_idx != -1) or \
-               (not self.any_out_obs)
+               (not self.any_out_obs) or \
+               (self.max_active_ext is not None and len(self.active) > self.max_active_ext)
 
     def propagate(self, time_offset=0., verbose=2):
         self.setup(time_offset=time_offset)
@@ -1019,6 +1056,8 @@ class SolverEF:
             msg = f'Stopped on extremals limit {self.max_extremals}'
         elif self.quick_solve and self.quick_traj_idx != -1:
             msg = 'Stopped quick solve'
+        elif self.max_active_ext is not None and len(self.active) > self.max_active_ext:
+            msg = 'Stopped on maximum of active extremal trajs'
         else:
             msg = f'Stopped empty active list'
         if verbose == 2:
@@ -1142,10 +1181,11 @@ class SolverEF:
             for k1, b1 in bests.items():
                 if k1 in dominated:
                     continue
-                for k2 in range(k1 + 1, len(bests.keys())):
+                for k2, b2 in bests.items():
+                    if k2 <= k1:
+                        continue
                     if k2 in dominated:
                         continue
-                    b2 = bests[k2]
                     if b2.cost < b1.cost and b2.t < b1.t:
                         dominated.append(k1)
                         break
@@ -1210,7 +1250,8 @@ class SolverEF:
                 adjoints = adjoints[::-1]
                 controls = controls[::-1]
             traj = AugmentedTraj(ts, points, adjoints, controls, nt - 1, self.mp.coords,
-                                 info=f'opt_m{self.mode}_{self.asp_init:.0f}')
+                                 info=f'opt_m{self.mode}_{self.asp_init:.2f}',
+                                 constant_asp=self.mp.model.v_a if self.mode == 0 else None)
             btrajs[k0] = traj
         res = EFOptRes(status, bests, btrajs, self.mp_primal)
         return res

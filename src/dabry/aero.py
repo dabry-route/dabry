@@ -2,7 +2,7 @@ from abc import ABC
 
 import numpy as np
 import scipy.optimize
-from numpy import ndarray
+from ambiance import ambiance
 
 """
 aero.py
@@ -30,6 +30,10 @@ class Aero(ABC):
 
     def __init__(self):
         self.v_minp = None
+        self.v_min = None
+        self.v_max = None
+
+        self.mode = ''
 
     def power(self, _):
         """
@@ -54,23 +58,13 @@ class Aero(ABC):
         :param wind_speed: Wind speed in m/s
         :return: Airspeed in m/s
         """
-        v_minp = 8  # if self.v_minp is None else self.v_minp
         f = lambda asp: self.d_power(asp) - self.power(asp) / (asp + wind_speed)
         # return scipy.optimize.brentq(
         #     lambda asp: self.d_power(asp) - self.power(asp) / (asp + wind_speed), v_minp, 100.)
-        return f(scipy.optimize.brute(f, ((v_minp, 50.),))[0])
-
-    @staticmethod
-    def _vec_or_float_to_norm(x):
-        if isinstance(x, ndarray):
-            xn = np.linalg.norm(x)
-        else:
-            # Assuming float
-            xn = x
-        return xn
+        return f(scipy.optimize.brute(f, ((self.v_min, self.v_max),))[0])
 
     def asp_opti(self, adjoint):
-        pn = self._vec_or_float_to_norm(adjoint)
+        pn = np.linalg.norm(adjoint)
         return scipy.optimize.brentq(lambda asp: self.d_power(asp) - pn, 0.1, 100.)
 
 
@@ -79,20 +73,14 @@ class LLAero(Aero):
     Lifting-line type model where polar is of the form CD = CD0 + k CL ** 2
     """
 
-    def __init__(self, mode='dobro'):
+    def __init__(self, kp1: float, kp2: float):
         super().__init__()
-        self.mode = mode
-        if mode == 'dobro':
-            # Coefficients extracted from Dobrokhodov et al. 2020
-            self.kp1 = 0.05
-            self.kp2 = 1000
-        elif mode == 'dabry':
-            # Coefficients from Mermoz
-            self.kp1 = 0.011
-            self.kp2 = 500
-        else:
-            raise Exception(f'Unknown mode {mode}')
+        self.kp1 = kp1
+        self.kp2 = kp2
         self.v_minp = (self.kp2 / (3 * self.kp1)) ** (1 / 4)
+        self.v_min = self.v_minp
+        self.v_max = 2 * self.v_min
+        self.mode += 'llaero'
 
     def power(self, airspeed):
         return self.kp1 * airspeed ** 3 + self.kp2 / airspeed
@@ -101,8 +89,43 @@ class LLAero(Aero):
         return 3 * self.kp1 * airspeed ** 2 - self.kp2 / airspeed ** 2
 
     def asp_opti(self, adjoint):
-        pn = self._vec_or_float_to_norm(adjoint)
+        pn = np.linalg.norm(adjoint)
         return np.sqrt(pn / (6 * self.kp1) + np.sqrt(self.kp2 / (3 * self.kp1) + pn ** 2 / (36 * self.kp1 ** 2)))
+
+
+class DobrokhodovAero(LLAero):
+
+    def __init__(self):
+        # Coefficients extracted from Dobrokhodov et al. 2020
+        super().__init__(0.05, 1000)
+        self.mode += '-dobrokhodov'
+
+
+class MermozLLAero(LLAero):
+
+    def __init__(self):
+        # Coefficients from Mermoz drone
+        super().__init__(0.011, 500)
+        self.mode += '-mermoz'
+
+
+class ComAircraftAero(LLAero):
+
+    def __init__(self, level):
+        """
+        :param level: Flight level in hPa
+        """
+        # Coefficients from A330-300
+        a = ambiance.Atmosphere.from_pressure(level * 100)
+        rho = a.density[0]
+        S = 361
+        CD0 = 0.03
+        k = 0.044
+        m = 150e3
+        kp1 = 0.5 * rho * S * CD0
+        kp2 = 2 * k * (10 * m) ** 2 / rho / S
+        super().__init__(kp1, kp2)
+        self.mode += '-com_aircraft'
 
 
 class MermozAero(Aero):
@@ -118,7 +141,9 @@ class MermozAero(Aero):
         self._B0 = 12 * self.A2 / self.A0
         self.v_minp = np.sqrt(1 / (6 * self.A0) * (-self.A1 + np.sqrt(self.A1 ** 2 + 12 * self.A0 * self.A2)))
         self.v_fmax = (self.A2 / self.A0) ** (1 / 4)
-        self.mode = 'mermoz_fitted'
+        self.v_min = self.v_minp
+        self.v_max = 30.  # m/s
+        self.mode += 'mermoz_fitted'
 
     def power(self, asp):
         return self.A0 * asp ** 3 + self.A1 * asp + self.A2 / asp
@@ -127,6 +152,27 @@ class MermozAero(Aero):
         return 3 * self.A0 * asp ** 2 + self.A1 - self.A2 / (asp ** 2)
 
     def asp_opti(self, adjoint):
-        pn = self._vec_or_float_to_norm(adjoint)
+        pn = np.linalg.norm(adjoint)
         a = (pn - self.A1) / self.A0
         return np.sqrt(1 / 6 * (a + np.sqrt(a ** 2 + self._B0)))
+
+
+class SubramaniAero(Aero):
+
+    def __init__(self, factor=1):
+        super().__init__()
+        self.factor = factor
+        self.v_max = 1
+        self.v_min = 0.2
+        self.v_minp = 0.2
+        self.mode += 'subramani'
+
+    def power(self, asp):
+        return self.factor * asp ** 2
+
+    def d_power(self, asp):
+        return 2 * self.factor * asp
+
+    def asp_opti(self, adjoint):
+        pn = np.linalg.norm(adjoint)
+        return 1 / (2 * self.factor) * pn

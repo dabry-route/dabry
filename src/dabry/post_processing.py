@@ -11,7 +11,7 @@ import numpy as np
 from numpy import arctan2 as atan2
 from numpy import sin, ndarray
 
-from dabry.aero import LLAero, Aero, MermozAero
+from dabry.aero import LLAero, Aero, MermozAero, SubramaniAero
 from dabry.misc import Utils
 from dabry.wind import DiscreteWind
 
@@ -122,10 +122,12 @@ class PostProcessing:
             except KeyError:
                 self.aero_mode = 'dobro'
 
-        if self.aero_mode in ['dobro', 'dabry']:
+        if self.aero_mode in ['dobro', 'mermoz']:
             self.aero = LLAero(mode=self.aero_mode)
         elif self.aero_mode == 'mermoz_fitted':
             self.aero = MermozAero()
+        elif self.aero_mode == 'subramani':
+            self.aero = SubramaniAero()
         else:
             raise Exception(f'Unknown aero {self.aero_mode}')
 
@@ -136,40 +138,42 @@ class PostProcessing:
         self.trajs = []
 
     def load(self):
-        traj_fp = os.path.join(self.output_dir, self.traj_fn)
-        f = h5py.File(traj_fp, "r")
-        for k, traj in enumerate(f.values()):
-            # Filter extremal fields
-            if 'info' in traj.attrs.keys() and 'ef_' in traj.attrs['info']:
-                continue
-            _traj = {}
-            _traj['data'] = np.zeros(traj['data'].shape)
-            _traj['data'][:] = traj['data']
-            _traj['controls'] = np.zeros(traj['controls'].shape)
-            _traj['controls'][:] = traj['controls']
-            _traj['ts'] = np.zeros(traj['ts'].shape)
-            _traj['ts'][:] = traj['ts']
-            if _traj['ts'].shape[0] == 0:
-                continue
-            if 'adjoints' in traj.keys():
-                _traj['adjoints'] = np.zeros(traj['adjoints'].shape)
-                _traj['adjoints'][:] = traj['adjoints']
+        for filename in os.listdir(self.output_dir):
+            if 'trajectories' in filename:
+                traj_fp = os.path.join(self.output_dir, filename)
+                f = h5py.File(traj_fp, "r")
+                for k, traj in enumerate(f.values()):
+                    # Filter extremal fields
+                    if 'info' in traj.attrs.keys() and 'ef_' in traj.attrs['info']:
+                        continue
+                    _traj = {}
+                    _traj['data'] = np.zeros(traj['data'].shape)
+                    _traj['data'][:] = traj['data']
+                    _traj['controls'] = np.zeros(traj['controls'].shape)
+                    _traj['controls'][:] = traj['controls']
+                    _traj['ts'] = np.zeros(traj['ts'].shape)
+                    _traj['ts'][:] = traj['ts']
+                    if _traj['ts'].shape[0] == 0:
+                        continue
+                    if 'adjoints' in traj.keys():
+                        _traj['adjoints'] = np.zeros(traj['adjoints'].shape)
+                        _traj['adjoints'][:] = traj['adjoints']
 
-            _traj['type'] = traj.attrs['type']
-            _traj['last_index'] = traj.attrs['last_index']
-            _traj['interrupted'] = traj.attrs['interrupted']
-            _traj['coords'] = traj.attrs['coords']
-            _traj['label'] = traj.attrs['label']
-            try:
-                _traj['info'] = traj.attrs['info']
-            except KeyError:
-                # Backward compatibility
-                _traj['info'] = ""
-            if 'airspeed' in traj.keys():
-                _traj['airspeed'] = np.zeros(traj['airspeed'].shape)
-                _traj['airspeed'][:] = traj['airspeed']
-            self.trajs.append(_traj)
-        f.close()
+                    _traj['type'] = traj.attrs['type']
+                    _traj['last_index'] = traj.attrs['last_index']
+                    _traj['interrupted'] = traj.attrs['interrupted']
+                    _traj['coords'] = traj.attrs['coords']
+                    _traj['label'] = traj.attrs['label']
+                    try:
+                        _traj['info'] = traj.attrs['info']
+                    except KeyError:
+                        # Backward compatibility
+                        _traj['info'] = ""
+                    if 'airspeed' in traj.keys():
+                        _traj['airspeed'] = np.zeros(traj['airspeed'].shape)
+                        _traj['airspeed'][:] = traj['airspeed']
+                    self.trajs.append(_traj)
+                f.close()
 
     def stats(self):
         fig, ax = plt.subplots(ncols=3, nrows=2, figsize=(12, 8))
@@ -277,11 +281,12 @@ class PostProcessing:
         colors = [PostProcessing.path_colors[k % len(PostProcessing.path_colors)] for k in range(len(energies))]
         markers = list(map(lambda x: 'o' if np.bool(x[2]) else 'x', ets.values()))
         for k, t in enumerate(times):
-            ax.scatter(t, energies[k], c=colors[k], marker=markers[k])
+            color = 'red' if 'm0' in self.trajs[k]['info'] else 'blue'
+            ax.scatter(t, energies[k], c=color, marker=markers[k])
         for k in ets.keys():
             ax.annotate(self.trajs[k]['info'], (ets[k][1] / 3.6e3, ets[k][0] / 3.6e6), fontsize=8)
-        v_minp = (1000 / (3 * 0.05)) ** (1 / 4)
-        p_min = 0.05 * v_minp ** 3 + 1000 / v_minp
+        v_minp = self.aero.v_minp # (1000 / (3 * 0.05)) ** (1 / 4)
+        p_min = self.aero.power(self.aero.v_minp)# 0.05 * v_minp ** 3 + 1000 / v_minp
         Utils.decorate(ax, 'Energy vs. time', 'Time (h)', 'Energy (kWh)')
         x = np.linspace(5, 1.15 * max(times), 100)
         y = np.linspace(0.5, 1.15 * max(energies), 100)
@@ -289,8 +294,11 @@ class PostProcessing:
         points = zip(x, y)
         levels = p_min * (1 + np.arange(13) / 4)
         labels = {}
-        for l in levels:
-            labels[l] = f'{l / p_min:.2f}' + '$P_{min}$'
+        for k, l in enumerate(levels):
+            if k == 0:
+                labels[l] = '$P_{min}$'
+            else:
+                labels[l] = f'{int((l / p_min)*100)}%'
         cont = ax.contour(x, y, list(map(lambda p: 1e3 * p[1] / p[0], points)), levels=levels, alpha=0.5)
 
         def constant_asp_energy(l, t):

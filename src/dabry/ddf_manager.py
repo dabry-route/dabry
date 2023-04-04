@@ -111,6 +111,8 @@ class DDFmanager:
                 else:
                     trajgroup.attrs['label'] = traj.label
                 trajgroup.attrs['info'] = traj.info
+                if hasattr(traj, 'constant_asp') and traj.constant_asp is not None:
+                    trajgroup.attrs['constant_airspeed'] = traj.constant_asp
                 n = traj.last_index + 1
                 dset = trajgroup.create_dataset('data', (n, 2), dtype='f8')
                 dset[:, :] = traj.points[:n]
@@ -136,6 +138,12 @@ class DDFmanager:
                 if hasattr(traj, 'energy'):
                     dset = trajgroup.create_dataset('energy', n - 1, dtype='f8', fillvalue=0.)
                     dset[:] = traj.energy[:n - 1]
+
+    def log(self, pb, file=None):
+        self.ps.load_from_problem(pb)
+        self.ps.dump()
+        if file is not None:
+            self.save_script(file)
 
     def dump_obs(self, pb: NavigationProblem, nx=100, ny=100):
         filepath = os.path.join(self.case_dir, self.obs_filename)
