@@ -58,10 +58,10 @@ class Aero(ABC):
         :param wind_speed: Wind speed in m/s
         :return: Airspeed in m/s
         """
-        f = lambda asp: self.d_power(asp) - self.power(asp) / (asp + wind_speed)
+        f = lambda asp: (self.d_power(asp) * (asp + wind_speed) - self.power(asp))
         # return scipy.optimize.brentq(
         #     lambda asp: self.d_power(asp) - self.power(asp) / (asp + wind_speed), v_minp, 100.)
-        return f(scipy.optimize.brute(f, ((self.v_min, self.v_max),))[0])
+        return scipy.optimize.fsolve(f, (self.v_min + self.v_max)/2)[0]
 
     def asp_opti(self, adjoint):
         pn = np.linalg.norm(adjoint)

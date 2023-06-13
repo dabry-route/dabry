@@ -44,13 +44,14 @@ class EnergyAnalysis:
                 'mode': 1,
                 'pareto': self.pareto,
                 'no_coll_filtering': True,
+                'quick_solve': True,
             }
         if dt is None:
             kwargs['max_time'] = self.pb.time_scale
         else:
             kwargs['dt'] = dt
         solver = SolverEF(self.pb, **kwargs)
-        res_ef = solver.solve(verbose=0)
+        res_ef = solver.solve(verbose=2)
         chrono.stop()
         if ddf is not None:
             ddf.dump_trajs(solver.get_trajs())

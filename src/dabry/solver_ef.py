@@ -10,6 +10,7 @@ from numpy import arctan2 as atan2
 from numpy import sin, cos, pi
 from shapely.geometry import Polygon
 
+from dabry.feedback import MapFB
 from dabry.misc import Utils, Chrono
 from dabry.problem import NavigationProblem
 from dabry.trajectory import AugmentedTraj
@@ -599,7 +600,7 @@ class SolverEF:
                 self.dt = -.005 * mp.l_ref / mp.aero.v_minp
 
         if max_steps is None:
-            max_steps = int(abs(max_time/dt))
+            max_steps = int(abs(max_time / dt))
 
         # This group shall be reinitialized before new resolution
         self.active = []
@@ -629,7 +630,7 @@ class SolverEF:
         self.collbuf_shape = (50, 50) if collbuf_shape is None else collbuf_shape
         self.collbuf = CollisionBuffer()
 
-        self.reach_time = None
+        self.reach_duration = None
         self.reach_cost = None
 
         self._index_p = 0
@@ -687,7 +688,7 @@ class SolverEF:
         self.n_points = 0
         self.any_out_obs = True
         if self.mp_primal.t_init is not None:
-            t_start = self.mp_primal.t_init
+            t_start = self.mp_primal.t_init + time_offset
         else:
             t_start = self.mp_primal.model.wind.t_start + time_offset
         if not self.no_coll_filtering:
@@ -697,7 +698,7 @@ class SolverEF:
             pd = np.array((np.cos(theta), np.sin(theta)))
             pn = 1.
             if self.mode == self.MODE_ENERGY:
-                if self.asp_init is not None:
+                if self.mp.model.wind.t_end is not None:
                     asp = self.asp_init
                 else:
                     asp = self.asp_offset + self.mp.aero.asp_mlod(
@@ -800,8 +801,7 @@ class SolverEF:
         # Trimming procedure
         if self.no_coll_filtering and self.mode == 0:
             if self.it % self.trimming_rate == 0:
-                #self.trim()
-                pass
+                self.trim()
 
         self.active.clear()
         for pcl in self.new_points:
@@ -830,12 +830,12 @@ class SolverEF:
                     kw['v_a'] = self.mp.aero.asp_opti(p)
                 dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
                 A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
-                dyn_p = A.dot(p)
+                dyn_p = A.dot(p) - self.mp.penalty.d_value(x)
                 x += self.dt * dyn_x
                 p += self.dt * dyn_p
                 t += self.dt
                 # Transversality condition for debug purposes
-                a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
+                # a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
                 # For compatibility with other case
                 status = True
             else:
@@ -1056,6 +1056,7 @@ class SolverEF:
             msg = f'Stopped on extremals limit {self.max_extremals}'
         elif self.quick_solve and self.quick_traj_idx != -1:
             msg = 'Stopped quick solve'
+            self.reach_duration = self.step_algo * self.dt
         elif self.max_active_ext is not None and len(self.active) > self.max_active_ext:
             msg = 'Stopped on maximum of active extremal trajs'
         else:
@@ -1095,10 +1096,12 @@ class SolverEF:
             # First propagate forward extremals
             # Then compute backward extremals initialized at correct time
             self.set_primal(True)
+            self.quick_solve = True
             self.propagate()
             # Now than forward pass is completed, run the backward pass with correct start time
             self.set_primal(False)
-            self.propagate(time_offset=self.reach_time, verbose=verbose)
+            self.quick_solve = False
+            self.propagate(time_offset=self.reach_duration, verbose=verbose)
             res = self.build_opti_traj()
 
         chrono.stop()
@@ -1250,7 +1253,7 @@ class SolverEF:
                 adjoints = adjoints[::-1]
                 controls = controls[::-1]
             traj = AugmentedTraj(ts, points, adjoints, controls, nt - 1, self.mp.coords,
-                                 info=f'opt_m{self.mode}_{self.asp_init:.2f}',
+                                 info=f'opt_m{self.mode}_{self.asp_init:.5g}',
                                  constant_asp=self.mp.model.v_a if self.mode == 0 else None)
             btrajs[k0] = traj
         res = EFOptRes(status, bests, btrajs, self.mp_primal)
@@ -1297,3 +1300,33 @@ class SolverEF:
                                   type=Utils.TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver, energy=energy))
 
         return res
+
+    def get_control_map(self, nx, ny):
+        if len(self.ef_dual.trajs) == 0:
+            raise Exception('Dual problem not solved')
+        grid = np.dstack(np.meshgrid(np.linspace(self.mp.bl[1], self.mp.tr[1], ny),
+                                     np.linspace(self.mp.bl[0], self.mp.tr[0], nx))[::-1])
+
+        values = np.zeros((nx - 1, ny - 1))
+        costs = np.infty * np.ones((nx - 1, ny - 1))
+
+        x0 = self.mp.bl[0]
+        y0 = self.mp.bl[1]
+        x1 = self.mp.tr[0]
+        y1 = self.mp.tr[1]
+
+        def index(x):
+            xx = (x[0] - x0) / (x1 - x0)
+            yy = (x[1] - y0) / (y1 - y0)
+            return int((nx - 1) * xx), int((ny - 1) * yy)
+
+        for traj in self.ef_dual.trajs.values():
+            for pcl in traj.particles:
+                i, j = index(pcl.state)
+                if pcl.cost < costs[i, j]:
+                    costs[i, j] = pcl.cost
+                    values[i, j] = self.mp.control_angle(pcl.adjoint, pcl.state)
+
+        return MapFB(grid, values)
+
+

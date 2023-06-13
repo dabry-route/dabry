@@ -12,6 +12,7 @@ from dabry.integration import IntEulerExpl
 from dabry.misc import Utils
 from dabry.model import Model, ZermeloGeneralModel
 from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, MeanObs
+from dabry.penalty import Penalty
 from dabry.stoppingcond import StoppingCond, TimedSC, DistanceSC
 from dabry.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
     PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind, LVWind, TrapWind, ChertovskihWind
@@ -41,7 +42,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 class NavigationProblem:
 
     def __init__(self, model: Model, x_init, x_target, coords, domain=None, obstacles=None, bl=None, tr=None,
-                 autoframe=True, descr=None, time_scale=None, t_init=None, aero=None, **kwargs):
+                 autoframe=True, descr=None, time_scale=None, t_init=None, aero=None, penalty=None, **kwargs):
         self.model = model
         self.x_init = np.zeros(2)
         self.x_init[:] = x_init
@@ -109,6 +110,11 @@ class NavigationProblem:
         if len(self.obstacles) > 0:
             for obs in self.obstacles:
                 obs.update_lref(self.l_ref)
+
+        if penalty is None:
+            self.penalty = Penalty(lambda _: 0., lambda _: np.array((0, 0)))
+        else:
+            self.penalty = penalty
 
         self.frame_offset = 0.05
         if autoframe:
@@ -383,7 +389,17 @@ class IndexedProblem(NavigationProblem):
               '1obs']
 
     def __init__(self, i, seed=0):
-        name = IndexedProblem.problems[i][1]
+        if type(i) == int:
+            name = IndexedProblem.problems[i][1]
+            self.descr = IndexedProblem.problems[i][0]
+        elif type(i) == str:
+            name = i
+            for names in IndexedProblem.problems:
+                if names[1] == name:
+                    self.descr = names[0]
+                    break
+        else:
+            raise Exception(f'Unknown type for problem selection : {type(i)}')
         if name == '3vor':
             v_a = 14.11
             coords = Utils.COORD_CARTESIAN
@@ -1077,5 +1093,3 @@ class IndexedProblem(NavigationProblem):
 
         else:
             raise IndexError(f'No problem with index {i}')
-
-        self.descr = IndexedProblem.problems[i][0]

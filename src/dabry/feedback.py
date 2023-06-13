@@ -432,3 +432,26 @@ class E_GSTargetFB(MultiFeedback):
                     asp + self._heading(asp)[1] @ self.wind.value(t, x)) - self.aero.power(
                 asp), max(self.wind_ortho, self.aero.v_minp), 100.)
         return self._heading(asp_opti)[0], asp_opti
+
+
+class MapFB(Feedback):
+
+    def __init__(self, grid, values):
+        """
+        :param grid: Grid of points for discretization (nx, ny, 2)
+        :param values: Heading values on the grid (nx - 1, ny - 1)
+        """
+        self.grid = np.array(grid)
+        self.values = np.array(values)
+        super().__init__(2, UniformWind(np.array((0, 0))))
+
+    def value(self, _, x):
+
+        xx = (x[0] - self.grid[0, 0, 0]) / (self.grid[-1, 0, 0] - self.grid[0, 0, 0])
+        yy = (x[1] - self.grid[0, 0, 1]) / (self.grid[0, -1, 1] - self.grid[0, 0, 1])
+
+        nx, ny, _ = self.grid.shape
+        i = int((nx - 1) * xx)
+        j = int((ny - 1) * yy)
+
+        return self.values[i, j]

@@ -157,7 +157,7 @@ if __name__ == '__main__':
 
         chrono.start('Optimal trajectory Extremals')
         pb.load_feedback(FunFB(solver.control))
-        sc = TimedSC(pb.model.wind.t_start + solver.reach_time)
+        sc = TimedSC(pb.model.wind.t_start + solver.reach_duration)
         traj = pb.integrate_trajectory(pb.x_init, sc, int_step=reach_time / iit, t_init=pb.model.wind.t_start)
         traj.type = Utils.TRAJ_OPTIMAL
         traj.info = f'Extremals_{v_a:.2f}'

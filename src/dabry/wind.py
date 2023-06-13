@@ -447,7 +447,9 @@ class DiscreteWind(Wind):
             else:
                 self.compute_derivatives()
 
-    def load_from_cds(self, wind_db_path, bl, tr, t_start=None, t_end=None):
+    def load_from_cds(self, wind_db_path, bl, tr, t_start=None, t_end=None, i_member=None):
+
+        single_frame = abs(t_start - t_end) < 60
 
         # Get grid
         lon_b = Utils.rectify(bl[0], tr[0])
@@ -458,30 +460,24 @@ class DiscreteWind(Wind):
         grb_u = grb.select(name='U component of wind')
         if lon_b[1] > 360:
             # Has to extract in two steps
-            ny, nx1 = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[1].shape
-            _, nx2 = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[1].shape
+            data1 = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)
+            data2 = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)
+            ny, nx1 = data1[1].shape
+            _, nx2 = data2[1].shape
             self.ny = ny
             self.nx = nx1 + nx2
-            lons1 = Utils.DEG_TO_RAD * \
-                    Utils.to_m180_180(
-                        grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[2]).transpose()
-            lons2 = Utils.DEG_TO_RAD * \
-                    Utils.to_m180_180(
-                        grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[2]).transpose()
-            lats1 = Utils.DEG_TO_RAD * \
-                    grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[1].transpose()
-            lats2 = Utils.DEG_TO_RAD * \
-                    grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[1].transpose()
+            lons1 = Utils.DEG_TO_RAD * Utils.to_m180_180(data1[2]).transpose()
+            lons2 = Utils.DEG_TO_RAD * Utils.to_m180_180(data2[2]).transpose()
+            lats1 = Utils.DEG_TO_RAD * data1[1].transpose()
+            lats2 = Utils.DEG_TO_RAD * data2[1].transpose()
             lons = np.concatenate((lons1, lons2))
             lats = np.concatenate((lats1, lats2))
 
         else:
-            self.ny, self.nx = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[1].shape
-            lons = Utils.DEG_TO_RAD * \
-                   Utils.to_m180_180(
-                       grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[2]).transpose()
-            lats = Utils.DEG_TO_RAD * \
-                   grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[1].transpose()
+            data = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
+            self.ny, self.nx = data[1].shape
+            lons = Utils.DEG_TO_RAD * Utils.to_m180_180(data[2]).transpose()
+            lats = Utils.DEG_TO_RAD * data[1].transpose()
         self.grid = np.zeros((self.nx, self.ny, 2))
 
         self.grid[:, ::-1, 0] = lons
@@ -499,16 +495,24 @@ class DiscreteWind(Wind):
         startd_rounded = datetime(start_date.year, start_date.month, start_date.day, 3 * (start_date.hour // 3), 0)
         stopd_rounded = datetime(stop_date.year, stop_date.month, stop_date.day, 0, 0) + timedelta(
             hours=3 * (1 + (stop_date.hour // 3)))
+        one = False
         for wind_file in tqdm(sorted(os.listdir(wind_db_path))):
             wind_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
             if wind_date < start_date_rounded:
                 continue
             if wind_date >= stop_date_rounded:
                 continue
+            if one and single_frame:
+                break
             grb = pygrib.open(os.path.join(wind_db_path, wind_file))
             grb_u = grb.select(name='U component of wind')
             grb_v = grb.select(name='V component of wind')
-            for i in range(len(grb_u)):
+            if i_member is None:
+                r = range(len(grb_u))
+            else:
+                fr_time = len(grb_u) // 10
+                r = [i_member + i * 10 for i in range(fr_time)]
+            for i in r:
                 date = f'{grb_u[i]["date"]:0>8}'
                 hours = f'{grb_u[i]["time"]:0>4}'
                 t = datetime(int(date[:4]), int(date[4:6]), int(date[6:8]),
@@ -517,6 +521,9 @@ class DiscreteWind(Wind):
                     continue
                 if t > stopd_rounded:
                     continue
+                if one and single_frame:
+                    break
+                one = True
                 uv = np.zeros((self.nx, self.ny, 2))
                 if lon_b[1] > 360:
                     U1 = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[0].transpose()
@@ -541,7 +548,7 @@ class DiscreteWind(Wind):
 
         self.compute_derivatives()
         self.t_start = self.ts[0]
-        self.t_end = self.ts[-1]
+        self.t_end = None if single_frame else self.ts[-1]
 
     def value(self, t, x, units=Utils.U_METERS):
         """
