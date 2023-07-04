@@ -572,7 +572,8 @@ class SolverEF:
                  no_coll_filtering=False,
                  quick_solve=False,
                  pareto=None,
-                 max_active_ext=None):
+                 max_active_ext=None,
+                 no_transversality=False):
         self.mp_primal = mp
         self.mp_dual = NavigationProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
@@ -611,6 +612,7 @@ class SolverEF:
         self.lsets = []
         self.rel = Relations()
         self.n_points = 0
+        self.no_transversality = no_transversality
 
         self.max_active_ext = max_active_ext
 
@@ -698,7 +700,7 @@ class SolverEF:
             pd = np.array((np.cos(theta), np.sin(theta)))
             pn = 1.
             if self.mode == self.MODE_ENERGY:
-                if self.mp.model.wind.t_end is not None:
+                if self.mp.model.wind.t_end is not None or self.no_transversality:
                     asp = self.asp_init
                 else:
                     asp = self.asp_offset + self.mp.aero.asp_mlod(

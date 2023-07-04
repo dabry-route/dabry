@@ -400,11 +400,17 @@ class Utils:
         x = det(d, xdiff) / div
         y = det(d, ydiff) / div
         if b[1] - a[1] < 1e-5 * ref_dim:
-            t_ab = (x - a[0]) / (b[0] - a[0])
+            if b[0] - a[0] < 1e-5 * ref_dim:
+                t_ab = 0.
+            else:
+                t_ab = (x - a[0]) / (b[0] - a[0])
         else:
             t_ab = (y - a[1]) / (b[1] - a[1])
         if d[1] - c[1] < 1e-5 * ref_dim:
-            t_cd = (x - c[0]) / (d[0] - c[0])
+            if d[0] - c[0] < 1e-5 * ref_dim:
+                t_cd = 0.
+            else:
+                t_cd = (x - c[0]) / (d[0] - c[0])
         else:
             t_cd = (y - c[1]) / (d[1] - c[1])
         return (x, y), t_ab, t_cd
