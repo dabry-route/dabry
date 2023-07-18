@@ -38,6 +38,9 @@ if __name__ == '__main__':
 
     parser_idpb = subparsers.add_parser('case', help='Solve a given case from reference problems')
     parser_idpb.add_argument('test_id', default=-1, help='Problem id (int) or name (string)')
+    parser_idpb.add_argument('--airspeed', nargs='?', help='Vehicle speed relative to the flow in m/s', default=None)
+    parser_idpb.add_argument('--energy', action='store_const', const=True, default=False,
+                             help='(EXPERIMENTAL) Solve energy-optimal problem')
 
     parser_real = subparsers.add_parser('real', help='Solve a given case from real data')
     parser_real.add_argument('x_init_lon', help='Initial point longitude in degrees')
@@ -73,8 +76,10 @@ if __name__ == '__main__':
         ddf.set_case(f'{pb_name}')
         ddf.clean_output_dir()
         pb = IndexedProblem(_pb_id)
+        if args.airspeed is not None:
+            pb.update_airspeed(float(args.airspeed))
         t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.v_a
-        solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=1)
+        solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=1, mode=args.energy)
         res = solver_ef.solve(verbose=2)
         ddf.dump_wind(pb.model.wind, nx=101, ny=101, nt=10, bl=pb.bl, tr=pb.tr, coords=pb.coords)
         extremals = solver_ef.get_trajs()

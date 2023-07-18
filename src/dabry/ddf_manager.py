@@ -12,6 +12,7 @@ import pyproj
 
 from dabry.misc import Utils
 from dabry.params_summary import ParamsSummary
+from dabry.penalty import Penalty, DiscretePenalty
 from dabry.problem import NavigationProblem
 from dabry.wind import Wind, DiscreteWind
 
@@ -50,6 +51,7 @@ class DDFmanager:
         self.trajs_filename = 'trajectories.h5'
         self.wind_filename = 'wind.h5'
         self.obs_filename = 'obs.h5'
+        self.pen_filename = 'penalty.h5'
         self.case_name = None
         self.ps = ParamsSummary()
         self.cache_wind = cache_wind
@@ -224,6 +226,19 @@ class DDFmanager:
             dset = f.create_dataset('grid', (dwind.nx, dwind.ny, 2), dtype='f8')
             dset[:] = dwind.grid
 
+    def dump_penalty(self, penalty: DiscretePenalty):
+        filepath = os.path.join(self.case_dir, self.pen_filename)
+        with h5py.File(filepath, 'w') as f:
+            f.attrs['coords'] = 'gcs'
+            f.attrs['units_grid'] = Utils.U_RAD
+            dset = f.create_dataset('data', penalty.data.shape, dtype='f8')
+            dset[:] = penalty.data
+            dset = f.create_dataset('ts', penalty.ts.shape, dtype='f8')
+            dset[:] = penalty.ts
+            dset = f.create_dataset('grid', penalty.grid.shape, dtype='f8')
+            dset[:] = penalty.grid
+
+
     def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Utils.COORD_GCS):
         if coords == Utils.COORD_CARTESIAN:
             print('Cartesian conversion not handled yet', file=sys.stderr)
@@ -373,7 +388,7 @@ class DDFmanager:
             # server = ECMWFDataServer()
             server = cdsapi.Client()
             kwargs = {
-                "variable": ['u_component_of_wind', 'v_component_of_wind'],
+                "variable": ['u_component_of_wind', 'v_component_of_wind', 'specific_rain_water_content'],
                 "pressure_level": level,
                 "product_type": "reanalysis",
                 "year": day_required[:4],

@@ -112,7 +112,7 @@ class NavigationProblem:
                 obs.update_lref(self.l_ref)
 
         if penalty is None:
-            self.penalty = Penalty(lambda _: 0., lambda _: np.array((0, 0)))
+            self.penalty = Penalty(lambda _, __: 0., lambda _, __: np.array((0, 0)))
         else:
             self.penalty = penalty
 
