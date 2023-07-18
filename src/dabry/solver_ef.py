@@ -5,10 +5,11 @@ import sys
 import h5py
 import numpy as np
 import scipy.integrate
+from alphashape import alphashape
 from numpy import arcsin as asin
 from numpy import arctan2 as atan2
 from numpy import sin, cos, pi
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, Point
 
 from dabry.feedback import MapFB
 from dabry.misc import Utils, Chrono
@@ -658,6 +659,9 @@ class SolverEF:
 
         self.trimming_rate = 10
 
+        # Parameter for alpha shapes in the trimming procedure
+        self.alpha_value = 1 / (0.05 * self.mp.l_ref)
+
     def set_primal(self, b):
         self.mode_primal = b
         if b:
@@ -801,8 +805,8 @@ class SolverEF:
             self.rel.add(pcl_new.idf, idf, iu)
 
         # Trimming procedure
-        if self.no_coll_filtering and self.mode == 0:
-            if self.it % self.trimming_rate == 0:
+        if self.no_coll_filtering:  # and self.mode == 0:
+            if self.it > 1 and self.it % self.trimming_rate == 0:
                 self.trim()
 
         self.active.clear()
@@ -832,7 +836,7 @@ class SolverEF:
                     kw['v_a'] = self.mp.aero.asp_opti(p)
                 dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
                 A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
-                dyn_p = A.dot(p) - self.mp.penalty.d_value(x)
+                dyn_p = A.dot(p) - self.mp.penalty.d_value(t, x)
                 x += self.dt * dyn_x
                 p += self.dt * dyn_p
                 t += self.dt
@@ -986,49 +990,78 @@ class SolverEF:
                 if stop:
                     break
 
-    def trim(self):
-        comps = self.rel.components(free_only=True)
-        for comp in comps:
-            if len(comp) == 0:
-                continue
-            cyclic = comp[0] == comp[-1]
-            n_edges = len(comp) - 1
-            intersec = []
-            for i in range(n_edges):
-                for j in range(i + 2, n_edges):
-                    if cyclic and i == 0 and j == n_edges - 1:
-                        continue
-                    pcl1 = self.ef.trajs[comp[i]].get_last()
-                    pcl2 = self.ef.trajs[comp[i + 1]].get_last()
-                    pcl3 = self.ef.trajs[comp[j]].get_last()
-                    pcl4 = self.ef.trajs[comp[j + 1]].get_last()
-                    if Utils.has_intersec(pcl1.state, pcl2.state, pcl3.state, pcl4.state):
-                        s, _, _ = Utils.intersection(pcl1.state, pcl2.state, pcl3.state, pcl4.state)
-                        v1 = 1 / self.mp.distance(pcl1.state, s)
-                        v2 = 1 / self.mp.distance(pcl4.state, s)
-                        alpha = v1 / (v1 + v2)
-                        state = alpha * pcl1.state + (1 - alpha) * pcl4.state
-                        adjoint = alpha * pcl1.adjoint + (1 - alpha) * pcl4.adjoint
-                        cost = alpha * pcl1.cost + (1 - alpha) * pcl4.cost
+    def trim(self, method=1):
+        if method == 0:
+            comps = self.rel.components(free_only=True)
+            for comp in comps:
+                if len(comp) == 0:
+                    continue
+                cyclic = comp[0] == comp[-1]
+                n_edges = len(comp) - 1
+                intersec = []
+                for i in range(n_edges):
+                    for j in range(i + 2, n_edges):
+                        if cyclic and i == 0 and j == n_edges - 1:
+                            continue
+                        pcl1 = self.ef.trajs[comp[i]].get_last()
+                        pcl2 = self.ef.trajs[comp[i + 1]].get_last()
+                        pcl3 = self.ef.trajs[comp[j]].get_last()
+                        pcl4 = self.ef.trajs[comp[j + 1]].get_last()
+                        if Utils.has_intersec(pcl1.state, pcl2.state, pcl3.state, pcl4.state):
+                            s, _, _ = Utils.intersection(pcl1.state, pcl2.state, pcl3.state, pcl4.state)
+                            v1 = 1 / self.mp.distance(pcl1.state, s)
+                            v2 = 1 / self.mp.distance(pcl4.state, s)
+                            alpha = v1 / (v1 + v2)
+                            state = alpha * pcl1.state + (1 - alpha) * pcl4.state
+                            adjoint = alpha * pcl1.adjoint + (1 - alpha) * pcl4.adjoint
+                            cost = alpha * pcl1.cost + (1 - alpha) * pcl4.cost
 
-                        pcl = Particle(pcl1.idf, pcl1.idt, pcl1.t, state, adjoint, cost)
-                        self.ef.new_traj_between(comp[i], comp[j + 1], pcl1.idt, pcl_new=pcl)
+                            pcl = Particle(pcl1.idf, pcl1.idt, pcl1.t, state, adjoint, cost)
+                            self.ef.new_traj_between(comp[i], comp[j + 1], pcl1.idt, pcl_new=pcl)
 
-                        intersec.append((i, j, pcl))
+                            intersec.append((i, j, pcl))
 
-            def clen(i, j):
-                if j < i:
-                    j += n_edges
-                return j - i
+                def clen(i, j):
+                    if j < i:
+                        j += n_edges
+                    return j - i
 
-            if len(comps) == 1:
-                intersec = sorted(intersec, key=lambda e: clen(e[0], e[1]))[:-1]
-            for i, j, pcl in intersec:
-                for k in range(i + 1, j + 1):
-                    self.rel.deactivate(comp[k], reason='trimming')
-                self.new_points.append(pcl)
-                self.rel.add(pcl.idf, comp[i], comp[j + 1], force=True)
-                self.ef.add(pcl)
+                if len(comps) == 1:
+                    intersec = sorted(intersec, key=lambda e: clen(e[0], e[1]))[:-1]
+                for i, j, pcl in intersec:
+                    for k in range(i + 1, j + 1):
+                        self.rel.deactivate(comp[k], reason='trimming')
+                    self.new_points.append(pcl)
+                    self.rel.add(pcl.idf, comp[i], comp[j + 1], force=True)
+                    self.ef.add(pcl)
+
+        elif method == 1:
+            if self.mode == 0:
+                pcls = []
+                for traj in self.ef.trajs.values():
+                    for pcl in traj.particles[-20:]:
+                        pcls.append(pcl)
+
+                # In case of GCS points (lon, lat), multiply by Earth radius
+                # to build alpha shape in plate-carree projection space
+                factor = Utils.EARTH_RADIUS if self.mp.coords == Utils.COORD_GCS else 1.
+                points = [factor * pcl.state for pcl in pcls]
+                hull = alphashape(points, self.alpha_value)
+                for pcl in self.new_points:
+                    if hull.boundary.distance(Point(factor * pcl.state)) > 2 * self.abs_nb_ceil:
+                        self.rel.deactivate(pcl.idf, reason='Hull')
+            elif self.mode == 1:
+                raise Exception('Implementation not validated yet')
+                pcls = []
+                for traj in self.ef.trajs.values():
+                    for pcl in traj.particles[-20:]:
+                        pcls.append(pcl)
+
+                points = [(pcl.state[0], pcl.state[1], pcl.cost) for pcl in pcls]
+                hull = alphashape(points, 1 / (0.05 * 1e6))
+                for pcl in self.new_points:
+                    if hull.boundary.distance(Point(pcl.state)) > 2 * self.abs_nb_ceil:
+                        self.rel.deactivate(pcl.idf, reason='Hull')
 
     def exit_cond(self):
         return len(self.active) == 0 or \
@@ -1330,5 +1363,3 @@ class SolverEF:
                     values[i, j] = self.mp.control_angle(pcl.adjoint, pcl.state)
 
         return MapFB(grid, values)
-
-

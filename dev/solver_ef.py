@@ -41,6 +41,7 @@ if __name__ == '__main__':
 
     # Create problem
     # mdfm.dump_wind_from_grib2(grib_fps, bl, tr)
+    # mdfm.dump_wind_from_grib2(grib_fps, bl, tr)
     # pb = DatabaseProblem('/home/bastien/Documents/data/wind/ncdc/tmp.mz/wind.h5')
     if dbpb is not None:
         pb = DatabaseProblem(os.path.join('/home/bastien/Documents/data/wind/ncdc/', dbpb, 'wind.h5'), airspeed=23.)

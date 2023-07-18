@@ -1,4 +1,6 @@
+import h5py
 import numpy as np
+from scipy.interpolate import RegularGridInterpolator
 
 """
 penalty.py
@@ -30,12 +32,63 @@ class Penalty:
         if d_value_func is not None:
             self.d_value = d_value_func
 
-    def value(self, x):
+    def value(self, t, x):
         pass
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         # Finite differencing by default
         dx = self._dx
-        a1 = 1 / (2 * dx) * (self.value(x + dx * np.array((1, 0))) - self.value(x - dx * np.array((1, 0))))
-        a2 = 1 / (2 * dx) * (self.value(x + dx * np.array((0, 1))) - self.value(x - dx * np.array((0, 1))))
-        return np.array((a1, a2))
+        a1 = 1 / (2 * dx) * (self.value(t, x + dx * np.array((1, 0))) - self.value(t ,x - dx * np.array((1, 0))))
+        a2 = 1 / (2 * dx) * (self.value(t, x + dx * np.array((0, 1))) - self.value(t, x - dx * np.array((0, 1))))
+        return np.hstack((a1, a2))
+
+
+class CirclePenalty(Penalty):
+
+    def __init__(self, x_center, radius, amplitude):
+        super().__init__(self.value)
+        self.x_center = np.array(x_center)
+        self.radius = radius
+        self.amplitude = amplitude
+
+    def value(self, t, x):
+        return np.max((self.amplitude * 0.5 * (self.radius ** 2 - (x - self.x_center) @ (x - self.x_center)), 0.))
+
+
+class DiscretePenalty(Penalty):
+
+    def __init__(self, *args):
+        super().__init__(self.value)
+        self.data = None
+        self.ts = None
+        self.grid = None
+        self.itp = None
+        if len(args) != 0:
+            if len(args) != 3:
+                raise Exception('Requires 3 arguments : data, timestamps, grid')
+            data, ts, grid = args[0], args[1], args[2]
+            self.data = np.array(data)
+            self.ts = np.array(ts)
+            self.grid = np.array(grid)
+            self._setup()
+
+    def value(self, t, x):
+        u = np.zeros(3)
+        u[0] = t
+        u[1:] = x
+        return self.itp(u)
+
+    def _setup(self):
+        nx, ny, _ = self.grid.shape
+        x = np.zeros(nx)
+        y = np.zeros(ny)
+        x[:] = self.grid[:, 0, 0]
+        y[:] = self.grid[0, :, 1]
+        self.itp = RegularGridInterpolator((self.ts, x, y), self.data, method='linear', bounds_error=False, fill_value=0.)
+
+    def load(self, filepath):
+        with h5py.File(filepath, 'r') as f:
+            self.data = np.array(f['data'])
+            self.ts = np.array(f['ts'])
+            self.grid = np.array(f['grid'])
+        self._setup()
