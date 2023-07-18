@@ -5,10 +5,10 @@ import sys
 import h5py
 import numpy as np
 import scipy.integrate
+from alphashape import alphashape
 from numpy import arcsin as asin
 from numpy import arctan2 as atan2
 from numpy import sin, cos, pi
-from alphashape import alphashape
 from shapely.geometry import Polygon, Point
 
 from dabry.feedback import MapFB
@@ -469,6 +469,127 @@ class Relations:
         return comp
 
 
+class TriRel:
+
+    def __init__(self):
+
+        self.rel = {}
+        self.active = []
+        self.captive = []
+        self.deact_reason = {}
+        # Store only index of left-hand member of dead relation
+        self.dead_links = set()
+
+    def fill(self, members):
+        """
+        :param members: List of sorted int ids representing the initial cycle.
+        Relationships go like 0 <-> 1 <-> 2 <-> ... <-> n-1 and n-1 <-> 0
+        """
+        for k, m in enumerate(members):
+            self.rel[m] = (members[(k - 1) % len(members)], members[(k + 1) % len(members)])
+        self.active = [m for m in members]
+
+    def linked(self, i1, i2):
+        if i2 in self.rel[i1]:
+            return True
+        else:
+            return False
+
+    def add(self, i, il, iu, force=False):
+        if not self.linked(il, iu) and not force:
+            print('Trying to add member between non-linked members', file=sys.stderr)
+            exit(1)
+        o_ill, _ = self.rel[il]
+        _, o_iuu = self.rel[iu]
+        self.rel[il] = o_ill, i
+        self.rel[iu] = i, o_iuu
+        self.rel[i] = il, iu
+        self.active.append(i)
+
+    def remove(self, i):
+        il, iu = self.rel[i]
+        del self.rel[i]
+        o_ill, _ = self.rel[il]
+        _, o_iuu = self.rel[iu]
+        self.rel[il] = o_ill, iu
+        self.rel[iu] = il, o_iuu
+        if self.is_active(i):
+            self.active.remove(i)
+
+    def get(self, i):
+        return self.rel[i]
+
+    def get_index(self):
+        return list(self.rel.keys())[0]
+
+    def deactivate(self, i, reason=''):
+        if i in self.active:
+            self.active.remove(i)
+            self.deact_reason[i] = reason
+
+    def set_captive(self, i):
+        self.captive.append(i)
+
+    def deact_link(self, i1, i2):
+        i1l, i1u = self.get(i1)
+        if i2 == i1u:
+            self.dead_links.add(i1)
+        else:
+            self.dead_links.add(i2)
+
+    def is_active(self, i):
+        return i in self.active
+
+    def components(self, free_only=False):
+        comp = [[]]
+        icomp = 0
+        if len(self.active) == 0:
+            return []
+        i = i0 = self.active[0]
+        k = 1
+        # while i in self.dead_links:
+        #     i = i0 = self.active[k]
+        #     k += 1
+        i_active = True
+        i_captive = False
+        comp[icomp].append(i)
+        _, j = self.get(i)
+        in_comp = True
+        start = True
+        # print(f'\n{i0}')
+        i1, i2 = self.get(i0)
+        # print(i1, i2)
+        # print(self.get(i1))
+        # print(self.get(i2))
+        s = set()
+        s2 = set()
+        while i != i0 or start:
+            s.add(j)
+            if s == s2:
+                # print(s)
+                # print(j)
+                # print(self.get(j))
+                raise Exception('')
+            start = False
+            j_active = j in self.active
+            j_captive = j in self.captive
+            if i_active and j_active and (i not in self.dead_links) and \
+                    ((not free_only) or (not i_captive and not j_captive)):
+                if not in_comp:
+                    icomp += 1
+                    comp.append([])
+                comp[icomp].append(j)
+                in_comp = True
+            else:
+                in_comp = False
+            i_active = j_active
+            i_captive = j_captive
+            i = j
+            s2.add(j)
+            _, j = self.get(i)
+        return comp
+
+
 class CollisionBuffer:
     """
     Discretize space and keep trace of trajectories to compute collisions efficiently
@@ -805,7 +926,7 @@ class SolverEF:
             self.rel.add(pcl_new.idf, idf, iu)
 
         # Trimming procedure
-        if self.no_coll_filtering:# and self.mode == 0:
+        if self.no_coll_filtering:  # and self.mode == 0:
             if self.it > 1 and self.it % self.trimming_rate == 0:
                 self.trim()
 
@@ -1048,7 +1169,7 @@ class SolverEF:
                 points = [factor * pcl.state for pcl in pcls]
                 hull = alphashape(points, self.alpha_value)
                 for pcl in self.new_points:
-                    if hull.boundary.distance(Point(factor * pcl.state)) > 2*self.abs_nb_ceil:
+                    if hull.boundary.distance(Point(factor * pcl.state)) > 2 * self.abs_nb_ceil:
                         self.rel.deactivate(pcl.idf, reason='Hull')
             elif self.mode == 1:
                 raise Exception('Implementation not validated yet')

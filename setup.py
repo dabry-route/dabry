@@ -8,7 +8,8 @@ setup(
     author_email='bastien.schnitzler@live.fr',
     packages=find_packages('src'),  # same as name
     package_dir={'': 'src'},
-    install_requires=['ambiance',
+    install_requires=['alphashape',
+                      'ambiance',
                       'basemap',
                       'cdsapi',
                       'geopy',
