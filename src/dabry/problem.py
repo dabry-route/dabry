@@ -391,12 +391,12 @@ class IndexedProblem(NavigationProblem):
     def __init__(self, i, seed=0):
         if type(i) == int:
             name = IndexedProblem.problems[i][1]
-            self.descr = IndexedProblem.problems[i][0]
+            descr = IndexedProblem.problems[i][0]
         elif type(i) == str:
             name = i
             for names in IndexedProblem.problems:
                 if names[1] == name:
-                    self.descr = names[0]
+                    descr = names[0]
                     break
         else:
             raise Exception(f'Unknown type for problem selection : {type(i)}')
@@ -1093,3 +1093,5 @@ class IndexedProblem(NavigationProblem):
 
         else:
             raise IndexError(f'No problem with index {i}')
+
+        self.descr = descr

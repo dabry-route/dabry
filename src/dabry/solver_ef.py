@@ -1,15 +1,16 @@
 import csv
 import os
 import sys
+from abc import ABC
 
 import h5py
 import numpy as np
 import scipy.integrate
 from alphashape import alphashape
-from numpy import arcsin as asin
+from numpy import arcsin as asin, ndarray
 from numpy import arctan2 as atan2
 from numpy import sin, cos, pi
-from shapely.geometry import Polygon, Point
+from shapely.geometry import Point
 
 from dabry.feedback import MapFB
 from dabry.misc import Utils, Chrono
@@ -285,7 +286,7 @@ class EFOptRes:
         return self.trajs[self.min_cost_idx]
 
 
-class ExtremalField:
+class ExtremalField(ABC):
 
     def __init__(self):
         self.trajs = {}
@@ -302,22 +303,6 @@ class ExtremalField:
         self.index += 1
         return i
 
-    def setup(self, N, t_start, x_init):
-        for k in range(N):
-            theta = 2 * np.pi * k / N
-            p = np.array((np.cos(theta), np.sin(theta)))
-            """
-            if self.mode == self.MODE_ENERGY:
-                if self.mp.model.wind.t_end is not None or self.no_transversality:
-                    asp = self.asp_init
-                else:
-                    asp = self.asp_offset + self.mp.aero.asp_mlod(
-                        -pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
-                pn = self.mp.aero.d_power(asp)
-            """
-            pcl = Particle(k, 0, t_start, x_init, p, 0.)
-            self.new_traj(pcl, p)
-
     def new_traj(self, pcl: Particle, p_init):
         """
         Create new initial trajectory
@@ -327,24 +312,6 @@ class ExtremalField:
         self.p_inits[i] = np.zeros(2)
         self.p_inits[i][:] = p_init
         self.active.append(i)
-
-    def new_traj_between(self, i1, i2, idt, pcl_new=None):
-        pcl1 = self.trajs[i1][idt]
-        pcl2 = self.trajs[i2][idt]
-
-        i_new = self.index
-        if pcl_new is None:
-            state = 0.5 * (pcl1.state + pcl2.state)
-            cost = 0.5 * (pcl1.cost + pcl2.cost)
-            adjoint = 0.5 * (pcl1.adjoint + pcl2.adjoint)
-            pcl_new = Particle(i_new, idt, pcl1.t, state, adjoint, cost)
-        else:
-            pcl_new.idf = i_new
-
-        self.trajs[i_new] = PartialTraj(pcl_new.idt, [pcl_new])
-        self.parents[i_new] = (i1, i2)
-        self.index += 1
-        return pcl_new
 
     def add(self, pcl: Particle):
         """
@@ -362,15 +329,15 @@ class ExtremalField:
         except KeyError:
             return None, None
 
-    def empty(self):
-        return len(self.trajs.keys()) == 0
-
     def get_init_adjoint(self, i):
         if i not in self.parents.keys():
             return self.p_inits[i]
         else:
             p1, p2 = self.parents[i]
             return 0.5 * (self.get_init_adjoint(p1) + self.get_init_adjoint(p2))
+
+    def empty(self):
+        return len(self.trajs.keys()) == 0
 
     def get_nb(self, i):
         nb = []
@@ -399,6 +366,78 @@ class ExtremalField:
             res.append(self.trajs[i].get_last())
         return res
 
+    def new_traj_between(self, i1, i2, idt, pcl_new=None):
+        pass
+
+    def setup(self, *args):
+        pass
+
+    def prune(self):
+        pass
+
+
+class Edge:
+
+    def __init__(self, i1, i2):
+        self.i1, self.i2 = (i1, i2) if i1 < i2 else (i2, i1)
+        self._i1, self._i2 = (i1, i2) if i1 < i2 else (i2, i1)
+
+    def __eq__(self, other):
+        if not isinstance(other, Edge):
+            return False
+        return self._i1 == other._i1 and self._i2 == other._i2
+
+    def first(self):
+        return self.i1
+
+    def second(self):
+        return self.i2
+
+
+class ExtremalField2D(ExtremalField):
+
+    def __init__(self):
+        super().__init__()
+
+    def setup(self, N, t_start, x_init):
+        for k in range(N):
+            theta = 2 * np.pi * k / N
+            p = np.array((np.cos(theta), np.sin(theta)))
+            """
+            if self.mode == self.MODE_ENERGY:
+                if self.mp.model.wind.t_end is not None or self.no_transversality:
+                    asp = self.asp_init
+                else:
+                    asp = self.asp_offset + self.mp.aero.asp_mlod(
+                        -pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
+                pn = self.mp.aero.d_power(asp)
+            """
+            pcl = Particle(k, 0, t_start, x_init, p, 0.)
+            self.new_traj(pcl, p)
+            self.edges.append(Edge(k, (k + 1) % N))
+
+    def new_traj_between(self, i1, i2, idt, pcl_new=None):
+
+        pcl1 = self.trajs[i1][idt]
+        pcl2 = self.trajs[i2][idt]
+
+        self.edges.remove(Edge(i1, i2))
+
+        i_new = self._create_id()
+        if pcl_new is None:
+            state = 0.5 * (pcl1.state + pcl2.state)
+            cost = 0.5 * (pcl1.cost + pcl2.cost)
+            adjoint = 0.5 * (pcl1.adjoint + pcl2.adjoint)
+            pcl_new = Particle(i_new, idt, pcl1.t, state, adjoint, cost)
+        else:
+            pcl_new.idf = i_new
+        self.edges.append(Edge(i1, i_new))
+        self.edges.append(Edge(i_new, i2))
+        self.trajs[i_new] = PartialTraj(pcl_new.idt, [pcl_new])
+        self.parents[i_new] = (i1, i2)
+        self.active.append(i_new)
+        return pcl_new
+
     def prune(self):
         """
         Prune all links to inactive particles
@@ -411,125 +450,67 @@ class ExtremalField:
             self.edges = edges
 
 
-class Relations:
+class ExtremalField2DE(ExtremalField):
 
     def __init__(self):
+        super().__init__()
+        self.tris = []
 
-        self.rel = {}
-        self.active = []
-        self.captive = []
-        self.deact_reason = {}
-        # Store only index of left-hand member of dead relation
-        self.dead_links = set()
-
-    def fill(self, members):
+    def setup(self, Nph: int, Na: int, t_start: float, x_init: ndarray, pn_bounds: tuple[float, float]):
         """
-        :param members: List of sorted int ids representing the initial cycle.
-        Relationships go like 0 <-> 1 <-> 2 <-> ... <-> n-1 and n-1 <-> 0
+        :param Nph: Discretization number in phase (angles)
+        :param Na: Discretization number in amplitude
+        :param t_start: Starting date for particles in seconds (POSIX).
+        :param x_init: (2,) array to initialize particles
+        :param pn_bounds: Minimum and maximum value for adjoint norm
+        There are na rows of nph points distributed in circles.
+        ...-o----o----o----o-...
+             \  / \  / \  /
+        ...---o----o----o---...
+             /  \ /  \ /  \
+        ...-o----o----o----o-...
+        Relationships go like 0 <-> 1 <-> 2 <-> ... <-> nph-1 and nph-1 <-> 0 within a circle.
         """
-        for k, m in enumerate(members):
-            self.rel[m] = (members[(k - 1) % len(members)], members[(k + 1) % len(members)])
-        self.active = [m for m in members]
+        grid = np.zeros((Na, Nph), dtype=int)
+        for ka in range(Na):
+            for kph in range(Nph):
+                k = self._create_id()
+                grid[ka, kph] = k
+                offset = 0 if ka % 2 == 0 else 0.5
+                theta = 2 * np.pi * (kph + offset) / Nph
+                pn = pn_bounds[0] + ka * (pn_bounds[1] - pn_bounds[0])
+                p = pn * np.array((np.cos(theta), np.sin(theta)))
+                """
+                if self.mp.model.wind.t_end is not None or self.no_transversality:
+                    asp = self.asp_init
+                else:
+                    asp = self.asp_offset + self.mp.aero.asp_mlod(
+                        -pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
+                pn = self.mp.aero.d_power(asp)
+                """
+                pcl = Particle(k, 0, t_start, x_init, p, 0.)
+                self.new_traj(pcl, p)
 
-    def linked(self, i1, i2):
-        if i2 in self.rel[i1]:
-            return True
-        else:
-            return False
-
-    def add(self, i, il, iu, force=False):
-        if not self.linked(il, iu) and not force:
-            print('Trying to add member between non-linked members', file=sys.stderr)
-            exit(1)
-        o_ill, _ = self.rel[il]
-        _, o_iuu = self.rel[iu]
-        self.rel[il] = o_ill, i
-        self.rel[iu] = i, o_iuu
-        self.rel[i] = il, iu
-        self.active.append(i)
-
-    def remove(self, i):
-        il, iu = self.rel[i]
-        del self.rel[i]
-        o_ill, _ = self.rel[il]
-        _, o_iuu = self.rel[iu]
-        self.rel[il] = o_ill, iu
-        self.rel[iu] = il, o_iuu
-        if self.is_active(i):
-            self.active.remove(i)
-
-    def get(self, i):
-        return self.rel[i]
-
-    def get_index(self):
-        return list(self.rel.keys())[0]
-
-    def deactivate(self, i, reason=''):
-        if i in self.active:
-            self.active.remove(i)
-            self.deact_reason[i] = reason
-
-    def set_captive(self, i):
-        self.captive.append(i)
-
-    def deact_link(self, i1, i2):
-        i1l, i1u = self.get(i1)
-        if i2 == i1u:
-            self.dead_links.add(i1)
-        else:
-            self.dead_links.add(i2)
-
-    def is_active(self, i):
-        return i in self.active
-
-    def components(self, free_only=False):
-        comp = [[]]
-        icomp = 0
-        if len(self.active) == 0:
-            return []
-        i = i0 = self.active[0]
-        k = 1
-        # while i in self.dead_links:
-        #     i = i0 = self.active[k]
-        #     k += 1
-        i_active = True
-        i_captive = False
-        comp[icomp].append(i)
-        _, j = self.get(i)
-        in_comp = True
-        start = True
-        # print(f'\n{i0}')
-        i1, i2 = self.get(i0)
-        # print(i1, i2)
-        # print(self.get(i1))
-        # print(self.get(i2))
-        s = set()
-        s2 = set()
-        while i != i0 or start:
-            s.add(j)
-            if s == s2:
-                # print(s)
-                # print(j)
-                # print(self.get(j))
-                raise Exception('')
-            start = False
-            j_active = j in self.active
-            j_captive = j in self.captive
-            if i_active and j_active and (i not in self.dead_links) and \
-                    ((not free_only) or (not i_captive and not j_captive)):
-                if not in_comp:
-                    icomp += 1
-                    comp.append([])
-                comp[icomp].append(j)
-                in_comp = True
-            else:
-                in_comp = False
-            i_active = j_active
-            i_captive = j_captive
-            i = j
-            s2.add(j)
-            _, j = self.get(i)
-        return comp
+        # Create connections
+        for ka in range(Na):
+            for kph in range(Nph):
+                i = grid[ka, kph]
+                # Inner circle neighbours
+                self.edges.append(Edge(i, grid[ka, (kph + 1) % Nph]))
+                if ka != Na - 1:
+                    # Upper neighbours. A member at position i in an even row is in
+                    # relation with the i-1 and i positions in the upper row.
+                    # In an odd row, it is in relation with i and i+1
+                    if ka % 2 == 0:
+                        self.edges.append(Edge(i, grid[ka + 1, (kph - 1) % Nph]))
+                        self.edges.append(Edge(i, grid[ka + 1, kph]))
+                        self.tris.append(Triangle(i, grid[ka, (kph + 1) % Nph], grid[ka + 1, kph]))
+                        self.tris.append(Triangle(i, grid[ka + 1, (kph - 1) % Nph], grid[ka + 1, kph]))
+                    else:
+                        self.edges.append(Edge(i, grid[ka + 1, kph]))
+                        self.edges.append(Edge(i, grid[ka + 1, (kph + 1) % Nph]))
+                        self.tris.append(Triangle(i, grid[ka, (kph + 1) % Nph], grid[ka + 1, (kph + 1) % Nph]))
+                        self.tris.append(Triangle(i, grid[ka + 1, kph], grid[ka + 1, (kph + 1) % Nph]))
 
 
 class Triangle:
@@ -540,13 +521,16 @@ class Triangle:
         :param b: Identifier of second vertex
         :param c: Identifier of third vertex
         """
-        self.id = sorted((a, b, c))
+        self.a, self.b, self.c = tuple(sorted((a, b, c)))
+        self._a, self._b, self._c = a, b, c
 
     def __eq__(self, other):
-        return self.id == other.id
+        if not isinstance(other, Triangle):
+            return False
+        return self.a == other.a and self.b == other.b and self.c == other.c
 
     def __contains__(self, item):
-        return item in self.id
+        return item in [self.a, self.b, self.c]
 
 
 class TriRel:
@@ -844,11 +828,10 @@ class SolverEF:
             max_steps = int(abs(max_time / dt))
 
         # This group shall be reinitialized before new resolution
-        self.ef_primal = ExtremalField()
-        self.ef_dual = ExtremalField()
+        self.ef_primal = ExtremalField2D() if self.mode == 0 else ExtremalField2DE()
+        self.ef_dual = ExtremalField2D() if self.mode == 0 else ExtremalField2DE()
         self.ef = self.ef_primal
         self.lsets = []
-        self.rel = Relations()
         self.n_points = 0
         self.no_transversality = no_transversality
 
@@ -918,13 +901,12 @@ class SolverEF:
         :return: None
         """
         if self.mode_primal:
-            self.ef_primal = ExtremalField()
+            self.ef_primal = ExtremalField2D() if self.mode == 0 else ExtremalField2DE()
             self.ef = self.ef_primal
         else:
-            self.ef_dual = ExtremalField()
+            self.ef_dual = ExtremalField2D() if self.mode == 0 else ExtremalField2DE()
             self.ef = self.ef_dual
         self.lsets = []
-        self.rel = Relations()
         self.it = 0
         self.n_points = 0
         self.any_out_obs = True
@@ -951,8 +933,8 @@ class SolverEF:
         for i in self.ef.active:
             copy_active.append(i)
 
-        for pcl in copy_active:
-            idf = pcl.idf
+        for idf in copy_active:
+            pcl = self.ef.trajs[idf].get_last()
 
             pcl_new, status = self.step_single(pcl)
 
@@ -1074,7 +1056,7 @@ class SolverEF:
                 x_prev = np.zeros(x.shape)
                 x_prev[:] = x
                 x += self.dt * dyn_x
-                p[:] = - 1. * np.array((np.cos(np.pi / 2. - u), np.sin(np.pi / 2 - u)))
+                p[:] = - 1. * np.array((np.cos(u), np.sin(u)))
                 t += self.dt
                 arg_ref_x = atan2(*(x - self.mp.obstacles[pcl.i_obs].ref_point)[::-1])
                 arg_ref_x_prev = atan2(*(x_prev - self.mp.obstacles[pcl.i_obs].ref_point)[::-1])
@@ -1121,8 +1103,12 @@ class SolverEF:
         self.ef.prune()
 
         if self.mode == 0:
+            copy_edges = []
             for e in self.ef.edges:
-                i1, i2 = e
+                copy_edges.append(e)
+
+            for e in copy_edges:
+                i1, i2 = e.first(), e.second()
                 pcl1 = self.ef.trajs[i1].get_last()
                 pcl2 = self.ef.trajs[i2].get_last()
                 # Only resample if precision is lost
@@ -1167,7 +1153,7 @@ class SolverEF:
                         cost1 = (1 - alpha1) * pcl_prev.cost + alpha1 * pcl.cost
                         cost2 = (1 - alpha2) * pcl1.cost + alpha2 * pcl2.cost
                         if cost2 < cost1:
-                            self.rel.deactivate(idf, 'collbuf')
+                            self.ef.deactivate(idf, 'collbuf')
                             stop = True
                 if stop:
                     break
@@ -1191,83 +1177,39 @@ class SolverEF:
                             cost1 = (1 - alpha1) * pcl_prev.cost + alpha1 * pcl.cost
                             cost2 = (1 - alpha2) * pcl1.cost + alpha2 * pcl2.cost
                             if cost2 < cost1:
-                                self.rel.deactivate(idf, 'collbuf_par')
+                                self.ef.deactivate(idf, 'collbuf_par')
                                 stop = True
                 if stop:
                     break
 
-    def trim(self, method=1):
-        if method == 0:
-            comps = self.rel.components(free_only=True)
-            for comp in comps:
-                if len(comp) == 0:
-                    continue
-                cyclic = comp[0] == comp[-1]
-                n_edges = len(comp) - 1
-                intersec = []
-                for i in range(n_edges):
-                    for j in range(i + 2, n_edges):
-                        if cyclic and i == 0 and j == n_edges - 1:
-                            continue
-                        pcl1 = self.ef.trajs[comp[i]].get_last()
-                        pcl2 = self.ef.trajs[comp[i + 1]].get_last()
-                        pcl3 = self.ef.trajs[comp[j]].get_last()
-                        pcl4 = self.ef.trajs[comp[j + 1]].get_last()
-                        if Utils.has_intersec(pcl1.state, pcl2.state, pcl3.state, pcl4.state):
-                            s, _, _ = Utils.intersection(pcl1.state, pcl2.state, pcl3.state, pcl4.state)
-                            v1 = 1 / self.mp.distance(pcl1.state, s)
-                            v2 = 1 / self.mp.distance(pcl4.state, s)
-                            alpha = v1 / (v1 + v2)
-                            state = alpha * pcl1.state + (1 - alpha) * pcl4.state
-                            adjoint = alpha * pcl1.adjoint + (1 - alpha) * pcl4.adjoint
-                            cost = alpha * pcl1.cost + (1 - alpha) * pcl4.cost
+    def trim(self):
 
-                            pcl = Particle(pcl1.idf, pcl1.idt, pcl1.t, state, adjoint, cost)
-                            self.ef.new_traj_between(comp[i], comp[j + 1], pcl1.idt, pcl_new=pcl)
+        if self.mode == 0:
+            pcls = []
+            for traj in self.ef.trajs.values():
+                for pcl in traj.particles[-20:]:
+                    pcls.append(pcl)
 
-                            intersec.append((i, j, pcl))
+            # In case of GCS points (lon, lat), multiply by Earth radius
+            # to build alpha shape in plate-carree projection space
+            factor = Utils.EARTH_RADIUS if self.mp.coords == Utils.COORD_GCS else 1.
+            points = [factor * pcl.state for pcl in pcls]
+            hull = alphashape(points, self.alpha_value)
+            for pcl in self.ef.last_active_pcls():
+                if hull.boundary.distance(Point(factor * pcl.state)) > 2 * self.abs_nb_ceil:
+                    self.ef.deactivate(pcl.idf, reason='Hull')
+        elif self.mode == 1:
+            raise Exception('Implementation not validated yet')
+            pcls = []
+            for traj in self.ef.trajs.values():
+                for pcl in traj.particles[-20:]:
+                    pcls.append(pcl)
 
-                def clen(i, j):
-                    if j < i:
-                        j += n_edges
-                    return j - i
-
-                if len(comps) == 1:
-                    intersec = sorted(intersec, key=lambda e: clen(e[0], e[1]))[:-1]
-                for i, j, pcl in intersec:
-                    for k in range(i + 1, j + 1):
-                        self.rel.deactivate(comp[k], reason='trimming')
-                    self.new_points.append(pcl)
-                    self.rel.add(pcl.idf, comp[i], comp[j + 1], force=True)
-                    self.ef.add(pcl)
-
-        elif method == 1:
-            if self.mode == 0:
-                pcls = []
-                for traj in self.ef.trajs.values():
-                    for pcl in traj.particles[-20:]:
-                        pcls.append(pcl)
-
-                # In case of GCS points (lon, lat), multiply by Earth radius
-                # to build alpha shape in plate-carree projection space
-                factor = Utils.EARTH_RADIUS if self.mp.coords == Utils.COORD_GCS else 1.
-                points = [factor * pcl.state for pcl in pcls]
-                hull = alphashape(points, self.alpha_value)
-                for pcl in self.new_points:
-                    if hull.boundary.distance(Point(factor * pcl.state)) > 2 * self.abs_nb_ceil:
-                        self.rel.deactivate(pcl.idf, reason='Hull')
-            elif self.mode == 1:
-                raise Exception('Implementation not validated yet')
-                pcls = []
-                for traj in self.ef.trajs.values():
-                    for pcl in traj.particles[-20:]:
-                        pcls.append(pcl)
-
-                points = [(pcl.state[0], pcl.state[1], pcl.cost) for pcl in pcls]
-                hull = alphashape(points, 1 / (0.05 * 1e6))
-                for pcl in self.new_points:
-                    if hull.boundary.distance(Point(pcl.state)) > 2 * self.abs_nb_ceil:
-                        self.rel.deactivate(pcl.idf, reason='Hull')
+            points = [(pcl.state[0], pcl.state[1], pcl.cost) for pcl in pcls]
+            hull = alphashape(points, 1 / (0.05 * 1e6))
+            for pcl in self.new_points:
+                if hull.boundary.distance(Point(pcl.state)) > 2 * self.abs_nb_ceil:
+                    self.ef.deactivate(pcl.idf, reason='Hull')
 
     def exit_cond(self):
         return len(self.ef.active) == 0 or \
@@ -1289,8 +1231,7 @@ class SolverEF:
                 print(
                     f'\rSteps : {self.step_algo:>6}/{self.max_steps}, '''
                     f'Extremals : {len(self.ef.trajs):>6}, Active : {len(self.ef.active):>4}, '
-                    f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} '
-                    f'Comp : {len(self.rel.components(free_only=True))} ', end='', flush=True)
+                    f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} ', end='', flush=True)
         if self.step_algo == self.max_steps:
             msg = f'Stopped on iteration limit {self.max_steps}'
         elif len(self.ef.trajs) == self.max_extremals:
@@ -1494,7 +1435,7 @@ class SolverEF:
                 adjoints = adjoints[::-1]
                 controls = controls[::-1]
             traj = AugmentedTraj(ts, points, adjoints, controls, nt - 1, self.mp.coords,
-                                 info=f'opt_m{self.mode}_{self.asp_init:.5g}',
+                                 info=f'opt_m{int(self.mode)}_{self.asp_init:.5g}',
                                  constant_asp=self.mp.model.v_a if self.mode == 0 else None)
             btrajs[k0] = traj
         res = EFOptRes(status, bests, btrajs, self.mp_primal)
