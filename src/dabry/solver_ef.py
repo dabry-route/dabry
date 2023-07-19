@@ -1,6 +1,5 @@
 import csv
 import os
-import sys
 from abc import ABC
 
 import h5py
@@ -286,6 +285,63 @@ class EFOptRes:
         return self.trajs[self.min_cost_idx]
 
 
+class Edge:
+
+    def __init__(self, i1, i2):
+        self.i1, self.i2 = (i1, i2) if i1 < i2 else (i2, i1)
+        self._i1, self._i2 = (i1, i2) if i1 < i2 else (i2, i1)
+
+    def __eq__(self, other):
+        if not isinstance(other, Edge):
+            return False
+        return self._i1 == other._i1 and self._i2 == other._i2
+
+    def __contains__(self, item):
+        return self.i1 == item or self.i2 == item
+
+    def first(self):
+        return self.i1
+
+    def second(self):
+        return self.i2
+
+
+class Triangle:
+
+    def __init__(self, a: int, b: int, c: int):
+        """
+        :param a: Identifier of first vertex
+        :param b: Identifier of second vertex
+        :param c: Identifier of third vertex
+        """
+        self.a, self.b, self.c = tuple(sorted((a, b, c)))
+        self._a, self._b, self._c = a, b, c
+
+    def __eq__(self, other):
+        if not isinstance(other, Triangle):
+            return False
+        return self.a == other.a and self.b == other.b and self.c == other.c
+
+    def __contains__(self, item):
+        return item in [self.a, self.b, self.c]
+
+
+class TriColl:
+
+    def __init__(self, tri_list):
+        """
+        Collection of triangles handling rapid access to triangle for vertices
+        :param tri_list: List of Triangle objects
+        """
+        self.tris = []
+        self.whos_tri = []
+        for tri in tri_list:
+            self.add(tri)
+
+    def add(self, tri):
+        self.tris.append(tri)
+
+
 class ExtremalField(ABC):
 
     def __init__(self):
@@ -295,6 +351,7 @@ class ExtremalField(ABC):
         self.active = []
         self.captive = []
         self.deact_reason = {}
+        self.deact_buffer = []
         self.edges = []
         self.index = 0
 
@@ -359,6 +416,7 @@ class ExtremalField(ABC):
         if i in self.active:
             self.active.remove(i)
             self.deact_reason[i] = reason
+            self.deact_buffer.append(i)
 
     def last_active_pcls(self):
         res = []
@@ -366,7 +424,7 @@ class ExtremalField(ABC):
             res.append(self.trajs[i].get_last())
         return res
 
-    def new_traj_between(self, i1, i2, idt, pcl_new=None):
+    def resample(self, *args):
         pass
 
     def setup(self, *args):
@@ -374,24 +432,6 @@ class ExtremalField(ABC):
 
     def prune(self):
         pass
-
-
-class Edge:
-
-    def __init__(self, i1, i2):
-        self.i1, self.i2 = (i1, i2) if i1 < i2 else (i2, i1)
-        self._i1, self._i2 = (i1, i2) if i1 < i2 else (i2, i1)
-
-    def __eq__(self, other):
-        if not isinstance(other, Edge):
-            return False
-        return self._i1 == other._i1 and self._i2 == other._i2
-
-    def first(self):
-        return self.i1
-
-    def second(self):
-        return self.i2
 
 
 class ExtremalField2D(ExtremalField):
@@ -416,7 +456,10 @@ class ExtremalField2D(ExtremalField):
             self.new_traj(pcl, p)
             self.edges.append(Edge(k, (k + 1) % N))
 
-    def new_traj_between(self, i1, i2, idt, pcl_new=None):
+    def resample(self, edge):
+        i1 = edge.first()
+        i2 = edge.second()
+        idt = self.trajs[i1].get_last().idt
 
         pcl1 = self.trajs[i1][idt]
         pcl2 = self.trajs[i2][idt]
@@ -424,30 +467,30 @@ class ExtremalField2D(ExtremalField):
         self.edges.remove(Edge(i1, i2))
 
         i_new = self._create_id()
-        if pcl_new is None:
-            state = 0.5 * (pcl1.state + pcl2.state)
-            cost = 0.5 * (pcl1.cost + pcl2.cost)
-            adjoint = 0.5 * (pcl1.adjoint + pcl2.adjoint)
-            pcl_new = Particle(i_new, idt, pcl1.t, state, adjoint, cost)
-        else:
-            pcl_new.idf = i_new
+        state = 0.5 * (pcl1.state + pcl2.state)
+        cost = 0.5 * (pcl1.cost + pcl2.cost)
+        adjoint = 0.5 * (pcl1.adjoint + pcl2.adjoint)
+        pcl_new = Particle(i_new, idt, pcl1.t, state, adjoint, cost)
+
         self.edges.append(Edge(i1, i_new))
         self.edges.append(Edge(i_new, i2))
         self.trajs[i_new] = PartialTraj(pcl_new.idt, [pcl_new])
         self.parents[i_new] = (i1, i2)
         self.active.append(i_new)
+
         return pcl_new
 
     def prune(self):
         """
         Prune all links to inactive particles
         """
-        for i in self.deact_reason.keys():
-            edges = []
-            for e in self.edges:
-                if i not in e:
-                    edges.append(e)
-            self.edges = edges
+        edges = []
+        for e in self.edges:
+            if e.first() in self.deact_buffer or e.second() in self.deact_buffer:
+                continue
+            edges.append(e)
+        self.edges = edges
+        self.deact_buffer.clear()
 
 
 class ExtremalField2DE(ExtremalField):
@@ -455,6 +498,52 @@ class ExtremalField2DE(ExtremalField):
     def __init__(self):
         super().__init__()
         self.tris = []
+        self.my_tris = []
+
+    def _create_id(self):
+        self.my_tris.append([])
+        return super()._create_id()
+
+    def add_tri(self, tri):
+        self.tris.append(tri)
+        self.my_tris[tri.a].append(tri)
+        self.my_tris[tri.b].append(tri)
+        self.my_tris[tri.c].append(tri)
+
+    def rm_tri(self, tri):
+        self.tris.remove(tri)
+        self.my_tris[tri.a].remove(tri)
+        self.my_tris[tri.b].remove(tri)
+        self.my_tris[tri.c].remove(tri)
+
+    def are_linked(self, i1, i2):
+        for tri in self.my_tris[i1]:
+            if i2 in tri:
+                return True
+        return False
+
+    def common(self, i1, i2):
+        s1 = set()
+        s2 = set()
+        for tri in self.my_tris[i1]:
+            s1.add(tri.a)
+            s1.add(tri.b)
+            s1.add(tri.c)
+        for tri in self.my_tris[i2]:
+            s2.add(tri.a)
+            s2.add(tri.b)
+            s2.add(tri.c)
+        s1.remove(i1)
+        s1.remove(i2)
+        s2.remove(i1)
+        s2.remove(i2)
+        res = s1.intersection(s2)
+        if len(res) >= 2:
+            raise Exception('Intersection containing more than one point')
+        elif len(res) == 0:
+            return None
+        else:
+            return res[0]
 
     def setup(self, Nph: int, Na: int, t_start: float, x_init: ndarray, pn_bounds: tuple[float, float]):
         """
@@ -496,200 +585,93 @@ class ExtremalField2DE(ExtremalField):
             for kph in range(Nph):
                 i = grid[ka, kph]
                 # Inner circle neighbours
-                self.edges.append(Edge(i, grid[ka, (kph + 1) % Nph]))
+                ir = grid[ka, (kph + 1) % Nph]
+                # self.edges.append(Edge(i, ir))
                 if ka != Na - 1:
                     # Upper neighbours. A member at position i in an even row is in
                     # relation with the i-1 and i positions in the upper row.
                     # In an odd row, it is in relation with i and i+1
                     if ka % 2 == 0:
-                        self.edges.append(Edge(i, grid[ka + 1, (kph - 1) % Nph]))
-                        self.edges.append(Edge(i, grid[ka + 1, kph]))
-                        self.tris.append(Triangle(i, grid[ka, (kph + 1) % Nph], grid[ka + 1, kph]))
-                        self.tris.append(Triangle(i, grid[ka + 1, (kph - 1) % Nph], grid[ka + 1, kph]))
+                        iul = grid[ka + 1, (kph - 1) % Nph]
+                        iur = grid[ka + 1, kph]
                     else:
-                        self.edges.append(Edge(i, grid[ka + 1, kph]))
-                        self.edges.append(Edge(i, grid[ka + 1, (kph + 1) % Nph]))
-                        self.tris.append(Triangle(i, grid[ka, (kph + 1) % Nph], grid[ka + 1, (kph + 1) % Nph]))
-                        self.tris.append(Triangle(i, grid[ka + 1, kph], grid[ka + 1, (kph + 1) % Nph]))
+                        iul = grid[ka + 1, kph]
+                        iur = grid[ka + 1, (kph + 1) % Nph]
+                    # self.edges.append(Edge(i, iul))
+                    # self.edges.append(Edge(i, iur))
+                    t1 = Triangle(i, ir, iur)
+                    t2 = Triangle(i, iul, iur)
+                    self.add_tri(t1)
+                    self.add_tri(t2)
 
+    def resample(self, tri):
+        i_a, i_b, i_c = tri.a, tri.b, tri.c
 
-class Triangle:
+        pcla = self.trajs[i_a].get_last()
+        pclb = self.trajs[i_b].get_last()
+        pclc = self.trajs[i_c].get_last()
 
-    def __init__(self, a: int, b: int, c: int):
-        """
-        :param a: Identifier of first vertex
-        :param b: Identifier of second vertex
-        :param c: Identifier of third vertex
-        """
-        self.a, self.b, self.c = tuple(sorted((a, b, c)))
-        self._a, self._b, self._c = a, b, c
+        pcls = [pcla, pclb, pclc]
 
-    def __eq__(self, other):
-        if not isinstance(other, Triangle):
-            return False
-        return self.a == other.a and self.b == other.b and self.c == other.c
+        self.rm_tri(tri)
 
-    def __contains__(self, item):
-        return item in [self.a, self.b, self.c]
+        # Resample by under-scaling triangle
+        # Naming conventions
+        #         a
+        #         o
+        # gamma /   \ beta
+        #      /     \
+        #     o-------o
+        #  b    alpha    c
 
+        # Some edges may already be split
+        split_alpha = not self.are_linked(i_b, i_c)
+        split_beta = not self.are_linked(i_a, i_c)
+        split_gamma = not self.are_linked(i_a, i_b)
 
-class TriRel:
-
-    def __init__(self):
-
-        self.rel = {}
-        self.tris = []
-        self.active = []
-        self.captive = []
-        self.deact_reason = {}
-        # Store only index of left-hand member of dead relation
-        self.dead_links = set()
-
-    def fill(self, members):
-        """
-        :param members: (na, nph) Array of int describing the initial mesh structure.
-        There are na rows of nph points distributed in circles.
-        ...-o----o----o----o-...
-             \  / \  / \  /
-        ...---o----o----o---...
-             /  \ /  \ /  \
-        ...-o----o----o----o-...
-        Relationships go like 0 <-> 1 <-> 2 <-> ... <-> nph-1 and nph-1 <-> 0 within a circle.
-        """
-        na, nph = members.shape
-        for ka in range(na):
-            for kph in range(nph):
-                m = members[ka, kph]
-                ngbs = ()
-                # Inner circle neighbours
-                ngbs += (members[ka, (kph - 1) % nph], members[ka, (kph + 1) % nph])
-                if ka != na - 1:
-                    # Upper neighbours. A member at position i in an even row is in
-                    # relation with the i-1 and i positions in the upper row.
-                    # In an odd row, it is in relation with i and i+1
-                    if ka % 2 == 0:
-                        ngbs += (members[ka + 1, (kph - 1) % nph], members[ka + 1, kph])
-                    else:
-                        ngbs += (members[ka + 1, kph], members[ka + 1, (kph + 1) % nph])
-                if ka != 0:
-                    # Lower neighbours. The principle is symmetric to the previous case
-                    if ka % 2 == 0:
-                        ngbs += (members[ka - 1, (kph - 1) % nph], members[ka - 1, kph])
-                    else:
-                        ngbs += (members[ka - 1, kph], members[ka - 1, (kph + 1) % nph])
-                self.rel[m] = ngbs
-
-        # Adding triangles
-        for ka in range(na - 1):
-            for kph in range(nph):
-                m = members[ka, kph]
-                up1 = members[ka + 1, (kph - 1) % nph] if ka % 2 == 0 else members[ka + 1, kph]
-                up2 = members[ka + 1, kph] if ka % 2 == 0 else members[ka + 1, (kph + 1) % nph]
-                right = members[ka, (kph + 1) % nph]
-                self.tris.append(sorted((m, up1, up2)))
-                self.tris.append(sorted((m, up2, right)))
-
-        self.active = [m for m in members]
-
-    def linked(self, i1, i2):
-        if i2 in self.rel[i1]:
-            return True
+        to_create = []
+        if split_alpha:
+            i_alpha = self.common(i_b, i_c)
         else:
-            return False
-
-    def add(self, i, il, iu, force=False):
-        if not self.linked(il, iu) and not force:
-            print('Trying to add member between non-linked members', file=sys.stderr)
-            exit(1)
-        o_ill, _ = self.rel[il]
-        _, o_iuu = self.rel[iu]
-        self.rel[il] = o_ill, i
-        self.rel[iu] = i, o_iuu
-        self.rel[i] = il, iu
-        self.active.append(i)
-
-    def remove(self, i):
-        il, iu = self.rel[i]
-        del self.rel[i]
-        o_ill, _ = self.rel[il]
-        _, o_iuu = self.rel[iu]
-        self.rel[il] = o_ill, iu
-        self.rel[iu] = il, o_iuu
-        if self.is_active(i):
-            self.active.remove(i)
-
-    def get(self, i):
-        return self.rel[i]
-
-    def get_index(self):
-        return list(self.rel.keys())[0]
-
-    def deactivate(self, i, reason=''):
-        if i in self.active:
-            self.active.remove(i)
-            self.deact_reason[i] = reason
-
-    def set_captive(self, i):
-        self.captive.append(i)
-
-    def deact_link(self, i1, i2):
-        i1l, i1u = self.get(i1)
-        if i2 == i1u:
-            self.dead_links.add(i1)
+            i_alpha = self._create_id()
+            to_create.append((i_alpha, pclb, pclc))
+        if split_beta:
+            i_beta = self.common(i_a, i_c)
         else:
-            self.dead_links.add(i2)
+            i_beta = self._create_id()
+            to_create.append((i_beta, pcla, pclc))
+        if split_gamma:
+            i_gamma = self.common(i_a, i_b)
+        else:
+            i_gamma = self._create_id()
+            to_create.append((i_gamma, pcla, pclb))
 
-    def is_active(self, i):
-        return i in self.active
+        new_pcls = []
+        for i_new, pcl1, pcl2 in to_create:
+            state = 0.5 * (pcl1.state + pcl2.state)
+            cost = 0.5 * (pcl1.cost + pcl2.cost)
+            adjoint = 0.5 * (pcl1.adjoint + pcl2.adjoint)
+            pcl_new = Particle(i_new, pcl1.idt, pcl1.t, state, adjoint, cost)
+            self.trajs[i_new] = PartialTraj(pcl_new.idt, [pcl_new])
+            self.parents[i_new] = (pcl1.idf, pcl2.idf)
+            self.active.append(i_new)
+            new_pcls.append(pcl_new)
 
-    def components(self, free_only=False):
-        comp = [[]]
-        icomp = 0
-        if len(self.active) == 0:
-            return []
-        i = i0 = self.active[0]
-        k = 1
-        # while i in self.dead_links:
-        #     i = i0 = self.active[k]
-        #     k += 1
-        i_active = True
-        i_captive = False
-        comp[icomp].append(i)
-        _, j = self.get(i)
-        in_comp = True
-        start = True
-        # print(f'\n{i0}')
-        i1, i2 = self.get(i0)
-        # print(i1, i2)
-        # print(self.get(i1))
-        # print(self.get(i2))
-        s = set()
-        s2 = set()
-        while i != i0 or start:
-            s.add(j)
-            if s == s2:
-                # print(s)
-                # print(j)
-                # print(self.get(j))
-                raise Exception('')
-            start = False
-            j_active = j in self.active
-            j_captive = j in self.captive
-            if i_active and j_active and (i not in self.dead_links) and \
-                    ((not free_only) or (not i_captive and not j_captive)):
-                if not in_comp:
-                    icomp += 1
-                    comp.append([])
-                comp[icomp].append(j)
-                in_comp = True
-            else:
-                in_comp = False
-            i_active = j_active
-            i_captive = j_captive
-            i = j
-            s2.add(j)
-            _, j = self.get(i)
-        return comp
+        self.add_tri(Triangle(i_a, i_beta, i_gamma))
+        self.add_tri(Triangle(i_b, i_alpha, i_gamma))
+        self.add_tri(Triangle(i_c, i_alpha, i_beta))
+        self.add_tri(Triangle(i_alpha, i_beta, i_gamma))
+
+        return new_pcls
+
+    def prune(self):
+        to_delete = []
+        for tri in self.tris:
+            if tri.a in self.deact_buffer or tri.b in self.deact_buffer or tri.c in self.deact_buffer:
+                to_delete.append(tri)
+
+        for tri in to_delete:
+            self.rm_tri(tri)
 
 
 class CollisionBuffer:
@@ -1118,13 +1100,34 @@ class SolverEF:
                 if pcl1.i_obs >= 0 and pcl2.i_obs >= 0:
                     continue
 
-                pcl_new = self.ef.new_traj_between(i1, i2, pcl1.idt)
+                pcl_new = self.ef.resample(e)
 
                 if not self.no_coll_filtering:
                     self.collbuf.add_particle(pcl_new)
         else:
-            # energy optimal mode
-            pass
+            copy_tris = []
+            for tri in self.ef.tris:
+                copy_tris.append(tri)
+
+            for tri in copy_tris:
+                i_a, i_b, i_c = tri.a, tri.b, tri.c
+                pcla = self.ef.trajs[i_a].get_last()
+                pclb = self.ef.trajs[i_b].get_last()
+                pclc = self.ef.trajs[i_c].get_last()
+
+                # Resample by under-scaling triangle
+                # Naming conventions
+                #         a
+                #         o
+                # gamma /   \ beta
+                #      /     \
+                #     o-------o
+                #  b    alpha    c
+
+                # Some edges may already be split
+                split_alpha = not self.ef.are_linked(i_b, i_c)
+                split_beta = not self.ef.are_linked(i_a, i_c)
+                split_gamma = not self.ef.are_linked(i_a, i_b)
 
     def collision_filter(self):
         for pcl in self.ef.last_active_pcls():
@@ -1183,7 +1186,6 @@ class SolverEF:
                     break
 
     def trim(self):
-
         if self.mode == 0:
             pcls = []
             for traj in self.ef.trajs.values():
