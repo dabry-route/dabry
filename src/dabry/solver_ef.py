@@ -82,69 +82,6 @@ class Particle:
         self.rot = rot
 
 
-class ExtremalField:
-
-    def __init__(self):
-        self.trajs = {}
-        self.p_inits = {}
-        self.parents = {}
-        self.index = 0
-
-    def new_traj(self, pcl: Particle, p_init):
-        """
-        Create new initial trajectory
-        """
-        i = self.index
-        self.trajs[i] = PartialTraj(pcl.idt, [pcl])
-        self.p_inits[i] = np.zeros(2)
-        self.p_inits[i][:] = p_init
-        self.index += 1
-
-    def new_traj_between(self, i1, i2, idt, pcl_new=None):
-        pcl1 = self.trajs[i1][idt]
-        pcl2 = self.trajs[i2][idt]
-
-        i_new = self.index
-        if pcl_new is None:
-            state = 0.5 * (pcl1.state + pcl2.state)
-            cost = 0.5 * (pcl1.cost + pcl2.cost)
-            adjoint = 0.5 * (pcl1.adjoint + pcl2.adjoint)
-            pcl_new = Particle(i_new, idt, pcl1.t, state, adjoint, cost)
-        else:
-            pcl_new.idf = i_new
-
-        self.trajs[i_new] = PartialTraj(pcl_new.idt, [pcl_new])
-        self.parents[i_new] = (i1, i2)
-        self.index += 1
-        return pcl_new
-
-    def add(self, pcl: Particle):
-        """
-        Add particle to existing trajectory
-        """
-        id_traj = pcl.idf
-        if id_traj not in self.trajs.keys():
-            raise Exception(f'Error in add : Trajectory {id_traj} does not exist')
-        else:
-            self.trajs[id_traj].append(pcl)
-
-    def get_parents(self, i):
-        try:
-            return self.parents[i]
-        except KeyError:
-            return None, None
-
-    def empty(self):
-        return len(self.trajs.keys()) == 0
-
-    def get_init_adjoint(self, i):
-        if i not in self.parents.keys():
-            return self.p_inits[i]
-        else:
-            p1, p2 = self.parents[i]
-            return 0.5 * (self.get_init_adjoint(p1) + self.get_init_adjoint(p2))
-
-
 class PartialTraj:
 
     def __init__(self, id_start, particles):
@@ -348,6 +285,132 @@ class EFOptRes:
         return self.trajs[self.min_cost_idx]
 
 
+class ExtremalField:
+
+    def __init__(self):
+        self.trajs = {}
+        self.p_inits = {}
+        self.parents = {}
+        self.active = []
+        self.captive = []
+        self.deact_reason = {}
+        self.edges = []
+        self.index = 0
+
+    def _create_id(self):
+        i = self.index
+        self.index += 1
+        return i
+
+    def setup(self, N, t_start, x_init):
+        for k in range(N):
+            theta = 2 * np.pi * k / N
+            p = np.array((np.cos(theta), np.sin(theta)))
+            """
+            if self.mode == self.MODE_ENERGY:
+                if self.mp.model.wind.t_end is not None or self.no_transversality:
+                    asp = self.asp_init
+                else:
+                    asp = self.asp_offset + self.mp.aero.asp_mlod(
+                        -pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
+                pn = self.mp.aero.d_power(asp)
+            """
+            pcl = Particle(k, 0, t_start, x_init, p, 0.)
+            self.new_traj(pcl, p)
+
+    def new_traj(self, pcl: Particle, p_init):
+        """
+        Create new initial trajectory
+        """
+        i = self._create_id()
+        self.trajs[i] = PartialTraj(pcl.idt, [pcl])
+        self.p_inits[i] = np.zeros(2)
+        self.p_inits[i][:] = p_init
+        self.active.append(i)
+
+    def new_traj_between(self, i1, i2, idt, pcl_new=None):
+        pcl1 = self.trajs[i1][idt]
+        pcl2 = self.trajs[i2][idt]
+
+        i_new = self.index
+        if pcl_new is None:
+            state = 0.5 * (pcl1.state + pcl2.state)
+            cost = 0.5 * (pcl1.cost + pcl2.cost)
+            adjoint = 0.5 * (pcl1.adjoint + pcl2.adjoint)
+            pcl_new = Particle(i_new, idt, pcl1.t, state, adjoint, cost)
+        else:
+            pcl_new.idf = i_new
+
+        self.trajs[i_new] = PartialTraj(pcl_new.idt, [pcl_new])
+        self.parents[i_new] = (i1, i2)
+        self.index += 1
+        return pcl_new
+
+    def add(self, pcl: Particle):
+        """
+        Add particle to existing trajectory
+        """
+        id_traj = pcl.idf
+        if id_traj not in self.trajs.keys():
+            raise Exception(f'Error in add : Trajectory {id_traj} does not exist')
+        else:
+            self.trajs[id_traj].append(pcl)
+
+    def get_parents(self, i):
+        try:
+            return self.parents[i]
+        except KeyError:
+            return None, None
+
+    def empty(self):
+        return len(self.trajs.keys()) == 0
+
+    def get_init_adjoint(self, i):
+        if i not in self.parents.keys():
+            return self.p_inits[i]
+        else:
+            p1, p2 = self.parents[i]
+            return 0.5 * (self.get_init_adjoint(p1) + self.get_init_adjoint(p2))
+
+    def get_nb(self, i):
+        nb = []
+        for e in self.edges:
+            if i in e:
+                if e[0] == i:
+                    nb.append(e[1])
+                else:
+                    nb.append(e[0])
+        return nb
+
+    def is_active(self, i):
+        return i in self.active
+
+    def set_captive(self, i):
+        self.captive.append(i)
+
+    def deactivate(self, i, reason=''):
+        if i in self.active:
+            self.active.remove(i)
+            self.deact_reason[i] = reason
+
+    def last_active_pcls(self):
+        res = []
+        for i in self.active:
+            res.append(self.trajs[i].get_last())
+        return res
+
+    def prune(self):
+        """
+        Prune all links to inactive particles
+        """
+        for i in self.deact_reason.keys():
+            edges = []
+            for e in self.edges:
+                if i not in e:
+                    edges.append(e)
+            self.edges = edges
+
+
 class Relations:
 
     def __init__(self):
@@ -366,6 +429,182 @@ class Relations:
         """
         for k, m in enumerate(members):
             self.rel[m] = (members[(k - 1) % len(members)], members[(k + 1) % len(members)])
+        self.active = [m for m in members]
+
+    def linked(self, i1, i2):
+        if i2 in self.rel[i1]:
+            return True
+        else:
+            return False
+
+    def add(self, i, il, iu, force=False):
+        if not self.linked(il, iu) and not force:
+            print('Trying to add member between non-linked members', file=sys.stderr)
+            exit(1)
+        o_ill, _ = self.rel[il]
+        _, o_iuu = self.rel[iu]
+        self.rel[il] = o_ill, i
+        self.rel[iu] = i, o_iuu
+        self.rel[i] = il, iu
+        self.active.append(i)
+
+    def remove(self, i):
+        il, iu = self.rel[i]
+        del self.rel[i]
+        o_ill, _ = self.rel[il]
+        _, o_iuu = self.rel[iu]
+        self.rel[il] = o_ill, iu
+        self.rel[iu] = il, o_iuu
+        if self.is_active(i):
+            self.active.remove(i)
+
+    def get(self, i):
+        return self.rel[i]
+
+    def get_index(self):
+        return list(self.rel.keys())[0]
+
+    def deactivate(self, i, reason=''):
+        if i in self.active:
+            self.active.remove(i)
+            self.deact_reason[i] = reason
+
+    def set_captive(self, i):
+        self.captive.append(i)
+
+    def deact_link(self, i1, i2):
+        i1l, i1u = self.get(i1)
+        if i2 == i1u:
+            self.dead_links.add(i1)
+        else:
+            self.dead_links.add(i2)
+
+    def is_active(self, i):
+        return i in self.active
+
+    def components(self, free_only=False):
+        comp = [[]]
+        icomp = 0
+        if len(self.active) == 0:
+            return []
+        i = i0 = self.active[0]
+        k = 1
+        # while i in self.dead_links:
+        #     i = i0 = self.active[k]
+        #     k += 1
+        i_active = True
+        i_captive = False
+        comp[icomp].append(i)
+        _, j = self.get(i)
+        in_comp = True
+        start = True
+        # print(f'\n{i0}')
+        i1, i2 = self.get(i0)
+        # print(i1, i2)
+        # print(self.get(i1))
+        # print(self.get(i2))
+        s = set()
+        s2 = set()
+        while i != i0 or start:
+            s.add(j)
+            if s == s2:
+                # print(s)
+                # print(j)
+                # print(self.get(j))
+                raise Exception('')
+            start = False
+            j_active = j in self.active
+            j_captive = j in self.captive
+            if i_active and j_active and (i not in self.dead_links) and \
+                    ((not free_only) or (not i_captive and not j_captive)):
+                if not in_comp:
+                    icomp += 1
+                    comp.append([])
+                comp[icomp].append(j)
+                in_comp = True
+            else:
+                in_comp = False
+            i_active = j_active
+            i_captive = j_captive
+            i = j
+            s2.add(j)
+            _, j = self.get(i)
+        return comp
+
+
+class Triangle:
+
+    def __init__(self, a: int, b: int, c: int):
+        """
+        :param a: Identifier of first vertex
+        :param b: Identifier of second vertex
+        :param c: Identifier of third vertex
+        """
+        self.id = sorted((a, b, c))
+
+    def __eq__(self, other):
+        return self.id == other.id
+
+    def __contains__(self, item):
+        return item in self.id
+
+
+class TriRel:
+
+    def __init__(self):
+
+        self.rel = {}
+        self.tris = []
+        self.active = []
+        self.captive = []
+        self.deact_reason = {}
+        # Store only index of left-hand member of dead relation
+        self.dead_links = set()
+
+    def fill(self, members):
+        """
+        :param members: (na, nph) Array of int describing the initial mesh structure.
+        There are na rows of nph points distributed in circles.
+        ...-o----o----o----o-...
+             \  / \  / \  /
+        ...---o----o----o---...
+             /  \ /  \ /  \
+        ...-o----o----o----o-...
+        Relationships go like 0 <-> 1 <-> 2 <-> ... <-> nph-1 and nph-1 <-> 0 within a circle.
+        """
+        na, nph = members.shape
+        for ka in range(na):
+            for kph in range(nph):
+                m = members[ka, kph]
+                ngbs = ()
+                # Inner circle neighbours
+                ngbs += (members[ka, (kph - 1) % nph], members[ka, (kph + 1) % nph])
+                if ka != na - 1:
+                    # Upper neighbours. A member at position i in an even row is in
+                    # relation with the i-1 and i positions in the upper row.
+                    # In an odd row, it is in relation with i and i+1
+                    if ka % 2 == 0:
+                        ngbs += (members[ka + 1, (kph - 1) % nph], members[ka + 1, kph])
+                    else:
+                        ngbs += (members[ka + 1, kph], members[ka + 1, (kph + 1) % nph])
+                if ka != 0:
+                    # Lower neighbours. The principle is symmetric to the previous case
+                    if ka % 2 == 0:
+                        ngbs += (members[ka - 1, (kph - 1) % nph], members[ka - 1, kph])
+                    else:
+                        ngbs += (members[ka - 1, kph], members[ka - 1, (kph + 1) % nph])
+                self.rel[m] = ngbs
+
+        # Adding triangles
+        for ka in range(na - 1):
+            for kph in range(nph):
+                m = members[ka, kph]
+                up1 = members[ka + 1, (kph - 1) % nph] if ka % 2 == 0 else members[ka + 1, kph]
+                up2 = members[ka + 1, kph] if ka % 2 == 0 else members[ka + 1, (kph + 1) % nph]
+                right = members[ka, (kph + 1) % nph]
+                self.tris.append(sorted((m, up1, up2)))
+                self.tris.append(sorted((m, up2, right)))
+
         self.active = [m for m in members]
 
     def linked(self, i1, i2):
@@ -605,8 +844,6 @@ class SolverEF:
             max_steps = int(abs(max_time / dt))
 
         # This group shall be reinitialized before new resolution
-        self.active = []
-        self.new_points = []
         self.ef_primal = ExtremalField()
         self.ef_dual = ExtremalField()
         self.ef = self.ef_primal
@@ -680,8 +917,6 @@ class SolverEF:
         Push all possible angles to active list from init point
         :return: None
         """
-        self.active = []
-        self.new_points = []
         if self.mode_primal:
             self.ef_primal = ExtremalField()
             self.ef = self.ef_primal
@@ -699,34 +934,12 @@ class SolverEF:
             t_start = self.mp_primal.model.wind.t_start + time_offset
         if not self.no_coll_filtering:
             self.collbuf.init(*self.collbuf_shape, self.mp.bl, self.mp.tr)
-        for k in range(self.N_disc_init):
-            theta = 2 * np.pi * k / self.N_disc_init
-            pd = np.array((np.cos(theta), np.sin(theta)))
-            pn = 1.
-            if self.mode == self.MODE_ENERGY:
-                if self.mp.model.wind.t_end is not None or self.no_transversality:
-                    asp = self.asp_init
-                else:
-                    asp = self.asp_offset + self.mp.aero.asp_mlod(
-                        -pd @ self.mp.model.wind.value(t_start, self.mp.x_init))
-                pn = self.mp.aero.d_power(asp)
-            p = pn * pd
-            pcl = Particle(k, 0, t_start, self.mp.x_init, p, 0.)
+
+        self.ef.setup(self.N_disc_init, t_start, self.mp.x_init)
+
+        for pcl in self.ef.last_active_pcls():
             if not self.no_coll_filtering:
                 self.collbuf.add_particle(pcl)
-            self.active.append(pcl)
-            self.ef.new_traj(pcl, p)
-        self.rel.fill(list(np.arange(self.N_disc_init)))
-
-    def build_cfront(self):
-        # Build current front
-        i = self.rel.get_index()
-        front = [list(self.ef.trajs[i].values())[-1][1]]
-        _, j = self.rel.get(i)
-        while j != i:
-            front.append(list(self.ef.trajs[j].values())[-1][1])
-            _, j = self.rel.get(j)
-        return Polygon(front)
 
     def step_global(self):
 
@@ -734,7 +947,11 @@ class SolverEF:
         self.best_distances = [self.mp.geod_l]
 
         # Evolve active particles
-        for pcl in self.active:
+        copy_active = []
+        for i in self.ef.active:
+            copy_active.append(i)
+
+        for pcl in copy_active:
             idf = pcl.idf
 
             pcl_new, status = self.step_single(pcl)
@@ -742,23 +959,22 @@ class SolverEF:
             if pcl_new.i_obs == -1:
                 self.any_out_obs = True
             elif pcl.i_obs == -1:
-                self.rel.set_captive(idf)
+                self.ef.set_captive(idf)
 
             dist = self.mp.distance(pcl_new.state, self.mp.x_target)
             self.best_distances.append(dist)
             if self.quick_solve and dist < self.abs_nb_ceil:
                 self.quick_traj_idx = idf
             if not status:
-                self.rel.deactivate(idf, 'domain')
+                self.ef.deactivate(idf, 'domain')
             elif abs(pcl_new.rot) > 2 * np.pi:
-                self.rel.deactivate(idf, 'roundabout')
+                self.ef.deactivate(idf, 'roundabout')
             elif self.cost_ceil is not None and pcl_new.cost > self.cost_ceil:
-                self.rel.deactivate(idf, 'cost')
+                self.ef.deactivate(idf, 'cost')
             elif self.pareto is not None and \
                     self.pareto.dominated((pcl_new.t - self.mp_primal.model.wind.t_start, pcl_new.cost)):
-                self.rel.deactivate(idf, 'pareto')
+                self.ef.deactivate(idf, 'pareto')
             else:
-                self.new_points.append(pcl_new)
                 self.ef.add(pcl_new)
                 self.n_points += 1
 
@@ -766,54 +982,20 @@ class SolverEF:
         if not self.no_coll_filtering:
             self.collision_filter()
 
-            for pcl in self.new_points:
+            for pcl in self.ef.last_active_pcls():
                 if pcl.i_obs >= 0:
                     # Points in obstacles do not contribute to collision buffer
                     continue
                 self.collbuf.add_particle(pcl)
 
         # Resampling of the front
-        for pcl in self.new_points:
-            idf = pcl.idf
-            _, iu = self.rel.get(idf)
-            # Resample only between two active trajectories
-            if not (self.rel.is_active(idf) and self.rel.is_active(iu)):
-                continue
-
-            pcl_other = self.ef.trajs[iu][pcl.idt]
-            # Resample when precision is lost
-            if self.mp.distance(pcl.state, pcl_other.state) <= self.abs_nb_ceil:
-                continue
-            # Resample when at least one point lies outside of an obstacle
-            if pcl.i_obs >= 0 and pcl_other.i_obs >= 0:
-                self.rel.deact_link(pcl.idf, pcl_other.idf)
-                continue
-
-            p1i, p2i = self.ef.get_parents(idf)
-            p1u, p2u = self.ef.get_parents(iu)
-            same_parents = (p1i == p1u and p2i == p2u) or (p1i == p2u and p2i == p1u)
-            no_parents = same_parents and p1i is None
-            between_cond = idf in (p1u, p2u) or iu in (p1i, p2i) or (same_parents and no_parents) or same_parents
-            if not between_cond:
-                continue
-
-            # Resampling needed
-            pcl_new = self.ef.new_traj_between(idf, iu, pcl.idt)
-            self.new_points.append(pcl_new)
-            if not self.no_coll_filtering:
-                self.collbuf.add_particle(pcl_new)
-            self.rel.add(pcl_new.idf, idf, iu)
+        self.resample()
 
         # Trimming procedure
-        if self.no_coll_filtering:  # and self.mode == 0:
-            if self.it > 1 and self.it % self.trimming_rate == 0:
+        if self.no_coll_filtering and self.mode == 0:
+            if self.it % self.trimming_rate == 0:
                 self.trim()
 
-        self.active.clear()
-        for pcl in self.new_points:
-            if self.rel.is_active(pcl.idf):
-                self.active.append(pcl)
-        self.new_points.clear()
         self.it += 1
 
     def step_single(self, pcl: Particle):
@@ -934,8 +1116,32 @@ class SolverEF:
         new_pcl = Particle(pcl.idf, pcl.idt + 1, t, x, p, cost, i_obs_new, ccw, rot)
         return new_pcl, status
 
+    def resample(self):
+        # First prune all links
+        self.ef.prune()
+
+        if self.mode == 0:
+            for e in self.ef.edges:
+                i1, i2 = e
+                pcl1 = self.ef.trajs[i1].get_last()
+                pcl2 = self.ef.trajs[i2].get_last()
+                # Only resample if precision is lost
+                if self.mp.distance(pcl1.state, pcl2.state) <= self.abs_nb_ceil:
+                    continue
+                # Only resample when at least one point lies outside of an obstacle
+                if pcl1.i_obs >= 0 and pcl2.i_obs >= 0:
+                    continue
+
+                pcl_new = self.ef.new_traj_between(i1, i2, pcl1.idt)
+
+                if not self.no_coll_filtering:
+                    self.collbuf.add_particle(pcl_new)
+        else:
+            # energy optimal mode
+            pass
+
     def collision_filter(self):
-        for pcl in self.new_points:
+        for pcl in self.ef.last_active_pcls():
             idf = pcl.idf
             # Deactivate new active points which fall inside front
             if pcl.i_obs >= 0:
@@ -1064,12 +1270,12 @@ class SolverEF:
                         self.rel.deactivate(pcl.idf, reason='Hull')
 
     def exit_cond(self):
-        return len(self.active) == 0 or \
+        return len(self.ef.active) == 0 or \
                self.step_algo >= self.max_steps or \
                len(self.ef.trajs) >= self.max_extremals or \
                (self.quick_solve and self.quick_traj_idx != -1) or \
                (not self.any_out_obs) or \
-               (self.max_active_ext is not None and len(self.active) > self.max_active_ext)
+               (self.max_active_ext is not None and len(self.ef.active) > self.max_active_ext)
 
     def propagate(self, time_offset=0., verbose=2):
         self.setup(time_offset=time_offset)
@@ -1082,7 +1288,7 @@ class SolverEF:
             if verbose == 2:
                 print(
                     f'\rSteps : {self.step_algo:>6}/{self.max_steps}, '''
-                    f'Extremals : {len(self.ef.trajs):>6}, Active : {len(self.active):>4}, '
+                    f'Extremals : {len(self.ef.trajs):>6}, Active : {len(self.ef.active):>4}, '
                     f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} '
                     f'Comp : {len(self.rel.components(free_only=True))} ', end='', flush=True)
         if self.step_algo == self.max_steps:
@@ -1092,7 +1298,7 @@ class SolverEF:
         elif self.quick_solve and self.quick_traj_idx != -1:
             msg = 'Stopped quick solve'
             self.reach_duration = self.step_algo * self.dt
-        elif self.max_active_ext is not None and len(self.active) > self.max_active_ext:
+        elif self.max_active_ext is not None and len(self.ef.active) > self.max_active_ext:
             msg = 'Stopped on maximum of active extremal trajs'
         else:
             msg = f'Stopped empty active list'
