@@ -3,7 +3,9 @@ import os
 from abc import ABC
 
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import scipy.integrate
 from alphashape import alphashape
 from numpy import arcsin as asin, ndarray
@@ -360,11 +362,12 @@ class ExtremalField(ABC):
         self.index += 1
         return i
 
-    def new_traj(self, pcl: Particle, p_init):
+    def new_traj(self, pcl: Particle, p_init, i=None):
         """
         Create new initial trajectory
         """
-        i = self._create_id()
+        if i is None:
+            i = self._create_id()
         self.trajs[i] = PartialTraj(pcl.idt, [pcl])
         self.p_inits[i] = np.zeros(2)
         self.p_inits[i][:] = p_init
@@ -526,16 +529,18 @@ class ExtremalField2DE(ExtremalField):
         s1 = set()
         s2 = set()
         for tri in self.my_tris[i1]:
+            if i2 in tri:
+                continue
             s1.add(tri.a)
             s1.add(tri.b)
             s1.add(tri.c)
         for tri in self.my_tris[i2]:
+            if i1 in tri:
+                continue
             s2.add(tri.a)
             s2.add(tri.b)
             s2.add(tri.c)
         s1.remove(i1)
-        s1.remove(i2)
-        s2.remove(i1)
         s2.remove(i2)
         res = s1.intersection(s2)
         if len(res) >= 2:
@@ -543,7 +548,7 @@ class ExtremalField2DE(ExtremalField):
         elif len(res) == 0:
             return None
         else:
-            return res[0]
+            return res.pop()
 
     def setup(self, Nph: int, Na: int, t_start: float, x_init: ndarray, pn_bounds: tuple[float, float]):
         """
@@ -567,7 +572,7 @@ class ExtremalField2DE(ExtremalField):
                 grid[ka, kph] = k
                 offset = 0 if ka % 2 == 0 else 0.5
                 theta = 2 * np.pi * (kph + offset) / Nph
-                pn = pn_bounds[0] + ka * (pn_bounds[1] - pn_bounds[0])
+                pn = pn_bounds[0] + ka / (Na - 1) * (pn_bounds[1] - pn_bounds[0])
                 p = pn * np.array((np.cos(theta), np.sin(theta)))
                 """
                 if self.mp.model.wind.t_end is not None or self.no_transversality:
@@ -578,7 +583,7 @@ class ExtremalField2DE(ExtremalField):
                 pn = self.mp.aero.d_power(asp)
                 """
                 pcl = Particle(k, 0, t_start, x_init, p, 0.)
-                self.new_traj(pcl, p)
+                self.new_traj(pcl, p, i=k)
 
         # Create connections
         for ka in range(Na):
@@ -611,10 +616,6 @@ class ExtremalField2DE(ExtremalField):
         pclb = self.trajs[i_b].get_last()
         pclc = self.trajs[i_c].get_last()
 
-        pcls = [pcla, pclb, pclc]
-
-        self.rm_tri(tri)
-
         # Resample by under-scaling triangle
         # Naming conventions
         #         a
@@ -646,6 +647,13 @@ class ExtremalField2DE(ExtremalField):
             i_gamma = self._create_id()
             to_create.append((i_gamma, pcla, pclb))
 
+        s = set()
+        s.add(i_alpha)
+        s.add(i_beta)
+        s.add(i_gamma)
+        if len(s) <= 2:
+            raise Exception('Flat triangle')
+
         new_pcls = []
         for i_new, pcl1, pcl2 in to_create:
             state = 0.5 * (pcl1.state + pcl2.state)
@@ -661,6 +669,8 @@ class ExtremalField2DE(ExtremalField):
         self.add_tri(Triangle(i_b, i_alpha, i_gamma))
         self.add_tri(Triangle(i_c, i_alpha, i_beta))
         self.add_tri(Triangle(i_alpha, i_beta, i_gamma))
+
+        self.rm_tri(tri)
 
         return new_pcls
 
@@ -773,13 +783,16 @@ class SolverEF:
                  max_steps=None,
                  collbuf_shape=None,
                  cost_ceil=None,
+                 rel_cost_ceil=None,
                  asp_offset=0.,
                  asp_init=None,
                  no_coll_filtering=False,
                  quick_solve=False,
                  pareto=None,
                  max_active_ext=None,
-                 no_transversality=False):
+                 no_transversality=False,
+                 v_bounds=None,
+                 N_pn_init=5):
         self.mp_primal = mp
         self.mp_dual = NavigationProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
@@ -788,14 +801,26 @@ class SolverEF:
 
         self.mode = mode
 
+        if self.mode == 1:
+            if v_bounds is None:
+                self.v_min, self.v_max = mp.aero.v_min, mp.aero.v_max
+            else:
+                self.v_min, self.v_max = v_bounds
+
         # Solve time arguments
         if sum([max_time is None, dt is None, max_steps is None]) >= 2:
-            raise Exception('Please provide at least two arguments among "max_time", "max_steps" and "dt"')
+            if max_steps is not None:
+                # Trying automatic parameters
+                dt = 1.5 * mp.l_ref / mp.aero.v_min / max_steps
+                print(f'Automatic dt ({dt:.5g})')
+            else:
+                raise Exception('Please provide at least two arguments among "max_time", "max_steps" and "dt"')
 
         if max_time is None:
             max_time = dt * max_steps
 
         self.N_disc_init = N_disc_init
+        self.N_pn_init = N_pn_init
         # Neighbouring distance ceil
         self.abs_nb_ceil = rel_nb_ceil * mp.geod_l
         if dt is not None:
@@ -826,7 +851,12 @@ class SolverEF:
         self.mp = self.mp_dual
         self.max_extremals = 10000
         self.max_time = max_time
+        if cost_ceil is None:
+            cost_ceil = self.mp.aero.power(self.v_max) * self.mp.l_ref / self.v_max
+            print(f'Automatic cost_ceil ({cost_ceil:.5g})')
         self.cost_ceil = cost_ceil
+        self.rel_cost_ceil = 0.05 if rel_cost_ceil is None else rel_cost_ceil
+        self.cost_thres = rel_cost_ceil * cost_ceil
         self.asp_offset = asp_offset
         self.asp_init = asp_init if asp_init is not None else self.mp.model.v_a
 
@@ -862,7 +892,11 @@ class SolverEF:
         self.trimming_rate = 10
 
         # Parameter for alpha shapes in the trimming procedure
-        self.alpha_value = 1 / (0.05 * self.mp.l_ref)
+        self.alpha_param = 0.05
+        self.alpha_value = 1 / (self.alpha_param * self.mp.l_ref)
+
+        # For debug
+        self.reg = Register()
 
     def set_primal(self, b):
         self.mode_primal = b
@@ -899,7 +933,12 @@ class SolverEF:
         if not self.no_coll_filtering:
             self.collbuf.init(*self.collbuf_shape, self.mp.bl, self.mp.tr)
 
-        self.ef.setup(self.N_disc_init, t_start, self.mp.x_init)
+        if self.mode == 0:
+            self.ef.setup(self.N_disc_init, t_start, self.mp.x_init)
+        if self.mode == 1:
+            p_min = self.mp.aero.d_power(self.mp.aero.v_min)
+            p_max = self.mp.aero.d_power(self.mp.aero.v_max)
+            self.ef.setup(self.N_disc_init, self.N_pn_init, t_start, self.mp.x_init, (p_min, p_max))
 
         for pcl in self.ef.last_active_pcls():
             if not self.no_coll_filtering:
@@ -956,8 +995,8 @@ class SolverEF:
         self.resample()
 
         # Trimming procedure
-        if self.no_coll_filtering and self.mode == 0:
-            if self.it % self.trimming_rate == 0:
+        if self.no_coll_filtering:
+            if self.it > 0 and self.it % self.trimming_rate == 0:
                 self.trim()
 
         self.it += 1
@@ -973,13 +1012,15 @@ class SolverEF:
         u = None
         ccw = pcl.ccw
         rot = pcl.rot
+        v_a = None
         if pcl.i_obs == -1:
             if self.manual_integration:
                 # For the moment, simple Euler scheme
                 u = self.mp.control_angle(p, x)
                 kw = {}
                 if self.mode == self.MODE_ENERGY:
-                    kw['v_a'] = self.mp.aero.asp_opti(p)
+                    kw['v_a'] = v_a = np.min(
+                        (self.mp.aero.v_max, np.max((self.mp.aero.v_min, self.mp.aero.asp_opti(p)))))
                 dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
                 A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
                 dyn_p = A.dot(p) - self.mp.penalty.d_value(t, x)
@@ -1075,7 +1116,7 @@ class SolverEF:
         if self.mode == self.MODE_TIME:
             power = self.mp.aero.power(self.mp.model.v_a)
         else:
-            power = self.mp.aero.power(self.mp.aero.asp_opti(p))
+            power = self.mp.aero.power(v_a)
         cost = power * abs(self.dt) + pcl.cost
         new_pcl = Particle(pcl.idf, pcl.idt + 1, t, x, p, cost, i_obs_new, ccw, rot)
         return new_pcl, status
@@ -1114,20 +1155,20 @@ class SolverEF:
                 pcla = self.ef.trajs[i_a].get_last()
                 pclb = self.ef.trajs[i_b].get_last()
                 pclc = self.ef.trajs[i_c].get_last()
+                c1 = self.mp.distance(pcla.state, pclb.state) > self.abs_nb_ceil
+                c2 = self.mp.distance(pclb.state, pclc.state) > self.abs_nb_ceil
+                c3 = self.mp.distance(pcla.state, pclc.state) > self.abs_nb_ceil
+                c4 = abs(pcla.cost - pclb.cost) > self.cost_thres
+                c5 = abs(pclb.cost - pclc.cost) > self.cost_thres
+                c6 = abs(pcla.cost - pclc.cost) > self.cost_thres
 
-                # Resample by under-scaling triangle
-                # Naming conventions
-                #         a
-                #         o
-                # gamma /   \ beta
-                #      /     \
-                #     o-------o
-                #  b    alpha    c
+                # Only resample when at least one point lies outside of an obstacle
+                if sum((pcla.i_obs == -1, pclb.i_obs == -1, pclb.i_obs == -1)) == 0:
+                    continue
 
-                # Some edges may already be split
-                split_alpha = not self.ef.are_linked(i_b, i_c)
-                split_beta = not self.ef.are_linked(i_a, i_c)
-                split_gamma = not self.ef.are_linked(i_a, i_b)
+                resamp_cond = c1 or c2 or c3 or c4 or c5 or c6
+                if resamp_cond:
+                    self.ef.resample(tri)
 
     def collision_filter(self):
         for pcl in self.ef.last_active_pcls():
@@ -1188,7 +1229,11 @@ class SolverEF:
     def trim(self):
         if self.mode == 0:
             pcls = []
-            for traj in self.ef.trajs.values():
+            idx = set()
+            for pcl in self.ef.last_active_pcls():
+                idx.add(pcl.idf)
+            for idf in idx:
+                traj = self.ef.trajs[idf]
                 for pcl in traj.particles[-20:]:
                     pcls.append(pcl)
 
@@ -1201,17 +1246,29 @@ class SolverEF:
                 if hull.boundary.distance(Point(factor * pcl.state)) > 2 * self.abs_nb_ceil:
                     self.ef.deactivate(pcl.idf, reason='Hull')
         elif self.mode == 1:
-            raise Exception('Implementation not validated yet')
             pcls = []
             for traj in self.ef.trajs.values():
                 for pcl in traj.particles[-20:]:
                     pcls.append(pcl)
 
-            points = [(pcl.state[0], pcl.state[1], pcl.cost) for pcl in pcls]
-            hull = alphashape(points, 1 / (0.05 * 1e6))
-            for pcl in self.new_points:
-                if hull.boundary.distance(Point(pcl.state)) > 2 * self.abs_nb_ceil:
+            def normalize(x1, x2, c):
+                xx1 = (x1 - self.mp.bl[0]) / (self.mp.tr[0] - self.mp.bl[0])
+                xx2 = (x2 - self.mp.bl[1]) / (self.mp.tr[1] - self.mp.bl[1])
+                cc = c / self.cost_ceil
+                return xx1, xx2, cc
+
+            n = len(pcls)
+            points = np.zeros((n, 3))
+            for i, pcl in enumerate(pcls):
+                points[i, :] = normalize(pcl.state[0], pcl.state[1], pcl.cost)
+            hull = alphashape(points, self.alpha_param)
+            for pcl in self.ef.last_active_pcls():
+                z = np.array((normalize(*(tuple(pcl.state) + (pcl.cost,))),))
+                dist = hull.nearest.on_surface(z)[1][0]
+                if dist > 0.05:
                     self.ef.deactivate(pcl.idf, reason='Hull')
+        # Apply deactivation to the graph of relations
+        self.ef.prune()
 
     def exit_cond(self):
         return len(self.ef.active) == 0 or \
@@ -1512,3 +1569,69 @@ class SolverEF:
                     values[i, j] = self.mp.control_angle(pcl.adjoint, pcl.state)
 
         return MapFB(grid, values)
+
+
+class Debugger:
+
+    def __init__(self, solver_ef: SolverEF):
+        self.solver = solver_ef
+        self.reg = Register()
+
+    def show_points(self):
+        ax = plt.figure().add_subplot(projection='3d')
+        n = 0
+        for traj in self.solver.ef.trajs.values():
+            n += len(traj.particles)
+        points = np.zeros((n, 3))
+        i = 0
+        for traj in self.solver.ef.trajs.values():
+            for pcl in traj.particles:
+                points[i, :] = pcl.state[0], pcl.state[1], pcl.cost
+                i += 1
+
+        ax.scatter(points[:10, 0], points[:10, 1], points[:10, 2])
+        plt.show()
+
+    def show_points2d(self):
+        ax = plt.figure().add_subplot()
+        ax.axis('equal')
+        n = len(self.solver.ef.trajs)
+        points = np.zeros((n, 3))
+        labels = np.zeros(n, dtype=int)
+        for i, key in enumerate(self.solver.ef.trajs.keys()):
+            traj = self.solver.ef.trajs[key]
+            pcl = traj.get_last()
+            points[i, :] = pcl.state[0], pcl.state[1], pcl.cost
+            labels[i] = key
+
+        ax.scatter(points[:, 0], points[:, 1])
+        for i in range(n):
+            ax.annotate(labels[i], (points[i, 0], points[i, 1]))
+
+        k = 0
+        colors = ['red', 'blue', 'yellow', 'purple', 'green', 'orange', 'cyan']
+        for tri in self.solver.ef.tris:
+            a = self.solver.ef.trajs[tri.a].get_last().state
+            b = self.solver.ef.trajs[tri.b].get_last().state
+            c = self.solver.ef.trajs[tri.c].get_last().state
+            t1 = plt.Polygon((a, b, c), color=colors[(k % len(colors))], alpha=0.5)
+            plt.gca().add_patch(t1)
+            ax.annotate(self.reg.name_tri(tri), 1 / 3 * (a + b + c))
+            k += 1
+
+        plt.show()
+
+
+class Register:
+
+    def __init__(self):
+        df = pd.read_csv('/home/bastien/Documents/data/liste_des_prenoms.csv', delimiter=';')
+        self.names = list(df['Prenoms'])
+
+    def name(self, i: int):
+        return self.names[i % len(self.names)]
+
+    def name_tri(self, tri: Triangle):
+        i = ((tri.a + 17) * (tri.b + 203)) % len(self.names)
+        i = i * (tri.c + 47)
+        return self.name(i)

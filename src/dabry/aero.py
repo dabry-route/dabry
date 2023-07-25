@@ -141,7 +141,7 @@ class MermozAero(Aero):
         self._B0 = 12 * self.A2 / self.A0
         self.v_minp = np.sqrt(1 / (6 * self.A0) * (-self.A1 + np.sqrt(self.A1 ** 2 + 12 * self.A0 * self.A2)))
         self.v_fmax = (self.A2 / self.A0) ** (1 / 4)
-        self.v_min = self.v_minp
+        self.v_min = 1.05 * self.v_minp
         self.v_max = 30.  # m/s
         self.mode += 'mermoz_fitted'
 
