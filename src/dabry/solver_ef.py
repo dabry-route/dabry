@@ -88,12 +88,14 @@ class PartialTraj:
 
     def __init__(self, id_start, particles):
         self.id_traj = particles[0].idf
+        """
         if len(particles) > 0:
             # Check consistency
             assert (particles[0].idt == id_start)
             for i in range(len(particles) - 1):
                 assert (particles[i + 1].idt - particles[i].idt == 1)
                 assert (particles[i + 1].idf == self.id_traj)
+        """
         self.id_start = id_start
         self.particles = particles
 
@@ -347,7 +349,7 @@ class TriColl:
 class ExtremalField(ABC):
 
     def __init__(self):
-        self.trajs = {}
+        self.trajs = []
         self.p_inits = {}
         self.parents = {}
         self.active = []
@@ -360,6 +362,7 @@ class ExtremalField(ABC):
     def _create_id(self):
         i = self.index
         self.index += 1
+        self.trajs.append(None)
         return i
 
     def new_traj(self, pcl: Particle, p_init, i=None):
@@ -378,7 +381,7 @@ class ExtremalField(ABC):
         Add particle to existing trajectory
         """
         id_traj = pcl.idf
-        if id_traj not in self.trajs.keys():
+        if id_traj >= len(self.trajs):
             raise Exception(f'Error in add : Trajectory {id_traj} does not exist')
         else:
             self.trajs[id_traj].append(pcl)
@@ -397,7 +400,7 @@ class ExtremalField(ABC):
             return 0.5 * (self.get_init_adjoint(p1) + self.get_init_adjoint(p2))
 
     def empty(self):
-        return len(self.trajs.keys()) == 0
+        return len(self.trajs) == 0
 
     def get_nb(self, i):
         nb = []
@@ -788,6 +791,7 @@ class SolverEF:
                  asp_init=None,
                  no_coll_filtering=False,
                  quick_solve=False,
+                 quick_offset=0,
                  pareto=None,
                  max_active_ext=None,
                  no_transversality=False,
@@ -851,16 +855,17 @@ class SolverEF:
         self.mp = self.mp_dual
         self.max_extremals = 10000
         self.max_time = max_time
-        if cost_ceil is None:
+        if cost_ceil is None and mode == 1:
             cost_ceil = self.mp.aero.power(self.v_max) * self.mp.l_ref / self.v_max
             print(f'Automatic cost_ceil ({cost_ceil:.5g})')
         self.cost_ceil = cost_ceil
         self.rel_cost_ceil = 0.05 if rel_cost_ceil is None else rel_cost_ceil
-        self.cost_thres = rel_cost_ceil * cost_ceil
+        self.cost_thres = None if cost_ceil is None else rel_cost_ceil * cost_ceil
         self.asp_offset = asp_offset
         self.asp_init = asp_init if asp_init is not None else self.mp.model.v_a
 
         self.it = 0
+        self.it_first_reach = -1
 
         self.collbuf_shape = (50, 50) if collbuf_shape is None else collbuf_shape
         self.collbuf = CollisionBuffer()
@@ -878,8 +883,11 @@ class SolverEF:
         # Base collision filtering scheme only for steady problems
         self.no_coll_filtering = no_coll_filtering or self.mp.model.wind.t_end is not None
         self.quick_solve = quick_solve
+        self.quick_offset = quick_offset
+        self._qcounter = 0
         self.quick_traj_idx = -1
-        self.best_distances = [self.mp.geod_l]
+        self.quick_exit = False
+        self.best_distance = self.mp.geod_l
 
         self.any_out_obs = False
 
@@ -947,12 +955,14 @@ class SolverEF:
     def step_global(self):
 
         self.any_out_obs = False
-        self.best_distances = [self.mp.geod_l]
+        self.best_distance = self.mp.geod_l
 
         # Evolve active particles
         copy_active = []
         for i in self.ef.active:
             copy_active.append(i)
+
+        up_qcounter = False
 
         for idf in copy_active:
             pcl = self.ef.trajs[idf].get_last()
@@ -965,9 +975,19 @@ class SolverEF:
                 self.ef.set_captive(idf)
 
             dist = self.mp.distance(pcl_new.state, self.mp.x_target)
-            self.best_distances.append(dist)
-            if self.quick_solve and dist < self.abs_nb_ceil:
-                self.quick_traj_idx = idf
+            if dist < self.best_distance:
+                self.best_distance = dist
+            if dist < self.abs_nb_ceil:
+                if self.it_first_reach == -1:
+                    self.it_first_reach = self.it
+                    self.quick_traj_idx = idf
+                if self.quick_solve:
+                    if self._qcounter == self.quick_offset:
+                        self.quick_exit = True
+                    else:
+                        if not up_qcounter:
+                            self._qcounter += 1
+                            up_qcounter = True
             if not status:
                 self.ef.deactivate(idf, 'domain')
             elif abs(pcl_new.rot) > 2 * np.pi:
@@ -1247,7 +1267,7 @@ class SolverEF:
                     self.ef.deactivate(pcl.idf, reason='Hull')
         elif self.mode == 1:
             pcls = []
-            for traj in self.ef.trajs.values():
+            for traj in self.ef.trajs:
                 for pcl in traj.particles[-20:]:
                     pcls.append(pcl)
 
@@ -1274,7 +1294,7 @@ class SolverEF:
         return len(self.ef.active) == 0 or \
                self.step_algo >= self.max_steps or \
                len(self.ef.trajs) >= self.max_extremals or \
-               (self.quick_solve and self.quick_traj_idx != -1) or \
+               self.quick_exit or \
                (not self.any_out_obs) or \
                (self.max_active_ext is not None and len(self.ef.active) > self.max_active_ext)
 
@@ -1290,7 +1310,7 @@ class SolverEF:
                 print(
                     f'\rSteps : {self.step_algo:>6}/{self.max_steps}, '''
                     f'Extremals : {len(self.ef.trajs):>6}, Active : {len(self.ef.active):>4}, '
-                    f'Dist : {min(self.best_distances) / self.mp.geod_l * 100:>3.0f} ', end='', flush=True)
+                    f'Dist : {self.best_distance / self.mp.geod_l * 100:>3.0f} ', end='', flush=True)
         if self.step_algo == self.max_steps:
             msg = f'Stopped on iteration limit {self.max_steps}'
         elif len(self.ef.trajs) == self.max_extremals:
@@ -1388,6 +1408,12 @@ class SolverEF:
         return self.mp.aero.asp_opti(p)
 
     def build_opti_traj(self, dual=False):
+        """
+        Extract optimal trajectories from completed extremal front.
+        May extract several trajectories in energy-optimal mode.
+        :param dual: True if problem was solved backward in time.
+        :return: EFOptRes
+        """
         if not dual:
             self.set_primal(True)
             using_primal = True
@@ -1399,20 +1425,26 @@ class SolverEF:
         btrajs = {}
         closest = None
         dist = None
-        best_cost = None
-        for k, ptraj in self.ef.trajs.items():
-            for pcl in ptraj.particles:
-                duration = pcl.t - self.mp_primal.model.wind.t_start
-                cur_dist = self.mp.distance(pcl.state, self.mp.x_target)
-                if dist is None or cur_dist < dist:
-                    dist = cur_dist
-                    closest = pcl
-                if cur_dist < self.abs_nb_ceil:
-                    if best_cost is None or pcl.cost < best_cost:
-                        if k not in list(map(lambda x: x.idf, bests.values())) or \
-                                duration < bests[k].t - self.mp_primal.model.wind.t_start:
-                            best_cost = pcl.cost
-                            bests[k] = pcl
+        # Optimal trajectory is to
+        idt_min, idt_max = self.it_first_reach, self.it_first_reach
+        if self.quick_solve:
+            idt_max += self.quick_offset
+        if self.quick_offset == 0:
+            bests[self.quick_traj_idx] = self.ef.trajs[self.quick_traj_idx][self.it_first_reach]
+        else:
+            for k, ptraj in enumerate(self.ef.trajs):
+                for idt in range(idt_min, idt_max + 1):
+                    try:
+                        pcl = ptraj[idt]
+                    except IndexError:
+                        continue
+                    cur_dist = self.mp.distance(pcl.state, self.mp.x_target)
+                    if dist is None or cur_dist < dist:
+                        dist = cur_dist
+                        closest = pcl
+                    if cur_dist < self.abs_nb_ceil:
+                        bests[k] = pcl
+                        break
 
         status = 1 if self.quick_solve else 2
         if len(bests) == 0:
@@ -1440,65 +1472,78 @@ class SolverEF:
 
         # Build optimal trajectories
         for pcl in bests.values():
-            nt = pcl.idt + 1
-            k0 = pcl.idf
-            p_traj = self.ef.trajs[k0]
-            points = np.zeros((nt, 2))
-            adjoints = np.zeros((nt, 2))
-            controls = np.zeros(nt)
-            ts = np.zeros(nt)
-            for s in range(p_traj.id_start, pcl.idt + 1):
-                ts[s] = p_traj[s].t
-                points[s] = p_traj[s].state
-                adjoints[s] = p_traj[s].adjoint
-                controls[s] = self.mp.control_angle(p_traj[s].adjoint, p_traj[s].state)
-
-            sm = p_traj.id_start - 1
-
-            if k0 not in range(self.N_disc_init):
-                kl, ku = self.ef.get_parents(k0)
-                a = 0.5
-                while sm >= 0:
-                    endl = sm < self.ef.trajs[kl].id_start
-                    endu = sm < self.ef.trajs[ku].id_start
-                    if endl and not endu:
-                        b = 0.5
-                        kl, _ = self.ef.get_parents(kl)
-                        a = a + b * (1 - a)
-                    if endu and not endl:
-                        b = 0.5
-                        _, ku = self.ef.get_parents(ku)
-                        a = a * b
-                    if endl and endu:
-                        b = 0.5
-                        c = 0.5
-                        kl, _ = self.ef.get_parents(kl)
-                        _, ku = self.ef.get_parents(ku)
-                        a = a * c + b * (1 - a)
-                    ptraj_l = self.ef.trajs[kl]
-                    ptraj_u = self.ef.trajs[ku]
-                    # Position cursor to lowest common instant
-                    sb = max(ptraj_l.id_start, ptraj_u.id_start)
-                    # Create interpolated traj
-                    for s in range(sb, sm + 1):
-                        ts[s] = ptraj_l[s].t
-                        state = (1 - a) * ptraj_l[s].state + a * ptraj_u[s].state
-                        adjoint = (1 - a) * ptraj_l[s].adjoint + a * ptraj_u[s].adjoint
-                        points[s] = state
-                        adjoints[s] = adjoint
-                        controls[s] = self.mp.control_angle(adjoint, state)
-                    sm = sb - 1
-            if not using_primal:
-                ts = ts[::-1]
-                points = points[::-1]
-                adjoints = adjoints[::-1]
-                controls = controls[::-1]
-            traj = AugmentedTraj(ts, points, adjoints, controls, nt - 1, self.mp.coords,
-                                 info=f'opt_m{int(self.mode)}_{self.asp_init:.5g}',
-                                 constant_asp=self.mp.model.v_a if self.mode == 0 else None)
-            btrajs[k0] = traj
+            traj = self.traj_rollback(pcl, using_primal)
+            btrajs[pcl.idf] = traj
         res = EFOptRes(status, bests, btrajs, self.mp_primal)
         return res
+
+    def traj_rollback(self, pcl: Particle, using_primal=True):
+        """
+        Builds a trajectory backward from front particle pcl.
+        The procedure fills the trajectory with the partial trajectory
+        ending at pcl, and further fills backward in time by interpolation
+        between parent trajectories.
+        :param pcl: Front particle ending trajectory
+        :param using_primal: True if problem is forward in time, False else
+        :return: AugmentedTraj
+        """
+        nt = pcl.idt + 1
+        k0 = pcl.idf
+        p_traj = self.ef.trajs[k0]
+        points = np.zeros((nt, 2))
+        adjoints = np.zeros((nt, 2))
+        controls = np.zeros(nt)
+        ts = np.zeros(nt)
+        for s in range(p_traj.id_start, pcl.idt + 1):
+            ts[s] = p_traj[s].t
+            points[s] = p_traj[s].state
+            adjoints[s] = p_traj[s].adjoint
+            controls[s] = self.mp.control_angle(p_traj[s].adjoint, p_traj[s].state)
+
+        sm = p_traj.id_start - 1
+
+        kl, ku = self.ef.get_parents(k0)
+        if kl is not None:
+            a = 0.5
+            while sm >= 0:
+                endl = sm < self.ef.trajs[kl].id_start
+                endu = sm < self.ef.trajs[ku].id_start
+                if endl and not endu:
+                    b = 0.5
+                    kl, _ = self.ef.get_parents(kl)
+                    a = a + b * (1 - a)
+                if endu and not endl:
+                    b = 0.5
+                    _, ku = self.ef.get_parents(ku)
+                    a = a * b
+                if endl and endu:
+                    b = 0.5
+                    c = 0.5
+                    kl, _ = self.ef.get_parents(kl)
+                    _, ku = self.ef.get_parents(ku)
+                    a = a * c + b * (1 - a)
+                ptraj_l = self.ef.trajs[kl]
+                ptraj_u = self.ef.trajs[ku]
+                # Position cursor to lowest common instant
+                sb = max(ptraj_l.id_start, ptraj_u.id_start)
+                # Create interpolated traj
+                for s in range(sb, sm + 1):
+                    ts[s] = ptraj_l[s].t
+                    state = (1 - a) * ptraj_l[s].state + a * ptraj_u[s].state
+                    adjoint = (1 - a) * ptraj_l[s].adjoint + a * ptraj_u[s].adjoint
+                    points[s] = state
+                    adjoints[s] = adjoint
+                    controls[s] = self.mp.control_angle(adjoint, state)
+                sm = sb - 1
+
+        if not using_primal:
+            ts = ts[::-1]
+            points = points[::-1]
+            adjoints = adjoints[::-1]
+            controls = controls[::-1]
+        return AugmentedTraj(ts, points, adjoints, controls, nt - 1, self.mp.coords,
+                             info=f'opt_m{int(self.mode)}_{self.asp_init:.5g}',
+                             constant_asp=self.mp.model.v_a if self.mode == 0 else None)
 
     def get_trajs(self, primal_only=False, dual_only=False):
         res = []
@@ -1508,7 +1553,7 @@ class SolverEF:
         if not dual_only:
             trajgroups.append(self.ef_primal.trajs)
         for i, trajs in enumerate(trajgroups):
-            for k, p_traj in trajs.items():
+            for k, p_traj in enumerate(trajs):
                 n = len(p_traj.particles)
                 timestamps = np.zeros(n)
                 points = np.zeros((n, 2))
