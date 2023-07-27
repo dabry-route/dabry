@@ -796,7 +796,8 @@ class SolverEF:
                  max_active_ext=None,
                  no_transversality=False,
                  v_bounds=None,
-                 N_pn_init=5):
+                 N_pn_init=5,
+                 alpha_factor=1.):
         self.mp_primal = mp
         self.mp_dual = NavigationProblem(**mp.__dict__)  # mp.dualize()
         mem = np.array(self.mp_dual.x_init)
@@ -900,7 +901,7 @@ class SolverEF:
         self.trimming_rate = 10
 
         # Parameter for alpha shapes in the trimming procedure
-        self.alpha_param = 0.05
+        self.alpha_param = 0.05 * alpha_factor
         self.alpha_value = 1 / (self.alpha_param * self.mp.l_ref)
 
         # For debug
@@ -1427,10 +1428,10 @@ class SolverEF:
         dist = None
         # Optimal trajectory is to
         idt_min, idt_max = self.it_first_reach, self.it_first_reach
-        if self.quick_solve:
+        if self.quick_exit:
             idt_max += self.quick_offset
-        if self.quick_offset == 0:
-            bests[self.quick_traj_idx] = self.ef.trajs[self.quick_traj_idx][self.it_first_reach]
+            if self.quick_offset == 0:
+                bests[self.quick_traj_idx] = self.ef.trajs[self.quick_traj_idx][self.it_first_reach]
         else:
             for k, ptraj in enumerate(self.ef.trajs):
                 for idt in range(idt_min, idt_max + 1):
@@ -1541,8 +1542,9 @@ class SolverEF:
             points = points[::-1]
             adjoints = adjoints[::-1]
             controls = controls[::-1]
+        asp_init = self.asp_init if self.mode == 0 else self.mp.aero.asp_opti(np.linalg.norm(adjoints[0]))
         return AugmentedTraj(ts, points, adjoints, controls, nt - 1, self.mp.coords,
-                             info=f'opt_m{int(self.mode)}_{self.asp_init:.5g}',
+                             info=f'opt_m{int(self.mode)}_{asp_init:.5g}',
                              constant_asp=self.mp.model.v_a if self.mode == 0 else None)
 
     def get_trajs(self, primal_only=False, dual_only=False):
