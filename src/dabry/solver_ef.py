@@ -5,7 +5,6 @@ from abc import ABC
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import scipy.integrate
 from alphashape import alphashape
 from numpy import arcsin as asin, ndarray
@@ -14,7 +13,7 @@ from numpy import sin, cos, pi
 from shapely.geometry import Point
 
 from dabry.feedback import MapFB
-from dabry.misc import Utils, Chrono
+from dabry.misc import Utils, Chrono, Debug
 from dabry.problem import NavigationProblem
 from dabry.trajectory import AugmentedTraj
 
@@ -1672,8 +1671,8 @@ class Debugger:
 class Register:
 
     def __init__(self):
-        df = pd.read_csv('/home/bastien/Documents/data/liste_des_prenoms.csv', delimiter=';')
-        self.names = list(df['Prenoms'])
+        self.db = Debug()
+        self.names = self.db.names
 
     def name(self, i: int):
         return self.names[i % len(self.names)]
