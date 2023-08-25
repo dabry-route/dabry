@@ -89,12 +89,12 @@ class ZermeloDyn(Dynamics):
         super().__init__(wind)
         self.v_a = v_a
 
-    def value(self, x, u, t, v_a=None):
+    def value(self, x, s, t, v_a=None):
         if v_a is None:
             v_a = self.v_a
-        return v_a * np.array([np.cos(u), np.sin(u)]) + self.wind.value(t, x)
+        return v_a * s + self.wind.value(t, x)
 
-    def d_value__d_state(self, x, u, t, v_a=None):
+    def d_value__d_state(self, x, s, t, v_a=None):
         return self.wind.d_value(t, x)
 
     def __str__(self):
@@ -118,20 +118,20 @@ class PCZermeloDyn(Dynamics):
         self.v_a = v_a
         self.factor = 1 / Utils.EARTH_RADIUS
 
-    def value(self, x, psi, t, v_a=None):
+    def value(self, x, s, t, v_a=None):
         if v_a is None:
             v_a = self.v_a
         return self.factor * (
-                np.diag([1 / cos(x[1]), 1.]) @ (v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)))
+                np.diag([1 / cos(x[1]), 1.]) @ (v_a * s + self.wind.value(t, x)))
 
-    def d_value__d_state(self, x, psi, t, v_a=None):
+    def d_value__d_state(self, x, s, t, v_a=None):
         if v_a is None:
             v_a = self.v_a
         wind_gradient = np.zeros((x.size, x.size))
         wind_gradient[:] = self.wind.d_value(t, x)
         res = self.factor * np.column_stack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
                                              np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
-                                             (v_a * np.array([sin(psi), cos(psi)]) + self.wind.value(t, x)) +
+                                             (v_a * s + self.wind.value(t, x)) +
                                              np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1]))
         return res
 

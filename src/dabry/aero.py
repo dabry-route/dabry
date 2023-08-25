@@ -2,7 +2,6 @@ from abc import ABC
 
 import numpy as np
 import scipy.optimize
-from ambiance import ambiance
 
 """
 aero.py
@@ -109,23 +108,23 @@ class MermozLLAero(LLAero):
         self.mode += '-mermoz'
 
 
-class ComAircraftAero(LLAero):
-
-    def __init__(self, level):
-        """
-        :param level: Flight level in hPa
-        """
-        # Coefficients from A330-300
-        a = ambiance.Atmosphere.from_pressure(level * 100)
-        rho = a.density[0]
-        S = 361
-        CD0 = 0.03
-        k = 0.044
-        m = 150e3
-        kp1 = 0.5 * rho * S * CD0
-        kp2 = 2 * k * (10 * m) ** 2 / rho / S
-        super().__init__(kp1, kp2)
-        self.mode += '-com_aircraft'
+# class ComAircraftAero(LLAero):
+#
+#     def __init__(self, level):
+#         """
+#         :param level: Flight level in hPa
+#         """
+#         # Coefficients from A330-300
+#         a = ambiance.Atmosphere.from_pressure(level * 100)
+#         rho = a.density[0]
+#         S = 361
+#         CD0 = 0.03
+#         k = 0.044
+#         m = 150e3
+#         kp1 = 0.5 * rho * S * CD0
+#         kp2 = 2 * k * (10 * m) ** 2 / rho / S
+#         super().__init__(kp1, kp2)
+#         self.mode += '-com_aircraft'
 
 
 class MermozAero(Aero):

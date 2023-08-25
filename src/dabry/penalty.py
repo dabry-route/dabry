@@ -38,7 +38,7 @@ class Penalty:
     def d_value(self, t, x):
         # Finite differencing by default
         dx = self._dx
-        a1 = 1 / (2 * dx) * (self.value(t, x + dx * np.array((1, 0))) - self.value(t ,x - dx * np.array((1, 0))))
+        a1 = 1 / (2 * dx) * (self.value(t, x + dx * np.array((1, 0))) - self.value(t, x - dx * np.array((1, 0))))
         a2 = 1 / (2 * dx) * (self.value(t, x + dx * np.array((0, 1))) - self.value(t, x - dx * np.array((0, 1))))
         return np.hstack((a1, a2))
 

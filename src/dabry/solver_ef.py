@@ -853,7 +853,7 @@ class SolverEF:
         # Default mode is dual problem
         self.mode_primal = False
         self.mp = self.mp_dual
-        self.max_extremals = 10000
+        self.max_extremals = 20000
         self.max_time = max_time
         if cost_ceil is None and mode == 1:
             cost_ceil = self.mp.aero.power(self.v_max) * self.mp.l_ref / self.v_max
@@ -1029,20 +1029,20 @@ class SolverEF:
         x_prev[:] = pcl.state
         p[:] = pcl.adjoint
         t = pcl.t
-        u = None
+        s = None
         ccw = pcl.ccw
         rot = pcl.rot
         v_a = None
         if pcl.i_obs == -1:
             if self.manual_integration:
                 # For the moment, simple Euler scheme
-                u = self.mp.control_angle(p, x)
+                s = self.mp.control_vector(p, x)
                 kw = {}
                 if self.mode == self.MODE_ENERGY:
                     kw['v_a'] = v_a = np.min(
                         (self.mp.aero.v_max, np.max((self.mp.aero.v_min, self.mp.aero.asp_opti(p)))))
-                dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
-                A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
+                dyn_x = self.mp.model.dyn.value(x, s, t, **kw)
+                A = -self.mp.model.dyn.d_value__d_state(x, s, t, **kw).transpose()
                 dyn_p = A.dot(p) - self.mp.penalty.d_value(t, x)
                 x += self.dt * dyn_x
                 p += self.dt * dyn_p
@@ -1055,12 +1055,12 @@ class SolverEF:
                 def f(t, z):
                     x = z[:2]
                     p = z[2:]
-                    u = self.mp.control_angle(p, x)
+                    s = self.mp.control_vector(p, x)
                     kw = {}
                     if self.mode == self.MODE_ENERGY:
                         kw['v_a'] = self.mp.aero.asp_opti(p)
-                    dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
-                    A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
+                    dyn_x = self.mp.model.dyn.value(x, s, t, **kw)
+                    A = -self.mp.model.dyn.d_value__d_state(x, s, t, **kw).transpose()
                     dyn_p = A.dot(p)
                     return np.hstack((dyn_x, dyn_p))
 
@@ -1095,11 +1095,12 @@ class SolverEF:
                 u = max([arg_ot - asin(r), arg_ot + asin(r) - pi], key=lambda uu: gs_f(uu, v_a, w, obs_tgt))
                 if self.mp.coords == Utils.COORD_GCS:
                     u = np.pi / 2. - u
-                dyn_x = self.mp.model.dyn.value(x, u, t)
+                s = np.array((np.cos(u), np.sin(u)))
+                dyn_x = self.mp.model.dyn.value(x, s, t)
                 x_prev = np.zeros(x.shape)
                 x_prev[:] = x
                 x += self.dt * dyn_x
-                p[:] = - 1. * np.array((np.cos(u), np.sin(u)))
+                p[:] = - 1. * s
                 t += self.dt
                 arg_ref_x = atan2(*(x - self.mp.obstacles[pcl.i_obs].ref_point)[::-1])
                 arg_ref_x_prev = atan2(*(x_prev - self.mp.obstacles[pcl.i_obs].ref_point)[::-1])
@@ -1126,9 +1127,6 @@ class SolverEF:
                     # Keep moving in obstacle, no points leaving
                     i_obs_new = pcl.i_obs
                 else:
-                    if self.mp.coords == Utils.COORD_GCS:
-                        u = np.pi / 2 - u
-                    s = np.array((np.cos(u), np.sin(u)))
                     obs_grad = self.mp.obstacles[i_obs_new].d_value(x)
                     obs_tgt = np.array(((0, -1), (1, 0))) @ obs_grad
                     ccw = s @ obs_tgt > 0.
@@ -1285,7 +1283,7 @@ class SolverEF:
             for pcl in self.ef.last_active_pcls():
                 z = np.array((normalize(*(tuple(pcl.state) + (pcl.cost,))),))
                 dist = hull.nearest.on_surface(z)[1][0]
-                if dist > 0.05:
+                if dist > 0.01:
                     self.ef.deactivate(pcl.idf, reason='Hull')
         # Apply deactivation to the graph of relations
         self.ef.prune()

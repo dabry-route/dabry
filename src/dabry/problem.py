@@ -234,6 +234,24 @@ class NavigationProblem:
             pl = mat @ adjoint
             return np.pi / 2. - np.arctan2(*-pl[::-1])
 
+    def control_vector(self, adjoint, state=None):
+        if self.coords == Utils.COORD_CARTESIAN:
+            # angle to x-axis in trigonometric angle
+            return - adjoint / np.linalg.norm(adjoint)
+        else:
+            # gcs, angle from north in cw order
+            mat = np.diag((1 / np.cos(state[1]), 1.))
+            pl = mat @ adjoint
+            return -pl / np.linalg.norm(pl)
+
+    def dyn_aug(self, t, y):
+        # Dynamics of augmented system (state, adjoint)
+        x = y[:2]
+        p = y[2:4]
+        s = self.control_vector(p, x)
+        return np.hstack((self.model.dyn.value(x, s, t, v_a=None),
+                          -self.model.dyn.d_value__d_state(y[:2], s, t).transpose() @ p))
+
     def eliminate_trajs(self, target, tol: float):
         """
         Delete trajectories that are too far from the objective point

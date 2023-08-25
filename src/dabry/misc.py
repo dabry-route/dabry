@@ -311,6 +311,15 @@ class Utils:
         return res
 
     @staticmethod
+    def heading_opti_dir(x, p, t, coords):
+        if coords == Utils.COORD_CARTESIAN:
+            return -p / np.linalg.norm(p)
+        # coords == COORD_GCS
+        v = - np.diag([1 / cos(x[1]), 1.]) @ p
+        v = v / np.linalg.norm(v)
+        return v
+
+    @staticmethod
     def airspeed_opti(p, cost='dobrokhodov'):
         if cost == 'dobrokhodov':
             pn = np.linalg.norm(p)
