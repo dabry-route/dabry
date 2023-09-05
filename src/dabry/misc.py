@@ -256,6 +256,20 @@ class Utils:
             return np.linalg.norm(x1 - x2)
 
     @staticmethod
+    def heading(x1, x2, coords):
+        # Initial heading to go from x1 to x2 following a geodesic curve
+        if coords == Utils.COORD_GCS:
+            # x1, x2 shall be vectors (lon, lat) in radians
+            lon1, lat1 = tuple(x1)
+            lon2, lat2 = tuple(x2)
+            return np.arctan2(np.sin(lon2 - lon1) * np.cos(lat2),
+                              np.cos(lat1) * np.sin(lat2) - np.sin(lat1) * np.cos(lat2) * np.cos(lon2 - lon1))
+        else:
+            # Assuming coords == COORD_CARTESIAN
+            # x1, x2 shall be cartesian vectors in meters
+            return np.arctan2(x2[1] - x1[1], x2[0] - x1[0])
+
+    @staticmethod
     def decorate(ax, title=None, xlab=None, ylab=None, legend=None, xlim=None, ylim=None, min_yspan=None):
         ax.xaxis.grid(color='k', linestyle='-', linewidth=0.2)
         ax.yaxis.grid(color='k', linestyle='-', linewidth=0.2)

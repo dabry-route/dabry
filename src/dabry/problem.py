@@ -224,6 +224,9 @@ class NavigationProblem:
     def middle(self, x1, x2):
         return Utils.middle(x1, x2, self.coords)
 
+    def heading(self, x1, x2):
+        return Utils.heading(x1, x2, self.coords)
+
     def control_angle(self, adjoint, state=None):
         if self.coords == Utils.COORD_CARTESIAN:
             # angle to x-axis in trigonometric angle

@@ -84,6 +84,8 @@ class DDFmanager:
                 continue
             if filename.endswith('rff.h5') and self.cache_rff:
                 continue
+            if filename.startswith('_'):
+                continue
             path = os.path.join(self.case_dir, filename)
             if os.path.isdir(path):
                 for file in os.listdir(path):
