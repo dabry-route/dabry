@@ -249,7 +249,7 @@ class Utils:
     def distance(x1, x2, coords):
         if coords == Utils.COORD_GCS:
             # x1, x2 shall be vectors (lon, lat) in radians
-            return Utils.geodesic_distance(x1, x2)
+            return Utils.geodesic_distance(x1, x2)  # max(abs(x1[0] - x2[0]), abs(x1[1] - x2[1]))
         else:
             # Assuming coords == COORD_CARTESIAN
             # x1, x2 shall be cartesian vectors in meters
@@ -445,6 +445,8 @@ class Utils:
         :param duration: Duration in seconds
         :return: String representation of duration in proper units
         """
+        if duration < 1.:
+            return f'{duration*1000:.1f}ms'
         if duration < 200:
             return f'{duration:.2f}s'
         elif duration < 60 * 200:

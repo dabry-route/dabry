@@ -4,7 +4,7 @@ import os
 import h5py
 import numpy as np
 from numpy import ndarray, pi
-from pyproj import Proj
+from pyproj import Proj, Geod
 
 from dabry.aero import MermozAero
 from dabry.feedback import Feedback, AirspeedLaw, MultiFeedback, GSTargetFB, HTargetFB
@@ -225,7 +225,9 @@ class NavigationProblem:
         return Utils.middle(x1, x2, self.coords)
 
     def heading(self, x1, x2):
-        return Utils.heading(x1, x2, self.coords)
+        g = Geod(ellps='WGS84')
+        az1, _, _ = g.inv(*x1, *x2, radians=True)
+        return az1
 
     def control_angle(self, adjoint, state=None):
         if self.coords == Utils.COORD_CARTESIAN:
