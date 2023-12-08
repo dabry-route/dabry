@@ -14,6 +14,7 @@ from dabry.model import Model, ZermeloGeneralModel
 from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, MeanObs
 from dabry.penalty import Penalty
 from dabry.stoppingcond import StoppingCond, TimedSC, DistanceSC
+from dabry.trajectory import Trajectory
 from dabry.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
     PointSymWind, BandGaussWind, RadialGaussWindT, LCWind, LinearWindT, BandWind, LVWind, TrapWind, ChertovskihWind
 
@@ -49,7 +50,7 @@ class NavigationProblem:
         self.x_target = np.zeros(2)
         self.x_target[:] = x_target
         self.coords = coords
-        self.t_init = t_init
+        self.t_init = t_init if t_init is not None else self.model.wind.t_start
         # self.aero = LLAero(mode='dabry')
         self.aero = MermozAero() if aero is None else aero
 
@@ -152,7 +153,6 @@ class NavigationProblem:
                              stop_cond: StoppingCond,
                              max_iter=20000,
                              int_step=0.0001,
-                             t_init=0.,
                              backward=False):
         """
         Use the specified discrete integration method to build a trajectory
@@ -162,7 +162,6 @@ class NavigationProblem:
         :param stop_cond: A stopping condition for the integration
         :param max_iter: Maximum number of iterations
         :param int_step: Integration step
-        :param t_init: Initial timestamp
         """
         sc = TimedSC(1.)
         sc.value = lambda t, x: stop_cond.value(t, x) or not self.domain(x)
@@ -174,7 +173,7 @@ class NavigationProblem:
                                   stop_cond=sc,
                                   max_iter=max_iter,
                                   int_step=int_step,
-                                  t_init=t_init,
+                                  t_init=self.t_init,
                                   backward=backward)
         traj = integrator.integrate(x_init)
         self.trajs.append(traj)
@@ -291,8 +290,7 @@ class NavigationProblem:
         fb = GSTargetFB(self.model.wind, self.model.v_a, self.x_target, self.coords)
         self.load_feedback(fb)
         sc = DistanceSC(lambda x: self.distance(x, self.x_target), self.geod_l * 0.01)
-        traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale / 2000, max_iter=6000,
-                                         t_init=self.model.wind.t_start)
+        traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale / 2000, max_iter=6000)
         if sc.value(0, traj.points[traj.last_index]):
             return traj.timestamps[traj.last_index] - self.model.wind.t_start
         else:
@@ -302,12 +300,64 @@ class NavigationProblem:
         fb = HTargetFB(self.x_target, self.coords)
         self.load_feedback(fb)
         sc = DistanceSC(lambda x: self.distance(x, self.x_target), self.geod_l * 0.01)
-        traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale / 2000, max_iter=6000,
-                                         t_init=self.model.wind.t_start)
+        traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale / 2000, max_iter=6000)
         if sc.value(0, traj.points[traj.last_index]):
             return traj.timestamps[traj.last_index] - self.model.wind.t_start
         else:
             return -1
+
+    def waypoints(self, traj: Trajectory):
+        """
+        Read trajectory as waypoints orders and evaluate a vehicle's performance on it
+        :param Trajectory: Waypoints orders
+        :return: Trajectory following waypoints in ambient wind field
+        """
+        nt = traj.points.shape[0]
+        t = self.model.wind.t_start
+        points = np.zeros(traj.points.shape)
+        controls = np.zeros(traj.points.shape[0])
+        timestamps = np.zeros(traj.timestamps.shape)
+        for k in range(nt - 1):
+            points[k, :] = traj.points[k]
+            timestamps[k] = t
+
+            if self.coords == Utils.COORD_CARTESIAN:
+                v_gs = (traj.points[k + 1] - traj.points[k]) / (traj.timestamps[k + 1] - traj.timestamps[k])
+            else:
+                dlonlat_dt = (traj.points[k + 1] - traj.points[k]) / (traj.timestamps[k + 1] - traj.timestamps[k])
+                v_gs = Utils.EARTH_RADIUS * np.diag((np.cos(traj.points[k][1]), 1.)) @ dlonlat_dt
+            v_w = self.model.wind.value(t, traj.points[k])
+            u_gs = v_gs / np.linalg.norm(v_gs)
+
+            up_gs = np.array((-u_gs[1], u_gs[0]))
+            v_wn = v_w @ up_gs
+
+            ratio = 1 * -v_wn / self.model.v_a
+            if np.abs(ratio) > 1.:
+                raise Exception('Unable to follow waypoints : wind too strong')
+            theta_gs = np.arctan2(*u_gs[::-1])
+            theta_u1 = theta_gs + np.arcsin(ratio)
+            theta_u2 = theta_gs + np.pi - np.arcsin(ratio)
+            vv_gs1 = v_w + self.model.v_a * np.array((np.cos(theta_u1), np.sin(theta_u1)))
+            vv_gs2 = v_w + self.model.v_a * np.array((np.cos(theta_u2), np.sin(theta_u2)))
+            if vv_gs1 @ u_gs > vv_gs2 @ u_gs:
+                theta_u = theta_u1
+                vv_gs = vv_gs1
+            else:
+                theta_u = theta_u2
+                vv_gs = vv_gs2
+            l = self.distance(traj.points[k + 1], traj.points[k])
+            dt = l / np.linalg.norm(vv_gs)
+            controls[k] = theta_u if self.coords == Utils.COORD_CARTESIAN else np.pi / 2. - theta_u
+            print(k, int(t), int(traj.timestamps[k]), f'{np.linalg.norm(vv_gs):.4g}', f'{np.linalg.norm(v_gs):.4g}',
+                  f'{controls[k]:.4g}', f'{traj.controls[k]:.4g}')
+            t += dt
+            if k == nt - 2:
+                points[k + 1, :] = traj.points[k + 1]
+                timestamps[k + 1] = t
+                controls[k + 1] = controls[k]
+
+        return Trajectory(timestamps, points, controls, nt - 1, self.coords)
 
 
 class DatabaseProblem(NavigationProblem):

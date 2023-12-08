@@ -3,10 +3,7 @@ import json
 import os
 import shutil
 
-import markdown
-
 from dabry.problem import NavigationProblem
-from dabry.solver_rp import SolverRP
 
 """
 params_summary.py
@@ -99,7 +96,7 @@ class ParamsSummary:
     def _fcomptime(self, comptime):
         return f'{comptime:.3f}'
 
-    def load_from_solver_rp(self, sv: SolverRP):
+    def load_from_solver_rp(self, sv):
         self.load_from_problem(sv.mp)
         self.add_param('max_time', sv.T)
         self.add_param('airspeed', sv.mp.model.v_a)
@@ -121,6 +118,7 @@ class ParamsSummary:
         self.add_param('aero_mode', pb.aero.mode)
 
     def process_params(self):
+        import markdown
         params = self.params
         if params['coords'] == 'gcs':
             self.coords_units = '°'

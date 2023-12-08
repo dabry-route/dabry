@@ -434,19 +434,18 @@ class E_GSTargetFB(MultiFeedback):
         return self._heading(asp_opti)[0], asp_opti
 
 
-class MapFB(Feedback):
+class GriddedStaticFB(Feedback):
 
     def __init__(self, grid, values):
         """
         :param grid: Grid of points for discretization (nx, ny, 2)
-        :param values: Heading values on the grid (nx - 1, ny - 1)
+        :param values: Heading values and validity date on the grid (nx - 1, ny - 1, 2)
         """
         self.grid = np.array(grid)
         self.values = np.array(values)
         super().__init__(2, UniformWind(np.array((0, 0))))
 
     def value(self, _, x):
-
         xx = (x[0] - self.grid[0, 0, 0]) / (self.grid[-1, 0, 0] - self.grid[0, 0, 0])
         yy = (x[1] - self.grid[0, 0, 1]) / (self.grid[0, -1, 1] - self.grid[0, 0, 1])
 
@@ -455,3 +454,37 @@ class MapFB(Feedback):
         j = int((ny - 1) * yy)
 
         return self.values[i, j]
+
+
+class GriddedFB(Feedback):
+
+    def __init__(self, grid, values):
+        """
+        :param grid: Grid of points for discretization (nx, ny, 2)
+        :param values: Heading values and validity date on the grid, shape (nx - 1, ny - 1, ndt, 2)
+        grid cell index, control value layer, (value of control, validity date)
+        """
+        self.grid = np.array(grid)
+        self.values = np.array(values)
+        super().__init__(2, UniformWind(np.array((0, 0))))
+
+    def value(self, t, x):
+        xx = (x[0] - self.grid[0, 0, 0]) / (self.grid[-1, 0, 0] - self.grid[0, 0, 0])
+        yy = (x[1] - self.grid[0, 0, 1]) / (self.grid[0, -1, 1] - self.grid[0, 0, 1])
+
+        nx, ny, _ = self.grid.shape
+        i = int((nx - 1) * xx)
+        j = int((ny - 1) * yy)
+
+        ndt = self.values.shape[2]
+        if t < self.values[i, j, 0, 1] or self.values[i, j, ndt - 1, 1] < t:
+            msg = 'Control law : ts {t:.0f} out of scope ({tl:.0f}, {tu:.0f})'.format(t=t, tl=self.values[i, j, 0, 1],
+                                                                                      tu=self.values[i, j, ndt - 1, 1])
+            raise Exception(msg)
+        k_inf = 0
+        for k in range(ndt - 1):
+            k_inf = k
+            if self.values[i, j, k, 1] < t:
+                break
+        alpha = (t - self.values[i, j, k_inf, 1]) / (self.values[i, j, k_inf + 1, 1] - self.values[i, j, k_inf, 1])
+        return (1 - alpha) * self.values[i, j, k_inf, 0] + alpha * self.values[i, j, k_inf + 1, 0]

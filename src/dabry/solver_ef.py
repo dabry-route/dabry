@@ -5,14 +5,13 @@ from abc import ABC
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.integrate
 from alphashape import alphashape
 from numpy import arcsin as asin, ndarray
 from numpy import arctan2 as atan2
 from numpy import sin, cos, pi
 from shapely.geometry import Point
 
-from dabry.feedback import MapFB
+from dabry.feedback import GriddedStaticFB
 from dabry.misc import Utils, Chrono, Debug
 from dabry.problem import NavigationProblem
 from dabry.trajectory import AugmentedTraj
@@ -710,23 +709,23 @@ class CollisionBuffer:
         nx, ny = len(self._collbuf), len(self._collbuf[0])
         return int(nx * xx), int(ny * yy)
 
-    def add(self, pos, id, idt):
+    def add(self, pos, idf, idt):
         """
         :param pos: Position in space (x, y)
-        :param id: Id of trajectory to log in
+        :param idf: Id of trajectory to log in
         :param idt: Time index to log in
         """
         i, j = self._index(pos)
         d = self._collbuf[i][j]
-        if id not in d.keys():
-            d[id] = (idt, idt)
+        if idf not in d.keys():
+            d[idf] = (idt, idt)
         else:
-            imin, imax = d[id]
+            imin, imax = d[idf]
             if idt < imin:
                 imin = idt
             elif idt > imax:
                 imax = idt
-            d[id] = (imin, imax)
+            d[idf] = (imin, imax)
 
     def add_particle(self, p: Particle):
         self.add(p.state, p.idf, p.idt)
@@ -1034,41 +1033,22 @@ class SolverEF:
         rot = pcl.rot
         v_a = None
         if pcl.i_obs == -1:
-            if self.manual_integration:
-                # For the moment, simple Euler scheme
-                s = self.mp.control_vector(p, x)
-                kw = {}
-                if self.mode == self.MODE_ENERGY:
-                    kw['v_a'] = v_a = np.min(
-                        (self.mp.aero.v_max, np.max((self.mp.aero.v_min, self.mp.aero.asp_opti(p)))))
-                dyn_x = self.mp.model.dyn.value(x, s, t, **kw)
-                A = -self.mp.model.dyn.d_value__d_state(x, s, t, **kw).transpose()
-                dyn_p = A.dot(p) - self.mp.penalty.d_value(t, x)
-                x += self.dt * dyn_x
-                p += self.dt * dyn_p
-                t += self.dt
-                # Transversality condition for debug purposes
-                # a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
-                # For compatibility with other case
-                status = True
-            else:
-                def f(t, z):
-                    x = z[:2]
-                    p = z[2:]
-                    s = self.mp.control_vector(p, x)
-                    kw = {}
-                    if self.mode == self.MODE_ENERGY:
-                        kw['v_a'] = self.mp.aero.asp_opti(p)
-                    dyn_x = self.mp.model.dyn.value(x, s, t, **kw)
-                    A = -self.mp.model.dyn.d_value__d_state(x, s, t, **kw).transpose()
-                    dyn_p = A.dot(p)
-                    return np.hstack((dyn_x, dyn_p))
-
-                sol = scipy.integrate.solve_ivp(f, [pcl.t, pcl.t + self.dt], np.hstack((x, p)))
-                x = sol.y[:2, -1]
-                p = sol.y[2:, -1]
-                t += self.dt
-                status = True
+            # Explicit Euler integration scheme for simplicity
+            s = self.mp.control_vector(p, x)
+            kw = {}
+            if self.mode == self.MODE_ENERGY:
+                kw['v_a'] = v_a = np.min(
+                    (self.mp.aero.v_max, np.max((self.mp.aero.v_min, self.mp.aero.asp_opti(p)))))
+            dyn_x = self.mp.model.dyn.value(x, s, t, **kw)
+            A = -self.mp.model.dyn.d_value__d_state(x, s, t, **kw).transpose()
+            dyn_p = A.dot(p) - self.mp.penalty.d_value(t, x)
+            x += self.dt * dyn_x
+            p += self.dt * dyn_p
+            t += self.dt
+            # Transversality condition for debug purposes
+            # a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
+            # For compatibility with other case
+            status = True
         else:
             # Obstacle mode. Follow the obstacle boundary as fast as possible
             obs_grad = self.mp.obstacles[pcl.i_obs].d_value(x)
@@ -1087,9 +1067,9 @@ class SolverEF:
                 # print('Impossible !')
                 status = False
             else:
-                def gs_f(uu, va, w, reference):
+                def gs_f(uu, va, ww, reference):
                     # Ground speed projected to reference
-                    return (np.array((cos(uu), sin(uu))) * va + w) @ reference
+                    return (np.array((cos(uu), sin(uu))) * va + ww) @ reference
 
                 # Select heading that maximizes ground speed along obstacle
                 u = max([arg_ot - asin(r), arg_ot + asin(r) - pi], key=lambda uu: gs_f(uu, v_a, w, obs_tgt))
@@ -1348,7 +1328,6 @@ class SolverEF:
 
         if not backward:
             # Only compute forward front
-            self.set_primal(True)
             self.propagate(verbose=verbose)
             res = self.build_opti_traj()
         else:
@@ -1592,7 +1571,7 @@ class SolverEF:
         grid = np.dstack(np.meshgrid(np.linspace(self.mp.bl[1], self.mp.tr[1], ny),
                                      np.linspace(self.mp.bl[0], self.mp.tr[0], nx))[::-1])
 
-        values = np.zeros((nx - 1, ny - 1))
+        values = np.zeros((nx - 1, ny - 1, 2))
         costs = np.infty * np.ones((nx - 1, ny - 1))
 
         x0 = self.mp.bl[0]
@@ -1605,14 +1584,15 @@ class SolverEF:
             yy = (x[1] - y0) / (y1 - y0)
             return int((nx - 1) * xx), int((ny - 1) * yy)
 
-        for traj in self.ef_dual.trajs.values():
+        for traj in self.ef_dual.trajs:
             for pcl in traj.particles:
                 i, j = index(pcl.state)
                 if pcl.cost < costs[i, j]:
                     costs[i, j] = pcl.cost
-                    values[i, j] = self.mp.control_angle(pcl.adjoint, pcl.state)
+                    values[i, j, 0] = self.mp.control_angle(pcl.adjoint, pcl.state)
+                    values[i, j, 1] = pcl.t
 
-        return MapFB(grid, values)
+        return GriddedStaticFB(grid, values)
 
 
 class Debugger:
@@ -1624,11 +1604,11 @@ class Debugger:
     def show_points(self):
         ax = plt.figure().add_subplot(projection='3d')
         n = 0
-        for traj in self.solver.ef.trajs.values():
+        for traj in self.solver.ef.trajs:
             n += len(traj.particles)
         points = np.zeros((n, 3))
         i = 0
-        for traj in self.solver.ef.trajs.values():
+        for traj in self.solver.ef.trajs:
             for pcl in traj.particles:
                 points[i, :] = pcl.state[0], pcl.state[1], pcl.cost
                 i += 1
@@ -1642,11 +1622,10 @@ class Debugger:
         n = len(self.solver.ef.trajs)
         points = np.zeros((n, 3))
         labels = np.zeros(n, dtype=int)
-        for i, key in enumerate(self.solver.ef.trajs.keys()):
-            traj = self.solver.ef.trajs[key]
+        for i, traj in enumerate(self.solver.ef.trajs):
             pcl = traj.get_last()
             points[i, :] = pcl.state[0], pcl.state[1], pcl.cost
-            labels[i] = key
+            labels[i] = i
 
         ax.scatter(points[:, 0], points[:, 1])
         for i in range(n):

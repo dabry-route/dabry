@@ -7,7 +7,7 @@ import h5py
 import numpy as np
 import pygrib
 import scipy.interpolate as itp
-from mpl_toolkits.basemap import Basemap
+
 from numpy import ndarray, pi, sin, cos
 from pyproj import Proj
 from tqdm import tqdm
@@ -808,6 +808,7 @@ class DiscreteWind(Wind):
         self.is_analytical = False
 
     def _rotate_wind(self, u, v, x, y):
+        from mpl_toolkits.basemap import Basemap
         if self.bm is None:
             if self.lon_0 is not None:
                 self.bm = Basemap(projection='ortho',

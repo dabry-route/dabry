@@ -17,7 +17,6 @@ setup(
                       'Markdown',
                       'matplotlib',
                       'numpy',
-                      'parse',
                       'pygrib',
                       'pyproj',
                       'scipy',

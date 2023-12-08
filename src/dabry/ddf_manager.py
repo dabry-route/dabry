@@ -4,7 +4,6 @@ import sys
 from datetime import datetime, timedelta
 from time import strftime
 
-import cdsapi
 import h5py
 import numpy as np
 import pygrib
@@ -14,6 +13,7 @@ from dabry.misc import Utils
 from dabry.params_summary import ParamsSummary
 from dabry.penalty import Penalty, DiscretePenalty
 from dabry.problem import NavigationProblem
+from dabry.trajectory import Trajectory
 from dabry.wind import Wind, DiscreteWind
 
 """
@@ -142,6 +142,22 @@ class DDFmanager:
                 if hasattr(traj, 'energy'):
                     dset = trajgroup.create_dataset('energy', n - 1, dtype='f8', fillvalue=0.)
                     dset[:] = traj.energy[:n - 1]
+
+    def load_trajs(self):
+        filepath = os.path.join(self.case_dir, self.trajs_filename)
+        res = []
+        with h5py.File(filepath, "r") as f:
+            for trajdata in f.values():
+                points = np.array(trajdata['data'])
+                timestamps = np.array(trajdata['ts'])
+                controls = np.array(trajdata['controls'])
+                nt = points.shape[0]
+                traj = Trajectory(timestamps, points, controls, nt - 1,
+                                  coords=trajdata.attrs['coords'],
+                                  type=trajdata.attrs['type'],
+                                  interrupted=trajdata.attrs['interrupted'])
+                res.append(traj)
+        return res
 
     def log(self, pb, file=None):
         self.ps.load_from_problem(pb)
@@ -367,6 +383,7 @@ class DDFmanager:
         return l
 
     def retrieve_wind(self, start_date, stop_date, level='1000', res='0.5'):
+        import cdsapi
         in_cache = []
         days_required = self.days_between(start_date, stop_date)
         db_path = os.path.join(self.cds_wind_db_dir, res, level)
