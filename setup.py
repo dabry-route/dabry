@@ -6,8 +6,8 @@ setup(
     description='Trajectory optimization in flow fields',
     author='Bastien Schnitzler',
     author_email='bastien.schnitzler@live.fr',
-    packages=find_packages('src'),  # same as name
-    package_dir={'': 'src'},
+    packages=find_packages('.'),  # same as name
+    package_dir={'': '.'},
     install_requires=['alphashape',
                       'ambiance',
                       'basemap',

@@ -1,15 +1,14 @@
 import os
 import sys
+from abc import ABC
 from datetime import datetime, timedelta
 from math import exp, log
+from typing import Optional
 
 import h5py
 import numpy as np
 import pygrib
-import scipy.interpolate as itp
-from mpl_toolkits.basemap import Basemap
 from numpy import ndarray, pi, sin, cos
-from pyproj import Proj
 from tqdm import tqdm
 
 from dabry.misc import Utils
@@ -36,81 +35,59 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
-class Wind:
+class Wind(ABC):
 
-    def __init__(self, value_func=None, d_value_func=None, descr='', is_analytical=False, t_start=0.,
-                 t_end=None, nt=1, **kwargs):
-        """
-        Builds a windfield which is a smooth vector field of space
-        value_func Function taking a point in space (ndarray) and returning the
-        wind value at the given point.
-        d_value_func Function taking a point in space (ndarray) and returning the
-        jacobian of the windfield at the given point.
-        """
-        self.value = value_func
-        self.d_value = d_value_func
-        self.descr = descr
-        # 0 if wind is not dumpable,
-        # 1 if dumpable but needs sampling (analytical winds)
-        # 2 if directly dumpable
-        self.is_dumpable = 1
-
-        # Used when wind is flattened
-        self.lon_0 = None
-        self.lat_0 = None
-        self.lon_1 = None
-        self.lat_1 = None
-        self.lon_2 = None
-        self.lat_2 = None
-
-        # When grid is not regularly spaced
-        self.unstructured = False
+    def __init__(self, _lch=None, _rch=None, _op=None, t_start=0., t_end=None, nt_int=None):
+        self._lch = _lch
+        self._rch = _rch
+        self._op = _op
 
         # When wind is time-varying, bounds for the time window
         # A none upper bound means no time variation
         self.t_start = t_start
         self.t_end = t_end
-        self.nt = nt
 
-        # To remember if an analytical wind was discretized for
-        # display purposes.
-        self.is_analytical = is_analytical
+        # Intrisic number of time frames when analytically defined
+        # flow fields depend on time-varying parameters
+        self.nt_int = nt_int
 
         # True if dualization operation flips wind (mulitplication by -1)
         # False if dualization operation leaves wind unchanged
         self.dualizable = True
 
-        for k, v in kwargs.items():
-            self.__dict__[k] = v
+    def value(self, t, x):
+        if self._lch is None:
+            return self._value(t, x)
+        if self._op == '+':
+            return self._lch.value(t, x) + self._rch.value(t, x)
+        if self._op == '-':
+            return self._lch.value(t, x) - self._rch.value(t, x)
+        if self._op == '*':
+            if isinstance(self._lch, float):
+                return self._lch + self._rch.value(t, x)
+            if isinstance(self._rch, float):
+                return self._lch.value(t, x) + self._rch
+            raise Exception('Only scaling by float implemented for flow fields')
 
-    def _index(self, t):
-        """
-        Get nearest lowest index for time discrete grid
-        :param t: The required time
-        :return: Nearest lowest index for time, coefficient for the linear interpolation
-        """
-        if self.t_end is None:
-            return 0, 0.
-        if self.nt == 1:
-            return 0, 0.
-        # if t < self.t_start or t > self.t_end:
-        #     print(f'Time {t} out of ({self.t_start}, {self.t_end})', file=sys.stderr)
-        #     exit(1)
-        # Bounds may not be in the right order if wind is dualized
-        t_min, t_max = min(self.t_start, self.t_end), max(self.t_start, self.t_end)
-        if t <= t_min:
-            # print(f'Time {t} lower than lower time bound {t_min}', file=sys.stderr)
-            # warnings.warn(UserWarning('Probably considering wind as steady'))
-            return 0, 0.
-        if t > t_max:
-            # Freeze wind to last frame
-            return self.nt - 2, 1.
-        tau = (t - t_min) / (t_max - t_min)
-        i, alpha = int(tau * (self.nt - 1)), tau * (self.nt - 1) - int(tau * (self.nt - 1))
-        if i == self.nt - 1:
-            i = self.nt - 2
-            alpha = 1.
-        return i, alpha
+    def d_value(self, t, x):
+        if self._lch is None:
+            return self._d_value(t, x)
+        if self._op == '+':
+            return self._lch.d_value(t, x) + self._rch.d_value(t, x)
+        if self._op == '-':
+            return self._lch.d_value(t, x) - self._rch.d_value(t, x)
+        if self._op == '*':
+            if isinstance(self._lch, float):
+                return self._lch + self._rch.d_value(t, x)
+            if isinstance(self._rch, float):
+                return self._lch.d_value(t, x) + self._rch
+            raise Exception('Only scaling by float implemented for flow fields')
+
+    def _value(self, t, x):
+        pass
+
+    def _d_value(self, t, x):
+        pass
 
     def dualize(self):
         a = -1.
@@ -125,32 +102,26 @@ class Wind:
     def __add__(self, other):
         """
         Add windfields
-
         :param other: Another windfield
         :return: The sum of the two windfields
         """
         if not isinstance(other, Wind):
             raise TypeError(f"Unsupported type for addition : {type(other)}")
-        value_func = lambda t, x: self.value(t, x) + other.value(t, x)
-        d_value_func = lambda t, x: self.d_value(t, x) + other.d_value(t, x)
-        descr = self.descr + ', ' + other.descr
-        is_analytical = self.is_analytical and other.is_analytical
-        # d = self.__dict__
-        # for k in ['value_func', 'd_value_func', 'descr', 'is_analytical']:
-        #     try:
-        #         del d[k]
-        #     except KeyError:
-        #         pass
-        return Wind(value_func=value_func,
-                    d_value_func=d_value_func,
-                    descr=descr,
-                    is_analytical=is_analytical)
-        # **d)
+        return Wind(_lch=self, _rch=other, _op='+')
+
+    def __sub__(self, other):
+        """
+        Substracts windfields
+        :param other: Another windfield
+        :return: The substraction of the two windfields
+        """
+        if not isinstance(other, Wind):
+            raise TypeError(f"Unsupported type for substraction : {type(other)}")
+        return Wind(_lch=self, _rch=other, _op='-')
 
     def __mul__(self, other):
         """
         Handles the scaling of a windfield by a real number
-
         :param other: A real number (float)
         :return: The scaled windfield
         """
@@ -158,53 +129,35 @@ class Wind:
             other = float(other)
         if not isinstance(other, float):
             raise TypeError(f"Unsupported type for multiplication : {type(other)}")
-        value_func = lambda t, x: other * self.value(t, x)
-        d_value_func = lambda t, x: other * self.d_value(t, x)
-        descr = self.descr
-        is_analytical = self.is_analytical
-        # d = self.__dict__
-        # for k in ['value_func', 'd_value_func', 'descr', 'is_analytical']:
-        #     try:
-        #         del d[k]
-        #     except KeyError:
-        #         pass
-        return Wind(value_func=value_func,
-                    d_value_func=d_value_func,
-                    descr=descr,
-                    is_analytical=is_analytical,
-                    t_start=self.t_start,
-                    t_end=self.t_end)
-        # **d)
+        return Wind(_lch=self, _rch=other, _op='*', t_start=self.t_start, t_end=self.t_end)
 
     def __rmul__(self, other):
         return self.__mul__(other)
 
-    def e_minus(self, x):
+    def _index(self, t):
         """
-        Returns an eigenvector of the vector space associated to the
-        negative eigenvalue of the jacobian of the windfield
-
-        :param x: The point in space where the eigenvector is computed
-        :return: The eigenvector
+        Get nearest lowest index for time discrete grid
+        :param t: The required time
+        :return: Nearest lowest index for time, coefficient for the linear interpolation
         """
-        d_wind = self.d_value(x)
-        dw_x = d_wind[0, 0]
-        dw_y = d_wind[0, 1]
-        lambda_0 = np.sqrt(dw_x ** 2 + dw_y ** 2)
-        return np.array([- dw_y, lambda_0 + dw_x])
-
-    def grad_norm(self, x):
-        """
-        Returns the gradient of the wind norm function at given point
-
-        :param x: The point at which to compute the gradient
-        :return: The gradient
-        """
-        wind = self.value(x)
-        return np.linalg.norm(self.d_value(x).transpose().dot(wind / np.linalg.norm(wind)))
-
-    def __str__(self):
-        return self.descr
+        if self.t_end is None:
+            return 0, 0.
+        nt = self.nt_int
+        if nt == 1:
+            return 0, 0.
+        # Bounds may not be in the right order if wind is dualized
+        t_min, t_max = min(self.t_start, self.t_end), max(self.t_start, self.t_end)
+        # Clip time to bounds
+        if t <= t_min:
+            return 0, 0.
+        if t > t_max:
+            return nt - 2, 1.
+        tau = (t - t_min) / (t_max - t_min)
+        i, alpha = int(tau * (nt - 1)), tau * (nt - 1) - int(tau * (nt - 1))
+        if i == nt - 1:
+            i = nt - 2
+            alpha = 1.
+        return i, alpha
 
 
 class DiscreteWind(Wind):
@@ -212,291 +165,141 @@ class DiscreteWind(Wind):
     Handles wind loading from H5 format and derivative computation
     """
 
-    def __init__(self, interp='pwc', force_analytical=False, wdata=None, diff=False):
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+    def __init__(self, values, bounds, coords, grad_values=None, force_no_diff=False):
+        super().__init__(nt_int=values.shape[0] if values.ndim == 4 else None)
 
         self.is_dumpable = 2
 
-        if wdata is None:
-            self.nt = None
-            self.nx = None
-            self.ny = None
+        self.values = values
+        self.bounds = bounds
+        self.coords = coords
 
-            self.uv = None
-            self.grid = None
-            self.coords = None
-            self.ts = None
+        self.spacings = (bounds[:, 1] - bounds[:, 0]) / (self.values.shape - np.ones(bounds.shape[0]).astype(np.int32))
 
-            self.x_min = None
-            self.x_max = None
-            self.y_min = None
-            self.y_max = None
+        self.grad_values = grad_values
 
-            self.units_grid = None
+        if not force_no_diff:
+            if self.grad_values is None:
+                self.compute_derivatives()
 
-            self.d_u__d_x = None
-            self.d_u__d_y = None
-            self.d_v__d_x = None
-            self.d_v__d_y = None
-        else:
-            if len(wdata['data'].shape) == 2:
-                self.nt = None
-                self.nx, self.ny, _ = wdata['data'].shape
-            else:
-                self.nt, self.nx, self.ny, _ = wdata['data'].shape
-
-            self.uv = np.zeros(wdata['data'].shape)
-            self.uv[:] = wdata['data']
-            self.grid = np.zeros(wdata['grid'].shape)
-            self.grid[:] = wdata['grid']
-            self.ts = np.zeros(wdata['ts'].shape)
-            self.ts[:] = wdata['ts']
-            self.coords = wdata['coords']
-
-            self.x_min = np.min(self.grid[:, :, 0])
-            self.x_max = np.max(self.grid[:, :, 0])
-            self.y_min = np.min(self.grid[:, :, 1])
-            self.y_max = np.max(self.grid[:, :, 1])
-
-            self.units_grid = Utils.U_RAD if self.coords == Utils.COORD_GCS else Utils.COORD_CARTESIAN
-
-            self.d_u__d_x = None
-            self.d_u__d_y = None
-            self.d_v__d_x = None
-            self.d_v__d_y = None
-
-        # Either 'pwc' for piecewise constant wind or 'linear' for linear interpolation
-        self.interp = interp
-
-        self.clipping_tol = 0.  # 1e-2
-
-        self.is_analytical = force_analytical
-
-        self.bm = None
-
-        if wdata is not None and diff:
-            self.compute_derivatives()
-
-    def load(self, filepath, nodiff=False, resample=1, duration_limit=None):
+    @classmethod
+    def from_h5(cls, filepath, **kwargs):
         """
         Loads wind data from H5 wind data
         :param filepath: The H5 file contaning wind data
-        :param nodiff: Do not compute wind derivatives
-        :param resample: If unstructured, the resample rate over which to evaluate wind
         """
 
         # Fill the wind data array
         # print(f'{"Loading wind values...":<30}', end='')
         with h5py.File(filepath, 'r') as wind_data:
-            self.coords = wind_data.attrs['coords']
-            self.units_grid = wind_data.attrs['units_grid']
-            try:
-                self.lon_0 = wind_data.attrs['lon_0']
-                self.lat_0 = wind_data.attrs['lat_0']
-            except KeyError:
-                pass
-            try:
-                # In a try/except for backward compatibility
-                self.unstructured = wind_data.attrs['unstructured']
-            except KeyError:
-                pass
+            coords = wind_data.attrs['coords']
 
             # Checking consistency before loading
-            Utils.ensure_coords(self.coords)
-            Utils.ensure_units(self.units_grid)
-            Utils.ensure_compatible(self.coords, self.units_grid)
+            Utils.ensure_coords(coords)
 
-            # Define computation bounds as smallest xy-coordinate outer bounding box
-            self.x_min = wind_data['grid'][:, :, 0].min()
-            self.x_max = wind_data['grid'][:, :, 0].max()
-            self.y_min = wind_data['grid'][:, :, 1].min()
-            self.y_max = wind_data['grid'][:, :, 1].max()
+            values = wind_data['data']
 
-            # Loading
-            if not self.unstructured:
-                self.nt, self.nx, self.ny, _ = wind_data['data'].shape
-                # if duration_limit is not None:
-                #     new_nt = 0
-                #     for t in wind_data['ts']:
-                #         if t - wind_data['ts'][0] > duration_limit:
-                #             break
-                #         new_nt += 1
-                # self.nt = new_nt
-                self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
-                self.uv[:, :, :, :] = wind_data['data'][:self.nt, :, :, :]
-                self.grid = np.zeros((self.nx, self.ny, 2))
-                self.grid[:] = wind_data['grid']
-                self.ts = np.zeros((self.nt,))
-                self.ts[:] = wind_data['ts'][:self.nt]
-            else:
-                nx_wind = wind_data['data'].shape[1]
-                ny_wind = wind_data['data'].shape[2]
-                self.nt = wind_data['data'].shape[0]
-                self.nx = resample * nx_wind
-                self.ny = resample * ny_wind
-                self.grid = np.zeros((self.nx, self.ny, 2))
-                self.grid[:] = np.array(np.meshgrid(np.linspace(self.x_min, self.x_max, self.nx),
-                                                    np.linspace(self.y_min, self.y_max, self.ny))).transpose((2, 1, 0))
-                grid_wind = np.zeros(wind_data['grid'].shape)
-                grid_wind[:] = np.array(wind_data['grid'])
-                grid_wind_rshp = grid_wind.reshape((nx_wind * ny_wind, 2))
-                self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
-                for kt in range(self.nt):
-                    u_wind = np.zeros((nx_wind, ny_wind))
-                    v_wind = np.zeros((nx_wind, ny_wind))
-                    u_wind[:] = np.array(wind_data['data'][kt, :, :, 0])
-                    v_wind[:] = np.array(wind_data['data'][kt, :, :, 1])
-                    u_itp = np.zeros((self.nx, self.ny))
-                    u_itp[:] = itp.griddata(grid_wind_rshp,
-                                            u_wind.reshape((nx_wind * ny_wind,)),
-                                            self.grid.reshape((self.nx * self.ny, 2)), method='linear',
-                                            fill_value=0.).reshape((self.nx, self.ny))
-                    v_itp = np.zeros((self.nx, self.ny))
-                    v_itp[:] = itp.griddata(grid_wind_rshp,
-                                            v_wind.reshape((nx_wind * ny_wind,)),
-                                            self.grid.reshape((self.nx * self.ny, 2)), method='linear',
-                                            fill_value=0.).reshape((self.nx, self.ny))
-                    self.uv[kt, :] = np.stack((u_itp, v_itp), axis=2)
-                self.ts = np.zeros((self.nt,))
-                self.ts[:] = wind_data['ts']
+            # Time bounds
+            t_start = wind_data['ts'][0]
+            t_end = None if wind_data['ts'].shape[0] == 1 else wind_data['ts'][-1]
 
-        # Time bounds
-        self.t_start = self.ts[0]
-        self.t_end = None if self.nt == 1 else self.ts[-1]
-        # Detecting millisecond-formated timestamps
-        if np.any(self.ts > 1e11):
-            self.ts[:] = self.ts / 1000.
-            self.t_start /= 1000.
-            if self.t_end is not None:
-                self.t_end /= 1000.
+            # Detecting millisecond-formated timestamps
+            if np.any(wind_data['ts'] > 1e11):
+                t_start /= 1000.
+                if t_end is not None:
+                    t_end /= 1000.
+            f = Utils.DEG_TO_RAD if wind_data.attrs['units_grid'] == Utils.U_DEG else 1.
 
-        # Post processing
-        if self.units_grid == Utils.U_DEG:
-            self.grid[:] = Utils.DEG_TO_RAD * self.grid
-            self.x_min, self.x_max, self.y_min, self.y_max = \
-                tuple(Utils.DEG_TO_RAD * np.array((self.x_min, self.x_max, self.y_min, self.y_max)))
+            bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) + \
+                              (f * wind_data['grid'][0, 0],
+                               f * wind_data['grid'][-1, -1]), axis=0)
 
-            self.units_grid = Utils.U_RAD
+        return cls(values, bounds, coords, **kwargs)
 
-        # self.x_min = np.max(self.grid[0, :, 0])
-        # self.x_max = np.min(self.grid[-1, :, 0])
-        # self.y_min = np.max(self.grid[:, 0, 1])
-        # self.y_max = np.min(self.grid[:, -1, 1])
-
-        if not nodiff:
-            self.compute_derivatives()
-
-        # print('Done')
-
-    def load_from_wind(self, wind: Wind, nx, ny, bl, tr, coords, nodiff=False, nt=1, fd=False):
-        self.coords = coords
-        self.units_grid = 'meters' if coords == Utils.COORD_CARTESIAN else 'degrees'
-        self.unstructured = wind.unstructured
-
+    @classmethod
+    def from_wind(cls, wind: Wind, grid_bounds, coords, nx=100, ny=100, nt=50, **kwargs):
         # Checking consistency before loading
-        Utils.ensure_units(self.units_grid)
-        Utils.ensure_coords(self.coords)
-        Utils.ensure_compatible(self.coords, self.units_grid)
+        Utils.ensure_coords(coords)
 
-        self.x_min = bl[0]
-        self.x_max = tr[0]
-        self.y_min = bl[1]
-        self.y_max = tr[1]
+        t_start = wind.t_start
+        t_end = wind.t_end
 
-        self.t_start = wind.t_start
-        self.t_end = wind.t_end
+        bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) + \
+                          (grid_bounds[0], grid_bounds[1]), axis=0)
+        shape = (() if t_end is None else (nt,)) + (nx, ny)
+        spacings = (bounds[:, 1] - bounds[:, 0]) / (shape - np.ones(bounds.shape[0]).astype(np.int32))
+        _nt = nt if t_end is not None else 1
+        values = np.zeros(shape + (2,))
+        grad_values = np.zeros(shape + (2, 2))
+        for k in range(_nt):
+            idt = (k,) if t_end is not None else ()
+            t = bounds[0, 0] + k * spacings[0] if t_end is not None else t_start
+            for i in range(nx):
+                for j in range(ny):
+                    state = bounds[-2:]
+                    values[idt + (i, j), :] = wind.value(t, state)
+                    grad_values[idt + (i, j), ...] = wind.d_value(t, state)
 
-        self.nt, self.nx, self.ny = nt, nx, ny
-        self.uv = np.zeros((self.nt, self.nx, self.ny, 2))
-        self.grid = np.zeros((self.nx, self.ny, 2))
-        delta_x = (self.x_max - self.x_min) / (self.nx - 1)
-        delta_y = (self.y_max - self.y_min) / (self.ny - 1)
-        self.ts = np.zeros((self.nt,))
-        for k in range(nt):
-            if wind.t_end is not None:
-                self.ts[k] = wind.t_start + (k / (self.nt - 1)) * (wind.t_end - wind.t_start)
-            for i in range(self.nx):
-                for j in range(self.ny):
-                    point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
-                    if wind.t_end is not None:
-                        self.uv[k, i, j, :] = wind.value(self.ts[k], point)
-                    else:
-                        self.uv[k, i, j, :] = wind.value(wind.t_start, point)
-                    self.grid[i, j, :] = point
+        return cls(values, bounds, coords, grad_values=grad_values, **kwargs)
 
-        # Post processing
-        # Loading derivatives
-        if not nodiff:
-            if not fd:
-                self.d_u__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-                self.d_u__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-                self.d_v__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-                self.d_v__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-                for k in range(self.nt):
-                    for i in range(1, self.nx - 1):
-                        for j in range(1, self.ny - 1):
-                            point = np.array([self.x_min + i * delta_x, self.y_min + j * delta_y])
-                            if nt > 1:
-                                diff = wind.d_value(self.ts[k], point)
-                            else:
-                                diff = wind.d_value(wind.t_start, point)
-                            self.d_u__d_x[k, i - 1, j - 1] = diff[0, 0]
-                            self.d_u__d_y[k, i - 1, j - 1] = diff[0, 1]
-                            self.d_v__d_x[k, i - 1, j - 1] = diff[1, 0]
-                            self.d_v__d_y[k, i - 1, j - 1] = diff[1, 1]
-            else:
-                self.compute_derivatives()
-
-    def load_from_cds(self, wind_db_path, bl, tr, t_start=None, t_end=None, i_member=None):
+    @classmethod
+    def from_cds_folder(cls, dirpath: str, grid_bounds: ndarray,
+                        t_start: Optional[float, datetime], t_end: Optional[float, datetime],
+                        i_member: Optional[int]):
 
         single_frame = abs(t_start - t_end) < 60
+        bl, tr = grid_bounds[0], grid_bounds[1]
+        bl_d, tr_d = bl * Utils.RAD_TO_DEG, tr * Utils.RAD_TO_DEG
 
-        # Get grid
-        lon_b = Utils.rectify(bl[0], tr[0])
-        start_date = datetime.fromtimestamp(t_start)
-        stop_date = datetime.fromtimestamp(t_end)
+        lon_b = Utils.rectify(bl_d[0], tr_d[0])
+        with sorted(os.listdir(dirpath))[0] as wind_file:
+            wind_start_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
+        with sorted(os.listdir(dirpath))[-1] as wind_file:
+            wind_stop_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
+        date_start, date_end = wind_start_date, wind_stop_date
+        for t_bound, wind_date_bound, date_bound, op in zip((t_start, t_end), (wind_start_date, wind_stop_date),
+                                                            (date_start, date_end), ('<', '>')):
+            adj = "lower" if op == "<" else "upper"
+            if t_bound is None:
+                print(f'[CDS wind] Using wind time {adj} bound {date_bound}')
+            else:
+                if not isinstance(t_bound, datetime):
+                    # Assuming float
+                    _date_bound = datetime.fromtimestamp(t_bound)
+                else:
+                    _date_bound = t_bound
+                if (op == '<' and _date_bound < wind_date_bound) or (op == '>' and _date_bound > wind_date_bound):
+                    print(f'[CDS wind] Clipping {adj} bound to wind time bound {wind_date_bound}')
 
-        grb = pygrib.open(os.path.join(wind_db_path, os.listdir(wind_db_path)[0]))
+        grb = pygrib.open(os.path.join(dirpath, os.listdir(dirpath)[0]))
         grb_u = grb.select(name='U component of wind')
         if lon_b[1] > 360:
             # Has to extract in two steps
-            data1 = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)
-            data2 = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)
-            ny, nx1 = data1[1].shape
-            _, nx2 = data2[1].shape
-            self.ny = ny
-            self.nx = nx1 + nx2
+            data1 = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=360)
+            data2 = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=0, lon2=lon_b[1] - 360)
             lons1 = Utils.DEG_TO_RAD * Utils.to_m180_180(data1[2]).transpose()
             lons2 = Utils.DEG_TO_RAD * Utils.to_m180_180(data2[2]).transpose()
             lats1 = Utils.DEG_TO_RAD * data1[1].transpose()
             lats2 = Utils.DEG_TO_RAD * data2[1].transpose()
             lons = np.concatenate((lons1, lons2))
             lats = np.concatenate((lats1, lats2))
-
         else:
-            data = grb_u[0].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])
-            self.ny, self.nx = data[1].shape
+            data = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])
             lons = Utils.DEG_TO_RAD * Utils.to_m180_180(data[2]).transpose()
             lats = Utils.DEG_TO_RAD * data[1].transpose()
-        self.grid = np.zeros((self.nx, self.ny, 2))
 
-        self.grid[:, ::-1, 0] = lons
-        self.grid[:, ::-1, 1] = lats
-        self.x_min = np.min(self.grid[:, :, 0])
-        self.x_max = np.max(self.grid[:, :, 0])
-        self.y_min = np.min(self.grid[:, :, 1])
-        self.y_max = np.max(self.grid[:, :, 1])
+        shape = lons.shape
 
         # Get wind and timestamps
         uv_frames = []
         ts = []
-        start_date_rounded = datetime(start_date.year, start_date.month, start_date.day, 0, 0)
-        stop_date_rounded = datetime(stop_date.year, stop_date.month, stop_date.day, 0, 0) + timedelta(days=1)
-        startd_rounded = datetime(start_date.year, start_date.month, start_date.day, 3 * (start_date.hour // 3), 0)
-        stopd_rounded = datetime(stop_date.year, stop_date.month, stop_date.day, 0, 0) + timedelta(
-            hours=3 * (1 + (stop_date.hour // 3)))
+        start_date_rounded = datetime(date_start.year, date_start.month, date_start.day, 0, 0)
+        stop_date_rounded = datetime(date_end.year, date_end.month, date_end.day, 0, 0) + timedelta(days=1)
+        startd_rounded = datetime(date_start.year, date_start.month, date_start.day, 3 * (date_start.hour // 3), 0)
+        stopd_rounded = datetime(date_end.year, date_end.month, date_end.day, 0, 0) + timedelta(
+            hours=3 * (1 + (date_end.hour // 3)))
         one = False
-        for wind_file in tqdm(sorted(os.listdir(wind_db_path))):
+        for wind_file in tqdm(sorted(os.listdir(dirpath))):
             wind_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
             if wind_date < start_date_rounded:
                 continue
@@ -504,7 +307,7 @@ class DiscreteWind(Wind):
                 continue
             if one and single_frame:
                 break
-            grb = pygrib.open(os.path.join(wind_db_path, wind_file))
+            grb = pygrib.open(os.path.join(dirpath, wind_file))
             grb_u = grb.select(name='U component of wind')
             grb_v = grb.select(name='V component of wind')
             if i_member is None:
@@ -524,315 +327,213 @@ class DiscreteWind(Wind):
                 if one and single_frame:
                     break
                 one = True
-                uv = np.zeros((self.nx, self.ny, 2))
+                uv = np.zeros(shape + (2,))
                 if lon_b[1] > 360:
-                    U1 = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[0].transpose()
-                    V1 = grb_v[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=360)[0].transpose()
-                    U2 = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[0].transpose()
-                    V2 = grb_v[i].data(lat1=bl[1], lat2=tr[1], lon1=0, lon2=lon_b[1] - 360)[0].transpose()
+                    U1 = grb_u[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=360)[0].transpose()
+                    V1 = grb_v[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=360)[0].transpose()
+                    U2 = grb_u[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=0, lon2=lon_b[1] - 360)[0].transpose()
+                    V2 = grb_v[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=0, lon2=lon_b[1] - 360)[0].transpose()
                     U = np.concatenate((U1, U2))
                     V = np.concatenate((V1, V2))
                 else:
-                    U = grb_u[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose()
-                    V = grb_v[i].data(lat1=bl[1], lat2=tr[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose()
+                    U = grb_u[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose()
+                    V = grb_v[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose()
                 uv[:, ::-1, 0] = U
                 uv[:, ::-1, 1] = V
                 uv_frames.append(uv)
                 ts.append(t.timestamp())
 
-        self.nt = len(uv_frames)
-        self.uv = np.array(uv_frames)
-        self.ts = np.array(ts)
+        values = np.array(uv_frames)
 
-        self.coords = Utils.COORD_GCS
+        return cls(values, np.stack((np.array((ts[0], ts[-1])), grid_bounds)), Utils.COORD_GCS)
 
-        self.compute_derivatives()
-        self.t_start = self.ts[0]
-        self.t_end = None if single_frame else self.ts[-1]
-
-    def value(self, t, x, units=Utils.U_METERS):
+    def value(self, t, x):
         """
-        :param x: Point at which to give wind interpolation
-        :param units: Units in which x is given
-        :return: The interpolated wind value at x
+        Return an interpolated wind value based on linear interpolation
+        :param t: Time stamp
+        :param x: Position
+        :return: Interpolated wind vector
         """
+        return Utils.interpolate(self.values, self.bounds, self.spacings, np.array((t,) + tuple(x)))
 
-        nx = self.nx
-        ny = self.ny
-
-        xx = (x[0] - self.x_min) / (self.x_max - self.x_min)
-        yy = (x[1] - self.y_min) / (self.y_max - self.y_min)
-
-        it, alpha = self._index(t)
-
-        eps = self.clipping_tol
-        if xx < 0. - eps or xx >= 1. or yy < 0. - eps or yy >= 1.:
-            # print(f"Real windfield undefined at ({x[0]:.3f}, {x[1]:.3f})")
-            return np.array([0., 0.])
-
-        if self.interp == 'pwc':
-            try:
-                if self.nt == 1:
-                    return self.uv[0, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
-                else:
-                    return (1 - alpha) * self.uv[it, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)] + \
-                           alpha * self.uv[it + 1, int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)]
-            except ValueError:
-                return np.zeros(2)
-
-        elif self.interp == 'linear':
-            # Find the tile to which requested point belongs
-            # A tile is a region between 4 known values of wind
-            delta_x = (self.x_max - self.x_min) / (nx - 1)
-            delta_y = (self.y_max - self.y_min) / (ny - 1)
-            i = int((nx - 1) * xx)
-            j = int((ny - 1) * yy)
-            # Tile bottom left corner x-coordinate
-            xij = delta_x * i + self.x_min
-            # Point relative position in tile
-            a = (x[0] - xij) / delta_x
-            # Tile bottom left corner y-coordinate
-            yij = delta_y * j + self.y_min
-            b = (x[1] - yij) / delta_y
-            if self.nt == 1:
-                return (1 - b) * ((1 - a) * self.uv[0, i, j] + a * self.uv[0, i + 1, j]) + b * (
-                        (1 - a) * self.uv[0, i, j + 1] + a * self.uv[0, i + 1, j + 1])
-            else:
-                return (1 - alpha) * ((1 - b) * ((1 - a) * self.uv[it, i, j] + a * self.uv[it, i + 1, j]) +
-                                      b * ((1 - a) * self.uv[it, i, j + 1] + a * self.uv[it, i + 1, j + 1])) + \
-                       alpha * ((1 - b) * ((1 - a) * self.uv[it + 1, i, j] + a * self.uv[it + 1, i + 1, j]) +
-                                b * ((1 - a) * self.uv[it + 1, i, j + 1] + a * self.uv[it + 1, i + 1, j + 1]))
-
-    def d_value(self, t, x, units=Utils.U_METERS):
+    def d_value(self, t, x):
         """
-        :param x: Point at which to give wind interpolation
-        :param units: Units in which x is given
-        :return: The interpolated wind value at x
+        Return an interpolated wind gradient value based on linear interpolation
+        :param t: Time stamp
+        :param x: Position
+        :return: Interpolated wind jacobian at requested time and position
         """
-        # ensure_units(units)
-        # ensure_compatible(self.coords, units)
-
-        nx = self.nx
-        ny = self.ny
-
-        it, alpha = self._index(t)
-
-        factor = 1.  # (DEG_TO_RAD if self.coords == COORD_GCS and units == U_DEG else 1.)
-
-        xx = (x[0] - self.x_min) / (self.x_max - self.x_min)
-        yy = (x[1] - self.y_min) / (self.y_max - self.y_min)
-
-        eps = self.clipping_tol
-        if xx < 1 / (2 * (nx - 1)) - eps or \
-                xx >= 1. - 1 / (2 * (nx - 1)) + eps or \
-                yy < 1 / (2 * (ny - 1)) - eps or yy >= 1. - 1 / (2 * (ny - 1)) + eps:
-            # print(f"Real windfield jacobian undefined at ({x[0]:.3f}, {x[1]:.3f})")
-            return np.array([[0., 0.],
-                             [0., 0.]])
-        if self.interp == 'pwc':
-            try:
-                i, j = int((nx - 1) * xx + 0.5), int((ny - 1) * yy + 0.5)
-                if self.nt == 1:
-                    return np.array([[self.d_u__d_x[0, i, j], self.d_u__d_y[0, i, j]],
-                                     [self.d_v__d_x[0, i, j], self.d_v__d_y[0, i, j]]])
-                else:
-                    return (1 - alpha) * np.array([[self.d_u__d_x[it, i, j], self.d_u__d_y[it, i, j]],
-                                                   [self.d_v__d_x[it, i, j], self.d_v__d_y[it, i, j]]]) + \
-                           alpha * np.array([[self.d_u__d_x[it + 1, i, j], self.d_u__d_y[it + 1, i, j]],
-                                             [self.d_v__d_x[it + 1, i, j], self.d_v__d_y[it + 1, i, j]]])
-            except (ValueError, IndexError) as e:
-                return np.array([[0., 0.],
-                                 [0., 0.]])
-        elif self.interp == 'linear':
-            delta_x = (self.x_max - self.x_min) / (nx - 1)
-            delta_y = (self.y_max - self.y_min) / (ny - 1)
-            i = int((nx - 1) * xx)
-            j = int((ny - 1) * yy)
-            xij = delta_x * i + self.x_min
-            a = (x[0] - xij) / delta_x
-            yij = delta_y * j + self.y_min
-            b = (x[1] - yij) / delta_y
-            if self.nt == 1:
-                d_uv__d_x = 1. / delta_x * ((1 - b) * (self.uv[0, i + 1, j] - self.uv[0, i, j]) +
-                                            b * (self.uv[0, i + 1, j + 1] - self.uv[0, i, j + 1]))
-                d_uv__d_y = 1. / delta_y * ((1 - a) * (self.uv[0, i, j + 1] - self.uv[0, i, j]) +
-                                            a * (self.uv[0, i + 1, j + 1] - self.uv[0, i + 1, j]))
-            else:
-                d_uv__d_x = 1. / delta_x * ((1 - alpha) * ((1 - b) * (self.uv[it, i + 1, j] - self.uv[it, i, j]) +
-                                                           b * (self.uv[it, i + 1, j + 1] - self.uv[it, i, j + 1])) +
-                                            alpha * ((1 - b) * (self.uv[it + 1, i + 1, j] - self.uv[it + 1, i, j]) +
-                                                     b * (self.uv[it + 1, i + 1, j + 1] - self.uv[it + 1, i, j + 1])))
-                d_uv__d_y = 1. / delta_y * ((1 - alpha) * ((1 - a) * (self.uv[it, i, j + 1] - self.uv[it, i, j]) +
-                                                           a * (self.uv[it, i + 1, j + 1] - self.uv[it, i + 1, j])) +
-                                            alpha * ((1 - a) * (self.uv[it + 1, i, j + 1] - self.uv[it + 1, i, j]) +
-                                                     a * (self.uv[it + 1, i + 1, j + 1] - self.uv[it + 1, i + 1, j])))
-            return np.stack((d_uv__d_x, d_uv__d_y), axis=1)
+        return Utils.interpolate(self.grad_values, self.bounds, self.spacings, np.array((t,) + tuple(x)))
 
     def compute_derivatives(self):
         """
         Computes the derivatives of the windfield with a central difference scheme
         on the wind native grid
         """
-        if self.uv is None:
-            raise RuntimeError("Derivative computation failed : wind not yet loaded")
-        self.d_u__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-        self.d_u__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-        self.d_v__d_x = np.zeros((self.nt, self.nx - 2, self.ny - 2))
-        self.d_v__d_y = np.zeros((self.nt, self.nx - 2, self.ny - 2))
+        self.grad_values = np.zeros(self.values.shape + (2,))
 
+        nt, nx, ny, _ = self.values.shape
         # Use order 2 precision derivative
         factor = 1 / Utils.EARTH_RADIUS if self.coords == 'gcs' else 1.
-        self.d_u__d_x[:] = factor * 0.5 * (self.uv[:, 2:, 1:-1, 0] - self.uv[:, :-2, 1:-1, 0]) / (
-                self.grid[2:, 1:-1, 0] - self.grid[:-2, 1:-1, 0])
-        self.d_u__d_y[:] = factor * 0.5 * (self.uv[:, 1:-1, 2:, 0] - self.uv[:, 1:-1, :-2, 0]) / (
-                self.grid[1:-1, 2:, 1] - self.grid[1:-1, :-2, 1])
-        self.d_v__d_x[:] = factor * 0.5 * (self.uv[:, 2:, 1:-1, 1] - self.uv[:, :-2, 1:-1, 1]) / (
-                self.grid[2:, 1:-1, 0] - self.grid[:-2, 1:-1, 0])
-        self.d_v__d_y[:] = factor * 0.5 * (self.uv[:, 1:-1, 2:, 1] - self.uv[:, 1:-1, :-2, 1]) / (
-                self.grid[1:-1, 2:, 1] - self.grid[1:-1, :-2, 1])
+        self.grad_values[:, 1:-1, 1:-1, ...] = factor * (
+            np.stack(((self.values[:, 2:, 1:-1, 0] - self.values[:, :-2, 1:-1, 0]) / (2 * self.spacings[1]),
+                      (self.values[:, 1:-1, 2:, 0] - self.values[:, 1:-1, :-2, 0]) / (2 * self.spacings[2]),
+                      (self.values[:, 2:, 1:-1, 1] - self.values[:, :-2, 1:-1, 1]) / (2 * self.spacings[1]),
+                      (self.values[:, 1:-1, 2:, 1] - self.values[:, 1:-1, :-2, 1]) / (2 * self.spacings[2])),
+                     axis=-1
+                     ).reshape((nt, nx - 2, ny - 2, 2, 2))
+        )
+        # Padding to full grid
+        # Borders
+        self.grad_values[:, 0, 1:-1, ...] = self.grad_values[:, 1, 1:-1, ...]
+        self.grad_values[:, -1, 1:-1, ...] = self.grad_values[:, -2, 1:-1, ...]
+        self.grad_values[:, 1:-1, 0, ...] = self.grad_values[:, 1:-1, 1, ...]
+        self.grad_values[:, 1:-1, -1, ...] = self.grad_values[:, 1:-1, -2, ...]
+        # Corners
+        self.grad_values[:, 0, 0, ...] = self.grad_values[:, 1, 1, ...]
+        self.grad_values[:, 0, -1, ...] = self.grad_values[:, 1, -2, ...]
+        self.grad_values[:, -1, 0, ...] = self.grad_values[:, -2, 1, ...]
+        self.grad_values[:, -1, -1, ...] = self.grad_values[:, -2, -2, ...]
 
-    def flatten(self, proj='plate-carree', **kwargs):
-        """
-        Flatten GCS-coordinates wind to euclidean space using given projection
-        :return The flattened wind
-        """
-        if self.coords != Utils.COORD_GCS:
-            print('Coordinates must be GCS to flatten', file=sys.stderr)
-            exit(1)
-        oldgrid = np.zeros(self.grid.shape)
-        oldgrid[:] = self.grid
-        oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
-        if proj == 'plate-carree':
-            center = 0.5 * (self.grid[0, 0] + self.grid[-1, -1])
-            newgrid = np.zeros(self.grid.shape)
-            newgrid[:] = Utils.EARTH_RADIUS * (self.grid - center)
-            self.grid[:] = newgrid
-            self.x_min = self.grid[0, 0, 0]
-            self.y_min = self.grid[0, 0, 1]
-            self.x_max = self.grid[-1, -1, 0]
-            self.y_max = self.grid[-1, -1, 1]
-            f_wind = DiscreteWind()
-            nx, ny, _ = self.grid.shape
-            bl = self.grid[0, 0]
-            tr = self.grid[-1, -1]
-            f_wind.load_from_wind(self, nx, ny, bl, tr, coords=Utils.COORD_CARTESIAN)
-        elif proj == 'ortho':
-            for p in ['lon_0', 'lat_0']:
-                if p not in kwargs.keys():
-                    print(f'Missing parameter {p} for {proj} flatten type', file=sys.stderr)
-                    exit(1)
-            # Lon and lats expected in radians
-            self.lon_0 = kwargs['lon_0']
-            self.lat_0 = kwargs['lat_0']
-            # width = kwargs['width']
-            # height = kwargs['height']
-
-            nx, ny, _ = self.grid.shape
-
-            # Grid
-            proj = Proj(proj='ortho', lon_0=Utils.RAD_TO_DEG * self.lon_0, lat_0=Utils.RAD_TO_DEG * self.lat_0)
-            oldgrid = np.zeros(self.grid.shape)
-            oldgrid[:] = self.grid
-            newgrid = np.zeros((2, nx, ny))
-            newgrid[:] = proj(Utils.RAD_TO_DEG * self.grid[:, :, 0], Utils.RAD_TO_DEG * self.grid[:, :, 1])
-            self.grid[:] = newgrid.transpose((1, 2, 0))
-            oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
-            self.x_min = self.grid[:, :, 0].min()
-            self.y_min = self.grid[:, :, 1].min()
-            self.x_max = self.grid[:, :, 0].max()
-            self.y_max = self.grid[:, :, 1].max()
-
-            print(self.x_min, self.x_max, self.y_min, self.y_max)
-
-            # Wind
-            newuv = np.zeros(self.uv.shape)
-            for kt in range(self.uv.shape[0]):
-                newuv[kt, :] = self._rotate_wind(self.uv[kt, :, :, 0],
-                                                 self.uv[kt, :, :, 1],
-                                                 Utils.RAD_TO_DEG * oldgrid[:, :, 0],
-                                                 Utils.RAD_TO_DEG * oldgrid[:, :, 1])
-            self.uv[:] = newuv
-        elif proj == 'omerc':
-            for p in ['lon_1', 'lat_1', 'lon_2', 'lat_2']:
-                if p not in kwargs.keys():
-                    print(f'Missing parameter {p} for {proj} flatten type', file=sys.stderr)
-                    exit(1)
-            # Lon and lats expected in radians
-            self.lon_1 = kwargs['lon_1']
-            self.lat_1 = kwargs['lat_1']
-            self.lon_2 = kwargs['lon_2']
-            self.lat_2 = kwargs['lat_2']
-            # width = kwargs['width']
-            # height = kwargs['height']
-
-            nx, ny, _ = self.grid.shape
-
-            # Grid
-            proj = Proj(proj='omerc',
-                        lon_1=Utils.RAD_TO_DEG * self.lon_1,
-                        lat_1=Utils.RAD_TO_DEG * self.lat_1,
-                        lon_2=Utils.RAD_TO_DEG * self.lon_2,
-                        lat_2=Utils.RAD_TO_DEG * self.lat_2,
-                        )
-            oldgrid = np.zeros(self.grid.shape)
-            oldgrid[:] = self.grid
-            newgrid = np.zeros((2, nx, ny))
-            newgrid[:] = proj(Utils.RAD_TO_DEG * self.grid[:, :, 0], Utils.RAD_TO_DEG * self.grid[:, :, 1])
-            self.grid[:] = newgrid.transpose((1, 2, 0))
-            oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
-            self.x_min = self.grid[:, :, 0].min()
-            self.y_min = self.grid[:, :, 1].min()
-            self.x_max = self.grid[:, :, 0].max()
-            self.y_max = self.grid[:, :, 1].max()
-
-            print(self.x_min, self.x_max, self.y_min, self.y_max)
-
-            # Wind
-            newuv = np.zeros(self.uv.shape)
-            for kt in range(self.uv.shape[0]):
-                newuv[kt, :] = self._rotate_wind(self.uv[kt, :, :, 0],
-                                                 self.uv[kt, :, :, 1],
-                                                 Utils.RAD_TO_DEG * oldgrid[:, :, 0],
-                                                 Utils.RAD_TO_DEG * oldgrid[:, :, 1])
-            self.uv[:] = newuv
-        else:
-            print(f"Unknown projection type {proj}", file=sys.stderr)
-            exit(1)
-
-        # self.grid[:] = oldgrid
-        # self.x_min, self.y_min, self.x_max, self.y_max = oldbounds
-
-        self.unstructured = True
-        self.coords = Utils.COORD_CARTESIAN
-        self.units_grid = 'meters'
-        self.is_analytical = False
-
-    def _rotate_wind(self, u, v, x, y):
-        if self.bm is None:
-            if self.lon_0 is not None:
-                self.bm = Basemap(projection='ortho',
-                                  lon_0=Utils.RAD_TO_DEG * self.lon_0,
-                                  lat_0=Utils.RAD_TO_DEG * self.lat_0)
-            else:
-                self.bm = Basemap(projection='omerc',
-                                  lon_1=Utils.RAD_TO_DEG * self.lon_1,
-                                  lat_1=Utils.RAD_TO_DEG * self.lat_1,
-                                  lon_2=Utils.RAD_TO_DEG * self.lon_2,
-                                  lat_2=Utils.RAD_TO_DEG * self.lat_2,
-                                  lon_0=Utils.RAD_TO_DEG * 0.5 * (self.lon_1 + self.lon_2),
-                                  lat_0=Utils.RAD_TO_DEG * 0.5 * (self.lat_1 + self.lat_2),
-                                  height=Utils.EARTH_RADIUS,
-                                  width=Utils.EARTH_RADIUS,
-                                  )
-        return np.array(self.bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
+    # def flatten(self, proj='plate-carree', **kwargs):
+    #     """
+    #     Flatten GCS-coordinates wind to euclidean space using given projection
+    #     :return The flattened wind
+    #     """
+    #     if self.coords != Utils.COORD_GCS:
+    #         print('Coordinates must be GCS to flatten', file=sys.stderr)
+    #         exit(1)
+    #     oldgrid = np.zeros(self.grid.shape)
+    #     oldgrid[:] = self.grid
+    #     oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
+    #     if proj == 'plate-carree':
+    #         center = 0.5 * (self.grid[0, 0] + self.grid[-1, -1])
+    #         newgrid = np.zeros(self.grid.shape)
+    #         newgrid[:] = Utils.EARTH_RADIUS * (self.grid - center)
+    #         self.grid[:] = newgrid
+    #         self.x_min = self.grid[0, 0, 0]
+    #         self.y_min = self.grid[0, 0, 1]
+    #         self.x_max = self.grid[-1, -1, 0]
+    #         self.y_max = self.grid[-1, -1, 1]
+    #         f_wind = DiscreteWind()
+    #         nx, ny, _ = self.grid.shape
+    #         bl = self.grid[0, 0]
+    #         tr = self.grid[-1, -1]
+    #         f_wind.load_from_wind(self, nx, ny, bl, tr, coords=Utils.COORD_CARTESIAN)
+    #     elif proj == 'ortho':
+    #         for p in ['lon_0', 'lat_0']:
+    #             if p not in kwargs.keys():
+    #                 print(f'Missing parameter {p} for {proj} flatten type', file=sys.stderr)
+    #                 exit(1)
+    #         # Lon and lats expected in radians
+    #         self.lon_0 = kwargs['lon_0']
+    #         self.lat_0 = kwargs['lat_0']
+    #         # width = kwargs['width']
+    #         # height = kwargs['height']
+    #
+    #         nx, ny, _ = self.grid.shape
+    #
+    #         # Grid
+    #         proj = Proj(proj='ortho', lon_0=Utils.RAD_TO_DEG * self.lon_0, lat_0=Utils.RAD_TO_DEG * self.lat_0)
+    #         oldgrid = np.zeros(self.grid.shape)
+    #         oldgrid[:] = self.grid
+    #         newgrid = np.zeros((2, nx, ny))
+    #         newgrid[:] = proj(Utils.RAD_TO_DEG * self.grid[:, :, 0], Utils.RAD_TO_DEG * self.grid[:, :, 1])
+    #         self.grid[:] = newgrid.transpose((1, 2, 0))
+    #         oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
+    #         self.x_min = self.grid[:, :, 0].min()
+    #         self.y_min = self.grid[:, :, 1].min()
+    #         self.x_max = self.grid[:, :, 0].max()
+    #         self.y_max = self.grid[:, :, 1].max()
+    #
+    #         print(self.x_min, self.x_max, self.y_min, self.y_max)
+    #
+    #         # Wind
+    #         newuv = np.zeros(self.uv.shape)
+    #         for kt in range(self.uv.shape[0]):
+    #             newuv[kt, :] = self._rotate_wind(self.uv[kt, :, :, 0],
+    #                                              self.uv[kt, :, :, 1],
+    #                                              Utils.RAD_TO_DEG * oldgrid[:, :, 0],
+    #                                              Utils.RAD_TO_DEG * oldgrid[:, :, 1])
+    #         self.uv[:] = newuv
+    #     elif proj == 'omerc':
+    #         for p in ['lon_1', 'lat_1', 'lon_2', 'lat_2']:
+    #             if p not in kwargs.keys():
+    #                 print(f'Missing parameter {p} for {proj} flatten type', file=sys.stderr)
+    #                 exit(1)
+    #         # Lon and lats expected in radians
+    #         self.lon_1 = kwargs['lon_1']
+    #         self.lat_1 = kwargs['lat_1']
+    #         self.lon_2 = kwargs['lon_2']
+    #         self.lat_2 = kwargs['lat_2']
+    #         # width = kwargs['width']
+    #         # height = kwargs['height']
+    #
+    #         nx, ny, _ = self.grid.shape
+    #
+    #         # Grid
+    #         proj = Proj(proj='omerc',
+    #                     lon_1=Utils.RAD_TO_DEG * self.lon_1,
+    #                     lat_1=Utils.RAD_TO_DEG * self.lat_1,
+    #                     lon_2=Utils.RAD_TO_DEG * self.lon_2,
+    #                     lat_2=Utils.RAD_TO_DEG * self.lat_2,
+    #                     )
+    #         oldgrid = np.zeros(self.grid.shape)
+    #         oldgrid[:] = self.grid
+    #         newgrid = np.zeros((2, nx, ny))
+    #         newgrid[:] = proj(Utils.RAD_TO_DEG * self.grid[:, :, 0], Utils.RAD_TO_DEG * self.grid[:, :, 1])
+    #         self.grid[:] = newgrid.transpose((1, 2, 0))
+    #         oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
+    #         self.x_min = self.grid[:, :, 0].min()
+    #         self.y_min = self.grid[:, :, 1].min()
+    #         self.x_max = self.grid[:, :, 0].max()
+    #         self.y_max = self.grid[:, :, 1].max()
+    #
+    #         print(self.x_min, self.x_max, self.y_min, self.y_max)
+    #
+    #         # Wind
+    #         newuv = np.zeros(self.uv.shape)
+    #         for kt in range(self.uv.shape[0]):
+    #             newuv[kt, :] = self._rotate_wind(self.uv[kt, :, :, 0],
+    #                                              self.uv[kt, :, :, 1],
+    #                                              Utils.RAD_TO_DEG * oldgrid[:, :, 0],
+    #                                              Utils.RAD_TO_DEG * oldgrid[:, :, 1])
+    #         self.uv[:] = newuv
+    #     else:
+    #         print(f"Unknown projection type {proj}", file=sys.stderr)
+    #         exit(1)
+    #
+    #     # self.grid[:] = oldgrid
+    #     # self.x_min, self.y_min, self.x_max, self.y_max = oldbounds
+    #
+    #     self.unstructured = True
+    #     self.coords = Utils.COORD_CARTESIAN
+    #     self.units_grid = 'meters'
+    #     self.is_analytical = False
+    #
+    # def _rotate_wind(self, u, v, x, y):
+    #     if self.bm is None:
+    #         if self.lon_0 is not None:
+    #             self.bm = Basemap(projection='ortho',
+    #                               lon_0=Utils.RAD_TO_DEG * self.lon_0,
+    #                               lat_0=Utils.RAD_TO_DEG * self.lat_0)
+    #         else:
+    #             self.bm = Basemap(projection='omerc',
+    #                               lon_1=Utils.RAD_TO_DEG * self.lon_1,
+    #                               lat_1=Utils.RAD_TO_DEG * self.lat_1,
+    #                               lon_2=Utils.RAD_TO_DEG * self.lon_2,
+    #                               lat_2=Utils.RAD_TO_DEG * self.lat_2,
+    #                               lon_0=Utils.RAD_TO_DEG * 0.5 * (self.lon_1 + self.lon_2),
+    #                               lat_0=Utils.RAD_TO_DEG * 0.5 * (self.lat_1 + self.lat_2),
+    #                               height=Utils.EARTH_RADIUS,
+    #                               width=Utils.EARTH_RADIUS,
+    #                               )
+    #     return np.array(self.bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
 
     def dualize(self):
         # Override method so that the dual of a DiscreteWind stays a DiscreteWind and
         # is not casted to Wind
-        wind = DiscreteWind()
-        bl = (self.x_min, self.y_min)
-        tr = (self.x_max, self.y_max)
-        wind.load_from_wind(-1. * self, self.nx, self.ny, bl, tr, self.coords)
+        wind = DiscreteWind.from_wind(-1. * self, self.bounds, self.coords, self.values.shape[1], self.values.shape[2])
         if self.t_end is not None:
             wind.t_start = self.t_end
             wind.t_end = self.t_start
@@ -849,23 +550,20 @@ class TwoSectorsWind(Wind):
                  x_switch: float):
         """
         Wind configuration where wind is constant over two half-planes separated by x = x_switch. x-wind is null.
-
         :param v_w1: y-wind value for x < x_switch
         :param v_w2: y-wind value for x >= x_switch
         :param x_switch: x-coordinate for sectors separation
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        super().__init__()
         self.v_w1 = v_w1
         self.v_w2 = v_w2
         self.x_switch = x_switch
-        self.descr = f'Two sectors'  # ({self.v_w1:.2f} m/s, {self.v_w2:.2f} m/s)'
-        self.is_analytical = True
 
-    def value(self, x):
+    def value(self, t, x):
         return np.array([0, self.v_w1 * np.heaviside(self.x_switch - x[0], 0.)
                          + self.v_w2 * np.heaviside(x[0] - self.x_switch, 0.)])
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         return np.array([[0, 0],
                          [0, 0]])
 
@@ -875,7 +573,6 @@ class TSEqualWind(TwoSectorsWind):
     def __init__(self, v_w1, v_w2, x_f):
         """
         TwoSectorsWind but the sector separation is midway to the target
-
         :param x_f: Target x-coordinate.
         """
         super().__init__(v_w1, v_w2, x_f / 2)
@@ -887,15 +584,13 @@ class UniformWind(Wind):
         """
         :param wind_vector: Direction and strength of wind
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
-        self.wind_vector = wind_vector
-        self.descr = f'Uniform'  # ({np.linalg.norm(self.wind_vector):.2f} m/s, {math.floor(180 / np.pi * np.arctan2(self.wind_vector[1], self.wind_vector[0]))})'
-        self.is_analytical = True
+        super().__init__()
+        self.wind_vector = np.array(wind_vector)
 
-    def value(self, t, x):
+    def _value(self, t, x):
         return self.wind_vector
 
-    def d_value(self, t, x):
+    def _d_value(self, t, x):
         return np.array([[0., 0.],
                          [0., 0.]])
 
@@ -907,19 +602,16 @@ class VortexWind(Wind):
                  y_omega: float,
                  gamma: float):
         """
-        A vortex from potential theory
-
-        :param x_omega: x_coordinate of vortex center in m
-        :param y_omega: y_coordinate of vortex center in m
-        :param gamma: Circulation of the vortex in m^2/s. Positive is ccw vortex.
+        A vortex from potential flow theory.
+        :param x_omega: x_coordinate of vortex center
+        :param y_omega: y_coordinate of vortex center
+        :param gamma: Circulation of the vortex. Positive is ccw vortex.
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        super().__init__()
         self.x_omega = x_omega
         self.y_omega = y_omega
         self.omega = np.array([x_omega, y_omega])
         self.gamma = gamma
-        self.descr = f'Vortex'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
-        self.is_analytical = True
 
     def value(self, t, x):
         r = np.linalg.norm(x - self.omega)
@@ -941,31 +633,26 @@ class RankineVortexWind(Wind):
     def __init__(self, center, gamma, radius, t_start=0., t_end=None):
         """
         A vortex from potential theory
-
-        :param center: Coordinates of the vortex center in m. Shape (2,) if steady else shape (nt, 2)
-        :param gamma: Circulation of the vortex in m^2/s. Positive is ccw vortex. Scalar for steady vortex
+        :param center: Coordinates of the vortex center. Shape (2,) if steady else shape (nt, 2)
+        :param gamma: Circulation of the vortex. Positive is ccw vortex. Scalar for steady vortex
         else shape (nt,)
-        :param radius: Radius of the vortex core in meters. Scalar for steady vortex else shape (nt,)
+        :param radius: Radius of the vortex core. Scalar for steady vortex else shape (nt,)
         """
-        time_varying = False
-        nt = 1
+        nt_int = None
         if len(center.shape) > 1:
-            time_varying = True
-            nt = center.shape[0]
-        if time_varying and t_end is None:
+            nt_int = center.shape[0]
+        if nt_int is not None and t_end is None:
             print('Missing t_end', file=sys.stderr)
             exit(1)
-        super().__init__(value_func=self.value, d_value_func=self.d_value, t_start=t_start, t_end=t_end, nt=nt)
+        super().__init__(t_start=t_start, t_end=t_end, nt_int=nt_int)
 
         self.omega = np.array(center)
         self.gamma = np.array(gamma)
         self.radius = np.array(radius)
-        if time_varying and not (self.omega.shape[0] == self.gamma.shape[0] == self.radius.shape[0]):
+        if nt_int is not None and not (self.omega.shape[0] == self.gamma.shape[0] == self.radius.shape[0]):
             print('Incoherent sizes', file=sys.stderr)
             exit(1)
         self.zero_ceil = 1e-3
-        self.descr = f'Rankine vortex'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
-        self.is_analytical = True
 
     def max_speed(self, t=0.):
         _, gamma, radius = self.params(t)
@@ -1042,39 +729,9 @@ class RankineVortexWind(Wind):
 #         self.descr = f'Vortex barrier'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
 #         self.is_analytical = True
 
-
-class SourceWind(Wind):
-
-    def __init__(self,
-                 x_omega: float,
-                 y_omega: float,
-                 flux: float):
-        """
-        A source from potentiel theory
-
-        :param x_omega: x_coordinate of source center in m
-        :param y_omega: y_coordinate of source center in m
-        :param flux: Flux of the source m^2/s. Positive is source, negative is well.
-        """
-        super().__init__()
-        self.x_omega = x_omega
-        self.y_omega = y_omega
-        self.omega = np.array([x_omega, y_omega])
-        self.flux = flux
-        self.is_analytical = True
-
-    def value(self, x):
-        r = np.linalg.norm(x - self.omega)
-        e_r = (x - self.omega) / r
-        return self.flux / (2 * np.pi * r) * e_r
-
-    def d_value(self, x):
-        raise ValueError("No derivative implemented for source wind")
-
-
 class LinearWind(Wind):
     """
-    This wind is NOT a potential flow
+    Constant gradient wind
     """
 
     def __init__(self, gradient: ndarray, origin: ndarray, value_origin: ndarray):
@@ -1083,7 +740,7 @@ class LinearWind(Wind):
         :param origin: The origin point for the origin value
         :param value_origin: The origin value
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        super().__init__()
 
         self.gradient = np.zeros(gradient.shape)
         self.origin = np.zeros(origin.shape)
@@ -1092,7 +749,6 @@ class LinearWind(Wind):
         self.gradient[:] = gradient
         self.origin[:] = origin
         self.value_origin[:] = value_origin
-        self.is_analytical = True
 
     def value(self, t, x):
         return self.gradient.dot(x - self.origin) + self.value_origin
@@ -1101,7 +757,11 @@ class LinearWind(Wind):
         return self.gradient
 
 
+# TODO: Unite with steady linear
 class LinearWindT(Wind):
+    """
+    Gradient does not vary with space but does vary with time
+    """
 
     def __init__(self, gradient, origin, value_origin, t_end):
         """
@@ -1109,7 +769,7 @@ class LinearWindT(Wind):
         :param origin: The origin point for the origin value, shape (2,)
         :param value_origin: The origin value, shape (2,)
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value, t_end=t_end)
+        super().__init__(t_end=t_end)
 
         self.gradient = np.zeros(gradient.shape)
         self.origin = np.zeros(origin.shape)
@@ -1118,8 +778,6 @@ class LinearWindT(Wind):
         self.gradient[:] = gradient
         self.origin[:] = origin
         self.value_origin[:] = value_origin
-        self.is_analytical = True
-        self.nt = self.gradient.shape[0]
 
     def value(self, t, x):
         i, alpha = self._index(t)
@@ -1145,14 +803,13 @@ class PointSymWind(Wind):
         :param gamma: Divergence
         :param omega: Curl
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        super().__init__()
 
         self.center = np.array((x_center, y_center))
 
         self.gamma = gamma
         self.omega = omega
         self.mat = np.array([[gamma, -omega], [omega, gamma]])
-        self.is_analytical = True
 
     def value(self, t, x):
         return self.mat @ (x - self.center)
@@ -1174,7 +831,7 @@ class DoubleGyreWind(Wind):
         :param y_wl: y-axis wavelength
         :param ampl: Amplitude in meters per second
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        super().__init__()
 
         self.center = np.array((x_center, y_center))
 
@@ -1182,7 +839,6 @@ class DoubleGyreWind(Wind):
         self.kx = 2 * pi / x_wl
         self.ky = 2 * pi / y_wl
         self.ampl = ampl
-        self.is_analytical = True
 
     def value(self, t, x):
         xx = np.diag((self.kx, self.ky)) @ (x - self.center)
@@ -1206,14 +862,14 @@ class DoubleGyreDampedWind(Wind):
                  y_center_damp: float,
                  lambda_x_damp: float,
                  lambda_y_damp: float):
-        super().__init__(value_func=self.value)
+        super().__init__()
         self.double_gyre = DoubleGyreWind(x_center, y_center, x_wl, y_wl, ampl)
         self.center_damp = np.array((x_center_damp, y_center_damp))
         self.lambda_x_damp = lambda_x_damp
         self.lambda_y_damp = lambda_y_damp
 
     def value(self, t, x):
-        xx = np.diag((1/self.lambda_x_damp, 1/self.lambda_y_damp)) @ (x - self.center_damp)
+        xx = np.diag((1 / self.lambda_x_damp, 1 / self.lambda_y_damp)) @ (x - self.center_damp)
         damp = 1 / (1 + xx[0] ** 2 + xx[1] ** 2)
         return self.double_gyre.value(t, x) * damp
 
@@ -1227,7 +883,7 @@ class RadialGaussWind(Wind):
         :param sdev: Gaussian standard deviation
         :param v_max: Maximum wind value
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        super().__init__()
 
         self.center = np.array((x_center, y_center))
 
@@ -1235,7 +891,6 @@ class RadialGaussWind(Wind):
         self.sdev = sdev
         self.v_max = v_max
         self.zero_ceil = 1e-3
-        self.is_analytical = True
         self.dualizable = False
 
     def ampl(self, r):
@@ -1280,8 +935,8 @@ class RadialGaussWindT(Wind):
         :param t_end: end of time window. Wind is supposed to be regularly sampled in the time window
         :param t_start: beginning of time window.
         """
-        super().__init__(value_func=self.value, d_value_func=self.d_value, t_start=t_start, t_end=t_end,
-                         nt=radius.shape[0])
+        super().__init__(t_start=t_start, t_end=t_end,
+                         nt_int=radius.shape[0])
 
         self.center = np.zeros(center.shape)
         self.radius = np.zeros(radius.shape)
@@ -1342,7 +997,7 @@ class BandGaussWind(Wind):
     """
 
     def __init__(self, origin, vect, ampl, sdev):
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        super().__init__()
         self.origin = np.zeros(2)
         self.origin[:] = origin
         self.vect = np.zeros(2)
@@ -1368,7 +1023,7 @@ class BandWind(Wind):
     """
 
     def __init__(self, origin, vect, w_value, width):
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        super().__init__()
         self.origin = np.zeros(2)
         self.origin[:] = origin
         self.vect = np.zeros(2)
@@ -1390,31 +1045,30 @@ class BandWind(Wind):
 
 class LCWind(Wind):
     """
-    Linear combination of winds. Handles the "dualization" of the windfield, i.e. multiplying by -1 everything
-    except wind virtual obstacles
+    Linear combination of winds.
     """
 
     def __init__(self, coeffs, winds):
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
         self.coeffs = np.zeros(coeffs.shape[0])
         self.coeffs[:] = coeffs
         self.winds = winds
 
         self.lcwind = sum((c * self.winds[i] for i, c in enumerate(self.coeffs)), UniformWind(np.zeros(2)))
-        nt = None
+        nt_int = None
+        t_start = None
         t_end = None
         for wind in self.winds:
-            if wind.nt > 1:
-                if nt is None:
-                    nt = wind.nt
+            if wind.nt_int is not None and wind.nt_int > 1:
+                if nt_int is None:
+                    nt_int = wind.nt_int
+                    t_start = wind.t_start
                     t_end = wind.t_end
                 else:
-                    if wind.nt != nt or wind.t_end != t_end:
-                        print('Cannot handle combination of multiple time-varying winds with'
-                              ' different parameters for the moment', file=sys.stderr)
+                    if wind.nt != nt_int or wind.t_start != t_start or wind.t_end != t_end:
+                        print('Cannot handle combination of multiple time-varying winds with '
+                              'different parameters for the moment', file=sys.stderr)
                         exit(1)
-        self.nt = nt if nt is not None else 1
-        self.t_end = t_end
+        super().__init__(t_start, t_end, nt_int)
 
     def value(self, t, x):
         return self.lcwind.value(t, x)
@@ -1438,7 +1092,7 @@ class LVWind(Wind):
     """
 
     def __init__(self, wind_value, gradient, time_scale):
-        super().__init__(value_func=self.value, d_value_func=self.d_value)
+        super().__init__()
         self.wind_value = np.array(wind_value)
         self.gradient = np.array(gradient)
         self.t_end = time_scale
@@ -1459,8 +1113,7 @@ class TrapWind(Wind):
         """
         if wind_value.shape[0] != radius.shape[0]:
             raise Exception('Incoherent shapes')
-        nt = wind_value.shape[0]
-        super().__init__(value_func=self.value, d_value_func=self.d_value, nt=nt, t_start=t_start, t_end=t_end)
+        super().__init__(t_start=t_start, t_end=t_end, nt_int=wind_value.shape[0])
         self.wind_value = np.array(wind_value)
         self.center = np.array(center)
         self.radius = np.array(radius)
@@ -1507,11 +1160,7 @@ class TrapWind(Wind):
 class ChertovskihWind(Wind):
 
     def __init__(self):
-        self.t_start = 0.
-        self.t_end = None
-        nt = 1
-        super().__init__(value_func=self.value, d_value_func=self.d_value, nt=nt, t_start=self.t_start,
-                         t_end=self.t_end)
+        super().__init__()
 
     def value(self, t, x):
         return np.array((x[0] * (x[1] + 3) / 4, -x[0] * x[0]))
@@ -1519,9 +1168,3 @@ class ChertovskihWind(Wind):
     def d_value(self, t, x):
         return np.array((((x[1] + 3) / 4, x[0] / 4),
                          (-2 * x[0], 0)))
-
-
-if __name__ == '__main__':
-    wind = DiscreteWind(interp='linear')
-    wind.load('/home/bastien/Documents/data/wind/windy/Dakar-Natal-0.5-padded.mz/data.h5')
-    wind.flatten()

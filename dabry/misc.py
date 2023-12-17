@@ -1,3 +1,4 @@
+import functools
 import sys
 import time
 from datetime import datetime
@@ -462,6 +463,26 @@ class Utils:
         bl_lon, tr_lon = Utils.rectify(Utils.RAD_TO_DEG * bl[0], Utils.RAD_TO_DEG * tr[0])
         p_lon = Utils.to_0_360(Utils.RAD_TO_DEG * p[0])
         return (bl_lon < p_lon < tr_lon or bl_lon < p_lon + 360 < tr_lon) and bl[1] < p[1] < tr[1]
+
+    @staticmethod
+    def interpolate(values, bl, spacings, state_ex):
+        """
+        Interpolates `values` (possibly multidimensional per node) defined over the grid at the given `state`.
+        Adapted from hj_reachability package
+        Clips to border for points outside boundaries
+        """
+        position = (state_ex - bl) / np.array(spacings)
+        index_lo = np.floor(position).astype(np.int32)
+        index_hi = index_lo + 1
+        weight_hi = position - index_lo
+        weight_lo = 1 - weight_hi
+        index_lo, index_hi = tuple(
+            np.clip(index, 0, np.array(values.shape[:-1]) - np.ones(len(values.shape[:-1]), dtype=np.int32))
+            for index in (index_lo, index_hi))
+        weight = functools.reduce(lambda x, y: x * y, np.ix_(*np.stack([weight_lo, weight_hi], -1)))
+        return np.sum(
+            weight[(...,) + (np.newaxis,) * (values.ndim - state_ex.shape[0])] *
+            values[np.ix_(*np.stack([index_lo, index_hi], -1))], tuple(list(range(state_ex.shape[0]))))
 
 
 class Chrono:
