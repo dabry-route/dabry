@@ -56,7 +56,7 @@ class SolverNLP:
         x = np.zeros((self.nt, 2))
         x[:] = self.x_init
         for k in range(self.nt - 1):
-            x[k + 1, :] = x[k] + self.dt * self.mp.model.dyn.value(x[k], u[k], self.ts[k])
+            x[k + 1, :] = x[k] + self.dt * self.mp.model.dyn.value(self.ts[k], x[k], u[k])
         return x
 
     def loss(self, u):
@@ -109,16 +109,16 @@ class SolverNLP:
             constraints += [
                 {'type': 'ineq',
                  'fun':
-                     lambda x: x[k + 1] - x[k] + self.dt * self.mp.model.dyn.value(np.array((x[k], x[k + nt])),
-                                                                                   x[k + 2 * nt], self.ts[k])[0],
+                     lambda x: x[k + 1] - x[k] + self.dt * self.mp.model.dyn.value(self.ts[k],
+                                                                                   np.array((x[k], x[k + nt])),
+                                                                                   x[k + 2 * nt])[0],
                  'ub': 1e1,
                  'lb': -1e1
                  },
                 {'type': 'ineq',
                  'fun':
                      lambda x: x[nt + k + 1] - x[nt + k] + self.dt *
-                               self.mp.model.dyn.value(np.array((x[k], x[k + nt])),
-                                                       x[k + 2 * nt], self.ts[k])[1],
+                               self.mp.model.dyn.value(self.ts[k], np.array((x[k], x[k + nt])), x[k + 2 * nt])[1],
                  'ub': 1e1,
                  'lb': -1e1
                  }

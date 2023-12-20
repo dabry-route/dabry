@@ -51,7 +51,7 @@ if __name__ == '__main__':
 
     if not cache_wind:
         chrono.start('Dumping windfield to file')
-        mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
+        mdfm.dump_wind(pb.model.ff, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
         chrono.stop()
 
     # Setting the extremal solver

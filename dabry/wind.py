@@ -3,7 +3,7 @@ import sys
 from abc import ABC
 from datetime import datetime, timedelta
 from math import exp, log
-from typing import Optional
+from typing import Optional, Union
 
 import h5py
 import numpy as np
@@ -165,16 +165,23 @@ class DiscreteWind(Wind):
     Handles wind loading from H5 format and derivative computation
     """
 
-    def __init__(self, values, bounds, coords, grad_values=None, force_no_diff=False):
+    def __init__(self, values: ndarray, bounds: ndarray, coords: str, grad_values: Optional[ndarray] = None,
+                 force_no_diff=False):
         super().__init__(nt_int=values.shape[0] if values.ndim == 4 else None)
 
         self.is_dumpable = 2
+
+        if bounds.shape[0] != len(values.shape) - 1:
+            raise Exception(f'Incompatible shape for values and bounds: '
+                            f'values has {len(values.shape) - 1} + 1 dimensions '
+                            f'so bounds must be of shape ({len(values.shape) - 1}, 2) ({bounds.shape} given)')
 
         self.values = values
         self.bounds = bounds
         self.coords = coords
 
-        self.spacings = (bounds[:, 1] - bounds[:, 0]) / (self.values.shape - np.ones(bounds.shape[0]).astype(np.int32))
+        self.spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(self.values.shape[1:2]) -
+                                                         np.ones(bounds.shape[0]).astype(np.int32))
 
         self.grad_values = grad_values
 
@@ -197,56 +204,69 @@ class DiscreteWind(Wind):
             # Checking consistency before loading
             Utils.ensure_coords(coords)
 
-            values = wind_data['data']
+            values = np.array(wind_data['data'])
 
             # Time bounds
             t_start = wind_data['ts'][0]
             t_end = None if wind_data['ts'].shape[0] == 1 else wind_data['ts'][-1]
 
             # Detecting millisecond-formated timestamps
-            if np.any(wind_data['ts'] > 1e11):
+            if np.any(np.array(wind_data['ts']) > 1e11):
                 t_start /= 1000.
                 if t_end is not None:
                     t_end /= 1000.
             f = Utils.DEG_TO_RAD if wind_data.attrs['units_grid'] == Utils.U_DEG else 1.
 
-            bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) + \
+            bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) +
                               (f * wind_data['grid'][0, 0],
                                f * wind_data['grid'][-1, -1]), axis=0)
 
         return cls(values, bounds, coords, **kwargs)
 
     @classmethod
-    def from_wind(cls, wind: Wind, grid_bounds, coords, nx=100, ny=100, nt=50, **kwargs):
-        # Checking consistency before loading
-        Utils.ensure_coords(coords)
-
+    def from_wind(cls, wind: Wind, grid_bounds, nx=100, ny=100, nt=50, **kwargs):
         t_start = wind.t_start
         t_end = wind.t_end
 
-        bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) + \
+        bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) +
                           (grid_bounds[0], grid_bounds[1]), axis=0)
         shape = (() if t_end is None else (nt,)) + (nx, ny)
         spacings = (bounds[:, 1] - bounds[:, 0]) / (shape - np.ones(bounds.shape[0]).astype(np.int32))
         _nt = nt if t_end is not None else 1
         values = np.zeros(shape + (2,))
-        grad_values = np.zeros(shape + (2, 2))
+        grad_values = np.zeros(shape + (2, 2)) if not kwargs.get('force_no_diff') else None
         for k in range(_nt):
-            idt = (k,) if t_end is not None else ()
             t = bounds[0, 0] + k * spacings[0] if t_end is not None else t_start
             for i in range(nx):
                 for j in range(ny):
-                    state = bounds[-2:]
-                    values[idt + (i, j), :] = wind.value(t, state)
-                    grad_values[idt + (i, j), ...] = wind.d_value(t, state)
-
+                    state = bounds[-2:, 0] + np.diag((i, j)) @ spacings[-2:]
+                    if t_end is None:
+                        values[i, j, :] = wind.value(t, state)
+                    else:
+                        values[k, i, j, :] = wind.value(t, state)
+                    if not kwargs.get('force_no_diff'):
+                        if t_end is None:
+                            grad_values[i, j, ...] = wind.d_value(t, state)
+                        else:
+                            grad_values[k, i, j, ...] = wind.d_value(t, state)
+        coords = Utils.COORD_GCS if isinstance(wind, DiscreteWind) and wind.coords == Utils.COORD_GCS \
+            else Utils.COORD_CARTESIAN
         return cls(values, bounds, coords, grad_values=grad_values, **kwargs)
 
     @classmethod
-    def from_cds_folder(cls, dirpath: str, grid_bounds: ndarray,
-                        t_start: Optional[float, datetime], t_end: Optional[float, datetime],
-                        i_member: Optional[int]):
-
+    def from_cds(cls, grid_bounds: ndarray, t_start: Union[float | datetime], t_end: Union[float | datetime],
+                 i_member: Optional[int] = None, resolution='0.5', pressure_level='1000'):
+        """
+        :param grid_bounds: A (2,2) array where the zeroth element is the bottom left corner vector
+        and the first element is the top right corner vector
+        :param t_start: The required start time for wind
+        :param t_end: The required end time for wind
+        :param i_member: The reanalysis ensemble member number
+        :param resolution: The weather model grid resolution in degrees, e.g. '0.5'
+        :param pressure_level: The pressure level in hPa, e.g. '1000', '500', '200'
+        :return: A DiscreteWind corresponding to the query
+        """
+        dirpath = os.path.join(os.environ.get('DABRYPATH'), 'data', 'cds', resolution, pressure_level)
         single_frame = abs(t_start - t_end) < 60
         bl, tr = grid_bounds[0], grid_bounds[1]
         bl_d, tr_d = bl * Utils.RAD_TO_DEG, tr * Utils.RAD_TO_DEG
@@ -279,14 +299,14 @@ class DiscreteWind(Wind):
             data2 = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=0, lon2=lon_b[1] - 360)
             lons1 = Utils.DEG_TO_RAD * Utils.to_m180_180(data1[2]).transpose()
             lons2 = Utils.DEG_TO_RAD * Utils.to_m180_180(data2[2]).transpose()
-            lats1 = Utils.DEG_TO_RAD * data1[1].transpose()
-            lats2 = Utils.DEG_TO_RAD * data2[1].transpose()
+            # lats1 = Utils.DEG_TO_RAD * data1[1].transpose()
+            # lats2 = Utils.DEG_TO_RAD * data2[1].transpose()
             lons = np.concatenate((lons1, lons2))
-            lats = np.concatenate((lats1, lats2))
+            # lats = np.concatenate((lats1, lats2))
         else:
             data = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])
             lons = Utils.DEG_TO_RAD * Utils.to_m180_180(data[2]).transpose()
-            lats = Utils.DEG_TO_RAD * data[1].transpose()
+            # lats = Utils.DEG_TO_RAD * data[1].transpose()
 
         shape = lons.shape
 
@@ -345,7 +365,7 @@ class DiscreteWind(Wind):
 
         values = np.array(uv_frames)
 
-        return cls(values, np.stack((np.array((ts[0], ts[-1])), grid_bounds)), Utils.COORD_GCS)
+        return cls(values, np.stack((np.array((ts[0], ts[-1])), grid_bounds)), Utils.COORD_GCS, grad_values=None)
 
     def value(self, t, x):
         """
@@ -623,9 +643,9 @@ class VortexWind(Wind):
         r = np.linalg.norm(x - self.omega)
         x_omega = self.x_omega
         y_omega = self.y_omega
-        return self.gamma / (2 * np.pi * r ** 4) * \
-               np.array([[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
-                         [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
+        return self.gamma / (2 * np.pi * r ** 4) * np.array(
+            [[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
+             [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
 
 
 class RankineVortexWind(Wind):
@@ -687,8 +707,8 @@ class RankineVortexWind(Wind):
             return np.zeros((2, 2))
         x_omega = omega[0]
         y_omega = omega[1]
-        e_r = np.array([(x - omega)[0] / r,
-                        (x - omega)[1] / r])
+        # e_r = np.array([(x - omega)[0] / r,
+        #                 (x - omega)[1] / r])
         e_theta = np.array([-(x - omega)[1] / r,
                             (x - omega)[0] / r])
         f = gamma / (2 * np.pi)

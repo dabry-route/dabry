@@ -1,19 +1,20 @@
 import os
 import shutil
 import sys
+import warnings
 from datetime import datetime, timedelta
 from time import strftime
+from typing import Optional
 
 import cdsapi
 import h5py
 import numpy as np
 import pygrib
 import pyproj
+from numpy import ndarray
 
 from dabry.misc import Utils
-from dabry.params_summary import ParamsSummary
-from dabry.penalty import Penalty, DiscretePenalty
-from dabry.problem import NavigationProblem
+from dabry.penalty import DiscretePenalty
 from dabry.wind import Wind, DiscreteWind
 
 """
@@ -45,15 +46,14 @@ class DDFmanager:
     """
 
     def __init__(self, cache_wind=False, cache_rff=False):
-        self.module_dir = None
-        self.cds_wind_db_dir = None
-        self.case_dir = None
+        self.module_dir: Optional[str] = None
+        self.cds_wind_db_dir: Optional[str] = None
+        self.case_dir: Optional[str] = None
         self.trajs_filename = 'trajectories.h5'
-        self.wind_filename = 'wind.h5'
+        self.wind_filename = 'wind'
         self.obs_filename = 'obs.h5'
         self.pen_filename = 'penalty.h5'
-        self.case_name = None
-        self.ps = ParamsSummary()
+        self.case_name: Optional[str] = None
         self.cache_wind = cache_wind
         self.cache_rff = cache_rff
 
@@ -68,13 +68,13 @@ class DDFmanager:
         self.cds_wind_db_dir = os.path.join(self.module_dir, 'data', 'cds')
 
     def set_case(self, case_name):
+        self.setup()
         self.case_name = case_name.split('/')[-1]
         if self.module_dir is None:
             raise Exception('Output directory not specified yet')
         self.case_dir = os.path.join(self.module_dir, 'output', self.case_name)
         if not os.path.exists(self.case_dir):
             os.mkdir(self.case_dir)
-        self.ps.setup(self.case_dir)
 
     def clean_output_dir(self):
         if not os.path.exists(self.case_dir):
@@ -147,30 +147,30 @@ class DDFmanager:
         if file is not None:
             self.save_script(file)
 
-    def dump_obs(self, pb: NavigationProblem, nx=100, ny=100):
-        filepath = os.path.join(self.case_dir, self.obs_filename)
-        with h5py.File(os.path.join(filepath), 'w') as f:
-            f.attrs['coords'] = pb.coords
-            delta_x = (pb.tr[0] - pb.bl[0]) / (nx - 1)
-            delta_y = (pb.tr[1] - pb.bl[1]) / (ny - 1)
-            dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
-            X, Y = np.meshgrid(pb.bl[0] + delta_x * np.arange(nx),
-                               pb.bl[1] + delta_y * np.arange(ny), indexing='ij')
-            dset[:, :, 0] = X
-            dset[:, :, 1] = Y
-
-            obs_val = np.infty * np.ones((nx, ny))
-            obs_id = -1 * np.ones((nx, ny))
-            for k, obs in enumerate(pb.obstacles):
-                for i in range(nx):
-                    for j in range(ny):
-                        point = np.array((pb.bl[0] + delta_x * i, pb.bl[1] + delta_y * j))
-                        val = obs.value(point)
-                        if val < 0. and val < obs_val[i, j]:
-                            obs_val[i, j] = val
-                            obs_id[i, j] = k
-            dset = f.create_dataset('data', (nx, ny), dtype='f8')
-            dset[:, :] = obs_id
+    # def dump_obs(self, pb: NavigationProblem, nx=100, ny=100):
+    #     filepath = os.path.join(self.case_dir, self.obs_filename)
+    #     with h5py.File(os.path.join(filepath), 'w') as f:
+    #         f.attrs['coords'] = pb.coords
+    #         delta_x = (pb.tr[0] - pb.bl[0]) / (nx - 1)
+    #         delta_y = (pb.tr[1] - pb.bl[1]) / (ny - 1)
+    #         dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
+    #         X, Y = np.meshgrid(pb.bl[0] + delta_x * np.arange(nx),
+    #                            pb.bl[1] + delta_y * np.arange(ny), indexing='ij')
+    #         dset[:, :, 0] = X
+    #         dset[:, :, 1] = Y
+    #
+    #         obs_val = np.infty * np.ones((nx, ny))
+    #         obs_id = -1 * np.ones((nx, ny))
+    #         for k, obs in enumerate(pb.obstacles):
+    #             for i in range(nx):
+    #                 for j in range(ny):
+    #                     point = np.array((pb.bl[0] + delta_x * i, pb.bl[1] + delta_y * j))
+    #                     val = obs.value(point)
+    #                     if val < 0. and val < obs_val[i, j]:
+    #                         obs_val[i, j] = val
+    #                         obs_id[i, j] = k
+    #         dset = f.create_dataset('data', (nx, ny), dtype='f8')
+    #         dset[:, :] = obs_id
 
     def _grib_date_to_unix(self, grib_filename):
         date, hm = grib_filename.split('_')[2:4]
@@ -189,42 +189,58 @@ class DDFmanager:
                 for attr, val in traj.attrs.items():
                     print(f'{attr} : {val}')
 
-    def dump_wind(self, wind: Wind, filename=None, nx=None, ny=None, nt=None, bl=None, tr=None,
-                  coords=Utils.COORD_CARTESIAN,
-                  force_analytical=False):
-        if wind.is_dumpable == 0:
-            print('Error : Wind is not dumpable to file', file=sys.stderr)
-            exit(1)
-        filename = self.wind_filename if filename is None else filename
-        filepath = os.path.join(self.case_dir, filename)
+    def dump_wind(self, ff: Wind, nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
+                  bl: Optional[ndarray] = None, tr: Optional[ndarray] = None):
+        filepath = os.path.join(self.case_dir, self.wind_filename)
         if os.path.exists(filepath) and self.cache_wind:
             return
-        if wind.is_dumpable == 1:
-            if nx is None or ny is None:
-                print(f'Please provide grid shape "nx=..., ny=..." to sample analytical wind "{wind}"')
-                exit(1)
-            dwind = DiscreteWind(force_analytical=force_analytical)
-            kwargs = {}
-            if nt is not None:
-                kwargs['nt'] = nt
-            dwind.load_from_wind(wind, nx, ny, bl, tr, coords, nodiff=True, **kwargs)
+        DDFmanager.dump_wind_to_file(ff, filepath, nx=nx, ny=ny, nt=nt, bl=bl, tr=tr, fmt='h5')
+
+    @staticmethod
+    def _cast_to_discrete_wind(ff: Wind, nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
+                               bl: Optional[ndarray] = None, tr: Optional[ndarray] = None):
+        if not isinstance(ff, DiscreteWind):
+            nx = 50 if nx is None else nx
+            ny = 50 if ny is None else ny
+            nt = 25 if nt is None else nt
+            if bl is None or tr is None:
+                raise Exception('Missing bounding box (bl, tr) to sample analytical flow field')
+            return DiscreteWind.from_wind(ff, np.array((bl, tr)).transpose(), nx=nx, ny=ny, nt=nt, force_no_diff=True)
         else:
-            dwind = wind
-        with h5py.File(filepath, 'w') as f:
-            f.attrs['coords'] = dwind.coords
-            f.attrs['units_grid'] = Utils.U_METERS if dwind.coords == Utils.COORD_CARTESIAN else Utils.U_RAD
-            f.attrs['analytical'] = dwind.is_analytical
-            if dwind.lon_0 is not None:
-                f.attrs['lon_0'] = dwind.lon_0
-            if dwind.lat_0 is not None:
-                f.attrs['lat_0'] = dwind.lat_0
-            f.attrs['unstructured'] = dwind.unstructured
-            dset = f.create_dataset('data', (dwind.nt, dwind.nx, dwind.ny, 2), dtype='f8')
-            dset[:] = dwind.uv
-            dset = f.create_dataset('ts', (dwind.nt,), dtype='f8')
-            dset[:] = dwind.ts
-            dset = f.create_dataset('grid', (dwind.nx, dwind.ny, 2), dtype='f8')
-            dset[:] = dwind.grid
+            warnings.warn('Grid shape (nt, nx, ny) provided but resampling of DiscreteWind not implemented yet.'
+                          'Continuing with wind native grid')
+            return ff
+
+    @classmethod
+    def dump_wind_to_file(cls, ff: Wind, filepath: str, fmt='npz',
+                          nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
+                          bl: Optional[ndarray] = None, tr: Optional[ndarray] = None):
+        if fmt not in ['h5', 'npz']:
+            raise Exception(f'Unknown output format "{fmt}"')
+        dff = DDFmanager._cast_to_discrete_wind(ff, nx, ny, nt, bl, tr)
+        if fmt == 'h5':
+            with h5py.File(filepath + '.' + fmt, 'w') as f:
+                f.attrs['coords'] = dff.coords
+                f.attrs['units_grid'] = Utils.U_METERS if dff.coords == Utils.COORD_CARTESIAN else Utils.U_RAD
+                if dff.values.ndim == 4:
+                    dset = f.create_dataset('data', dff.values.shape, dtype='f8')
+                    dset[:] = dff.values
+                else:
+                    dset = f.create_dataset('data', (1,) + dff.values.shape, dtype='f8')
+                    dset[0, :] = dff.values
+                if dff.values.ndim == 4:
+                    dset = f.create_dataset('ts', (dff.values.shape[0],), dtype='f8')
+                    dset[:] = np.linspace(dff.bounds[0, 0], dff.bounds[0, 1], dff.values.shape[0])
+                else:
+                    dset = f.create_dataset('ts', (1,), dtype='f8')
+                    dset[:] = dff.t_start
+                _nx, _ny = dff.values.shape[:2] if dff.values.ndim == 3 else dff.values.shape[1:3]
+                dset = f.create_dataset('grid', (_nx, _ny, 2), dtype='f8')
+                dset[:] = np.stack(np.meshgrid(np.linspace(dff.bounds[-2, 0], dff.bounds[-2, 1], _nx),
+                                               np.linspace(dff.bounds[-1, 0], dff.bounds[-1, 1], _ny), indexing='ij'), -1)
+        else:
+            # fmt == 'npz'
+            np.savez(filepath + '.' + fmt, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords))
 
     def dump_penalty(self, penalty: DiscretePenalty):
         filepath = os.path.join(self.case_dir, self.pen_filename)
@@ -237,7 +253,6 @@ class DDFmanager:
             dset[:] = penalty.ts
             dset = f.create_dataset('grid', penalty.grid.shape, dtype='f8')
             dset[:] = penalty.grid
-
 
     def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Utils.COORD_GCS):
         if coords == Utils.COORD_CARTESIAN:
@@ -384,7 +399,6 @@ class DDFmanager:
             print(f'Shall retrieve {len(days_required)} : {days_required}')
 
         for day_required in days_required:
-
             # server = ECMWFDataServer()
             server = cdsapi.Client()
             kwargs = {

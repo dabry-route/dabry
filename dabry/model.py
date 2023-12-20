@@ -1,10 +1,10 @@
-from abc import ABC
+from typing import Optional
 
 import numpy as np
 
-from dabry.misc import Utils
-from .dynamics import ZermeloDyn, PCZermeloDyn
-from .wind import UniformWind, Wind
+from .dynamics import ZermeloS2Dyn, Dynamics, ZermeloR2Dyn
+from .misc import Utils
+from .wind import UniformWind, Wind, DiscreteWind
 
 """
 model.py
@@ -28,54 +28,41 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
-class Model(ABC):
+class Model:
     """
-    Defines a complete model for the UAV navigation problem.
-    Defines:
-        - the windfield
-        - the dynamics of the model
+    Defines the dynamics and power law associated to a vehicle evolving in a flow field
     """
 
-    def __init__(self, v_a: float):
+    def __init__(self, dyn: Dynamics):
         """
-        :param v_a: The UAV airspeed in meters per seconds
-        :param x_f: The target x-coordinate in meters
+        :param dyn: The vehicle's dynamics
         """
-        self.v_a = v_a
-        self.dyn = None
-        self.wind = None
+        self.dyn = dyn
+        self.coords = Model.which_coords(dyn.ff)
 
-    def update_airspeed(self, v_a):
-        self.v_a = v_a
+    @classmethod
+    def which_coords(cls, ff: Wind):
+        return Utils.COORD_GCS if isinstance(ff, DiscreteWind) and ff.coords == Utils.COORD_GCS else\
+            Utils.COORD_CARTESIAN
 
+    @property
+    def ff(self):
+        return self.dyn.ff
 
-class ZermeloGeneralModel(Model):
+    @classmethod
+    def zermelo_R2(cls, ff: Optional[Wind]):
+        if ff is None:
+            ff = UniformWind(np.zeros(2))
+        return cls(ZermeloR2Dyn(ff))
 
-    def __init__(self, v_a: float, coords=Utils.COORD_CARTESIAN):
-        self.coords = coords
-        super().__init__(v_a)
-        self.wind = UniformWind(np.zeros(2))
-        if self.coords == Utils.COORD_CARTESIAN:
-            self.dyn = ZermeloDyn(self.wind, self.v_a)
-        elif self.coords == Utils.COORD_GCS:
-            self.dyn = PCZermeloDyn(self.wind, self.v_a)
+    @classmethod
+    def zermelo_S2(cls, ff: Wind):
+        return cls(ZermeloS2Dyn(ff))
+
+    @classmethod
+    def zermelo(cls, ff: Wind):
+        coords = Model.which_coords(ff)
+        if coords == Utils.COORD_CARTESIAN:
+            return cls.zermelo_R2(ff)
         else:
-            print(f'Unknown mode : {coords}')
-            exit(1)
-
-    def update_wind(self, wind: Wind):
-        self.wind = wind
-        if self.coords == Utils.COORD_CARTESIAN:
-            self.dyn = ZermeloDyn(self.wind, self.v_a)
-        elif self.coords == Utils.COORD_GCS:
-            self.dyn = PCZermeloDyn(self.wind, self.v_a)
-
-    def update_airspeed(self, v_a):
-        super(ZermeloGeneralModel, self).update_airspeed(v_a)
-        if self.coords == Utils.COORD_CARTESIAN:
-            self.dyn = ZermeloDyn(self.wind, self.v_a)
-        elif self.coords == Utils.COORD_GCS:
-            self.dyn = PCZermeloDyn(self.wind, self.v_a)
-
-    def __str__(self):
-        return str(self.dyn) + ' with ' + str(self.wind)
+            return cls.zermelo_S2(ff)

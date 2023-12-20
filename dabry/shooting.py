@@ -143,7 +143,7 @@ class Shooting(ABC):
                 print(sumup(0, t, x, p, u))
             if not self.adapt_ts:
                 dt = self.final_time / self.N_iter
-                sc = PrecisionSC(self.dyn.wind, factor=self.factor, int_stepsize=dt)
+                sc = PrecisionSC(self.dyn.ff, factor=self.factor, int_stepsize=dt)
                 i = 1
                 for i in range(1, self.N_iter):
                     if self.abort_on_precision:
@@ -166,8 +166,8 @@ class Shooting(ABC):
                         v_a = airspeed[i] = Utils.airspeed_opti(p)
                     else:
                         v_a = None
-                    dyn_x = self.dyn.value(x, u, t, v_a=v_a)
-                    A = -self.dyn.d_value__d_state(x, u, t, v_a=v_a).transpose()
+                    dyn_x = self.dyn.value(t, x, u)
+                    A = -self.dyn.d_value__d_state(t, x, u, srf=v_a).transpose()
                     dyn_p = A.dot(p)
                     x += dt * dyn_x
                     p += dt * dyn_p
@@ -185,12 +185,12 @@ class Shooting(ABC):
             else:
                 i = 1
                 while t < self.final_time and i < self.N_iter and self.domain(x):
-                    dt = 1 / self.dyn.wind.grad_norm(x) * self.factor
+                    dt = 1 / self.dyn.ff.grad_norm(x) * self.factor
                     t += dt
                     list_dt.append(dt)
                     u = Utils.heading_opti(x, p, t, self.coords)
-                    dyn_x = self.dyn.value(x, u, t)
-                    A = -self.dyn.d_value__d_state(x, u, t).transpose()
+                    dyn_x = self.dyn.value(t, x, u)
+                    A = -self.dyn.d_value__d_state(t, x, u, ).transpose()
                     dyn_p = A.dot(p)
                     x += dt * dyn_x
                     p += dt * dyn_p
@@ -233,8 +233,8 @@ class Shooting(ABC):
                     p = np.zeros(2)
                     p[:] = z[2:]
                     u = Utils.heading_opti(x, p, t, self.coords)
-                    dyn_x = self.dyn.value(x, u, t)
-                    A = -self.dyn.d_value__d_state(x, u, t).transpose()
+                    dyn_x = self.dyn.value(t, x, u)
+                    A = -self.dyn.d_value__d_state(t, x, u, ).transpose()
                     dyn_p = A.dot(p)
                     return np.concatenate((dyn_x, dyn_p))
 
@@ -263,8 +263,8 @@ class Shooting(ABC):
                     p = np.zeros(2)
                     p[:] = z[2:]
                     u = Utils.heading_opti(x, p, t, self.coords)
-                    dyn_x = self.dyn.value(x, u, t)
-                    A = -self.dyn.d_value__d_state(x, u, t).transpose()
+                    dyn_x = self.dyn.value(t, x, u)
+                    A = -self.dyn.d_value__d_state(t, x, u, ).transpose()
                     dyn_p = A.dot(p)
                     return np.concatenate((dyn_x, dyn_p))
 

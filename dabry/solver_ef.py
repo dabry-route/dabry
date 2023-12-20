@@ -1,11 +1,11 @@
 import csv
 import os
 from abc import ABC
+from typing import Optional
 
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.integrate
 from alphashape import alphashape
 from numpy import arcsin as asin, ndarray
 from numpy import arctan2 as atan2
@@ -271,7 +271,7 @@ class EFOptRes:
 
     @property
     def duration(self):
-        return self.bests[self.min_cost_idx].t - self.mp.model.wind.t_start
+        return self.bests[self.min_cost_idx].t - self.mp.model.ff.t_start
 
     @property
     def index(self):
@@ -777,6 +777,7 @@ class SolverEF:
 
     def __init__(self,
                  mp: NavigationProblem,
+                 t_init: Optional[float] = None,
                  max_time=None,
                  mode=0,
                  N_disc_init=20,
@@ -798,10 +799,9 @@ class SolverEF:
                  N_pn_init=5,
                  alpha_factor=1.):
         self.mp_primal = mp
-        self.mp_dual = NavigationProblem(**mp.__dict__)  # mp.dualize()
-        mem = np.array(self.mp_dual.x_init)
-        self.mp_dual.x_init = np.array(self.mp_dual.x_target)
-        self.mp_dual.x_target = np.array(mem)
+        self.mp_dual = mp.dualize()
+
+        self.t_init = t_init
 
         self.mode = mode
 
@@ -831,7 +831,7 @@ class SolverEF:
             self.dt = -dt
         else:
             if mode == 0:
-                self.dt = -.005 * mp.l_ref / mp.model.v_a
+                self.dt = -.005 * mp.l_ref / mp.srf_max
             else:
                 self.dt = -.005 * mp.l_ref / mp.aero.v_minp
 
@@ -862,7 +862,7 @@ class SolverEF:
         self.rel_cost_ceil = 0.05 if rel_cost_ceil is None else rel_cost_ceil
         self.cost_thres = None if cost_ceil is None else rel_cost_ceil * cost_ceil
         self.asp_offset = asp_offset
-        self.asp_init = asp_init if asp_init is not None else self.mp.model.v_a
+        self.asp_init = asp_init if asp_init is not None else self.mp.srf_max
 
         self.it = 0
         self.it_first_reach = -1
@@ -881,8 +881,8 @@ class SolverEF:
         self.N_filling_steps = 1
 
         # Base collision filtering scheme only for steady problems
-        self.no_coll_filtering = no_coll_filtering or self.mp.model.wind.t_end is not None
-        self.quick_solve = quick_solve
+        self.no_coll_filtering = no_coll_filtering or self.mp.model.ff.t_end is not None
+        self.quick_solve = quick_solve if mode == 1 else True
         self.quick_offset = quick_offset
         self._qcounter = 0
         self.quick_traj_idx = -1
@@ -934,10 +934,10 @@ class SolverEF:
         self.it = 0
         self.n_points = 0
         self.any_out_obs = True
-        if self.mp_primal.t_init is not None:
-            t_start = self.mp_primal.t_init + time_offset
+        if self.t_init is not None:
+            t_start = self.t_init + time_offset
         else:
-            t_start = self.mp_primal.model.wind.t_start + time_offset
+            t_start = self.mp_primal.model.ff.t_start + time_offset
         if not self.no_coll_filtering:
             self.collbuf.init(*self.collbuf_shape, self.mp.bl, self.mp.tr)
 
@@ -995,7 +995,7 @@ class SolverEF:
             elif self.cost_ceil is not None and pcl_new.cost > self.cost_ceil:
                 self.ef.deactivate(idf, 'cost')
             elif self.pareto is not None and \
-                    self.pareto.dominated((pcl_new.t - self.mp_primal.model.wind.t_start, pcl_new.cost)):
+                    self.pareto.dominated((pcl_new.t - self.mp_primal.model.ff.t_start, pcl_new.cost)):
                 self.ef.deactivate(idf, 'pareto')
             else:
                 self.ef.add(pcl_new)
@@ -1034,57 +1034,38 @@ class SolverEF:
         rot = pcl.rot
         v_a = None
         if pcl.i_obs == -1:
-            if self.manual_integration:
-                # For the moment, simple Euler scheme
-                u = self.mp.control_angle(p, x)
-                kw = {}
-                if self.mode == self.MODE_ENERGY:
-                    kw['v_a'] = v_a = np.min(
-                        (self.mp.aero.v_max, np.max((self.mp.aero.v_min, self.mp.aero.asp_opti(p)))))
-                dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
-                A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
-                dyn_p = A.dot(p) - self.mp.penalty.d_value(t, x)
-                x += self.dt * dyn_x
-                p += self.dt * dyn_p
-                t += self.dt
-                # Transversality condition for debug purposes
-                # a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
-                # For compatibility with other case
-                status = True
-            else:
-                def f(t, z):
-                    x = z[:2]
-                    p = z[2:]
-                    u = self.mp.control_angle(p, x)
-                    kw = {}
-                    if self.mode == self.MODE_ENERGY:
-                        kw['v_a'] = self.mp.aero.asp_opti(p)
-                    dyn_x = self.mp.model.dyn.value(x, u, t, **kw)
-                    A = -self.mp.model.dyn.d_value__d_state(x, u, t, **kw).transpose()
-                    dyn_p = A.dot(p)
-                    return np.hstack((dyn_x, dyn_p))
-
-                sol = scipy.integrate.solve_ivp(f, [pcl.t, pcl.t + self.dt], np.hstack((x, p)))
-                x = sol.y[:2, -1]
-                p = sol.y[2:, -1]
-                t += self.dt
-                status = True
+            # For the moment, simple Euler scheme
+            u = self.mp.control_angle(p, x)
+            su = self.mp.srf_max * np.array((np.cos(u), np.sin(u)))
+            kw = {}
+            if self.mode == self.MODE_ENERGY:
+                kw['v_a'] = v_a = np.min(
+                    (self.mp.aero.v_max, np.max((self.mp.aero.v_min, self.mp.aero.asp_opti(p)))))
+            dyn_x = self.mp.model.dyn.value(t, x, su)
+            A = -self.mp.model.dyn.d_value__d_state(t, x, su, **kw).transpose()
+            dyn_p = A.dot(p) - self.mp.penalty.d_value(t, x)
+            x += self.dt * dyn_x
+            p += self.dt * dyn_p
+            t += self.dt
+            # Transversality condition for debug purposes
+            # a = 1 - self.mp.model.v_a * np.linalg.norm(p) + p @ self.mp.model.wind.value(t, x)
+            # For compatibility with other case
+            status = True
         else:
             # Obstacle mode. Follow the obstacle boundary as fast as possible
             obs_grad = self.mp.obstacles[pcl.i_obs].d_value(x)
 
             obs_tgt = (-1. if not pcl.ccw else 1.) * np.array(((0, -1), (1, 0))) @ obs_grad
 
-            v_a = self.mp.model.v_a
+            v_a = self.mp.srf_max
 
             arg_ot = atan2(*obs_tgt[::-1])
-            w = self.mp.model.wind.value(t, x)
+            w = self.mp.model.ff.value(t, x)
             arg_w = atan2(*w[::-1])
             norm_w = np.linalg.norm(w)
             r = norm_w / v_a * sin(arg_w - arg_ot)
             if np.abs(r) >= 1.:
                 # Impossible to follow obstacle
-                # print('Impossible !')
                 status = False
             else:
                 def gs_f(uu, va, w, reference):
@@ -1095,7 +1076,8 @@ class SolverEF:
                 u = max([arg_ot - asin(r), arg_ot + asin(r) - pi], key=lambda uu: gs_f(uu, v_a, w, obs_tgt))
                 if self.mp.coords == Utils.COORD_GCS:
                     u = np.pi / 2. - u
-                dyn_x = self.mp.model.dyn.value(x, u, t)
+                su = self.mp.srf_max * np.array((np.cos(u), np.sin(u)))
+                dyn_x = self.mp.model.dyn.value(t, x, su)
                 x_prev = np.zeros(x.shape)
                 x_prev[:] = x
                 x += self.dt * dyn_x
@@ -1134,7 +1116,7 @@ class SolverEF:
                     ccw = s @ obs_tgt > 0.
                     rot = 0.
         if self.mode == self.MODE_TIME:
-            power = self.mp.aero.power(self.mp.model.v_a)
+            power = self.mp.aero.power(self.mp.srf_max)
         else:
             power = self.mp.aero.power(v_a)
         cost = power * abs(self.dt) + pcl.cost
@@ -1333,12 +1315,12 @@ class SolverEF:
         corresponding initial adjoint state
         """
 
-        hello = f'{self.mp_primal.descr}'
+        hello = f'{type(self.mp_primal).__name__}'
         hello += f' | {"TIMEOPT" if self.mode == SolverEF.MODE_TIME else "ENEROPT"}'
         if self.mode == SolverEF.MODE_TIME:
-            hello += f' | {self.mp_primal.model.v_a:.2f} m/s'
+            hello += f' | {self.mp_primal.srf_max:.2f} m/s'
         hello += f' | {self.mp_primal.geod_l:.2e} m'
-        nowind_time = self.mp_primal.geod_l / self.mp_primal.model.v_a
+        nowind_time = self.mp_primal.geod_l / self.mp_primal.srf_max
         hello += f' | scale {Utils.time_fmt(nowind_time)}'
         ortho_time = self.mp_primal.orthodromic()
         hello += f' | orthodromic {Utils.time_fmt(ortho_time) if ortho_time >= 0 else "DNR"}'
@@ -1425,7 +1407,6 @@ class SolverEF:
         btrajs = {}
         closest = None
         dist = None
-        # Optimal trajectory is to
         idt_min, idt_max = self.it_first_reach, self.it_first_reach
         if self.quick_exit:
             idt_max += self.quick_offset
@@ -1544,7 +1525,7 @@ class SolverEF:
         asp_init = self.asp_init if self.mode == 0 else self.mp.aero.asp_opti(np.linalg.norm(adjoints[0]))
         return AugmentedTraj(ts, points, adjoints, controls, nt - 1, self.mp.coords,
                              info=f'opt_m{int(self.mode)}_{asp_init:.5g}',
-                             constant_asp=self.mp.model.v_a if self.mode == 0 else None)
+                             constant_asp=self.mp.srf_max if self.mode == 0 else None)
 
     def get_trajs(self, primal_only=False, dual_only=False):
         res = []
@@ -1563,7 +1544,7 @@ class SolverEF:
                 transver = np.zeros(n)
                 energy = np.zeros(n)
                 offset = 0.
-                if self.mp_primal.model.wind.t_end is None and i == 0:
+                if self.mp_primal.model.ff.t_end is None and i == 0:
                     # If wind is steady, offset timestamps to have a <self.reach_time>-long window
                     # For dual trajectories
                     offset = 0.  # self.reach_time  # - self.max_time
@@ -1572,8 +1553,8 @@ class SolverEF:
                     points[it, :] = pcl.state
                     adjoints[it, :] = pcl.adjoint
                     controls[it] = self.mp.control_angle(pcl.adjoint, pcl.state)
-                    transver[it] = 1 - self.mp.model.v_a * np.linalg.norm(pcl.adjoint) \
-                                   + pcl.adjoint @ self.mp.model.wind.value(pcl.t, pcl.state)
+                    transver[it] = 1 - self.mp.srf_max * np.linalg.norm(pcl.adjoint) \
+                                   + pcl.adjoint @ self.mp.model.ff.value(pcl.t, pcl.state)
                     energy[it] = pcl.cost
                 add_info = ''
                 if i == 0:

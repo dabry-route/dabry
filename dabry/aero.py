@@ -26,6 +26,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
+class PowerModel(ABC):
+
+    def __init__(self):
+        pass
+
+
 class Aero(ABC):
 
     def __init__(self):
@@ -61,7 +67,7 @@ class Aero(ABC):
         f = lambda asp: (self.d_power(asp) * (asp + wind_speed) - self.power(asp))
         # return scipy.optimize.brentq(
         #     lambda asp: self.d_power(asp) - self.power(asp) / (asp + wind_speed), v_minp, 100.)
-        return scipy.optimize.fsolve(f, (self.v_min + self.v_max)/2)[0]
+        return scipy.optimize.fsolve(f, (self.v_min + self.v_max) / 2)[0]
 
     def asp_opti(self, adjoint):
         pn = np.linalg.norm(adjoint)

@@ -246,16 +246,16 @@ class LSEMaxiObs(Obstacle):
         """
         self.l_obs = l_obs
         ref_point = 1 / len(self.l_obs) * sum([obs.ref_point for obs in self.l_obs])
-        self.factor = 1e5
+        self._factor = 1e5
         super().__init__(self.value, ref_point, d_value_func=self.d_value)
 
     def value(self, x):
-        return self.factor * np.log(sum([np.exp(obs.value(x) / self.factor) for obs in self.l_obs]))
+        return self._factor * np.log(sum([np.exp(obs.value(x) / self._factor) for obs in self.l_obs]))
 
     def d_value(self, x):
-        s = sum([np.exp(obs.value(x) / self.factor) for obs in self.l_obs])
-        weights = [np.exp(obs.value(x) / self.factor) / s for obs in self.l_obs]
-        return self.factor * sum([obs.d_value(x) * weights[i] for i, obs in enumerate(self.l_obs)])
+        s = sum([np.exp(obs.value(x) / self._factor) for obs in self.l_obs])
+        weights = [np.exp(obs.value(x) / self._factor) / s for obs in self.l_obs]
+        return self._factor * sum([obs.d_value(x) * weights[i] for i, obs in enumerate(self.l_obs)])
 
 
 class MeanObs(Obstacle):

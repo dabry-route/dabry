@@ -251,8 +251,8 @@ class RFT:
             # New boundaries are defined as an encapsulating bounding box over the region defined
             # by (lon, lat) bottom left and top right corners
             # Define a dense grid of points within the (lon, lat) zone
-            x = Utils.RAD_TO_DEG * self.mp.model.wind.grid[:, :, 0]
-            y = Utils.RAD_TO_DEG * self.mp.model.wind.grid[:, :, 1]
+            x = Utils.RAD_TO_DEG * self.mp.model.ff.grid[:, :, 0]
+            y = Utils.RAD_TO_DEG * self.mp.model.ff.grid[:, :, 1]
             # x, y = np.meshgrid(RAD_TO_DEG * np.linspace(self.bl[0], self.tr[0], 100),
             #                    RAD_TO_DEG * np.linspace(self.bl[1], self.tr[1], 100), indexing='ij')
             # Project it
@@ -267,7 +267,7 @@ class RFT:
         self.delta_x = (self.tr[0] - self.bl[0]) / (self.nx - 1)
         self.delta_y = (self.tr[1] - self.bl[1]) / (self.ny - 1)
 
-        self.speed = mp.model.v_a
+        self.speed = mp.model.srf
         self.wind = None
         self.phi = None
 
@@ -297,8 +297,8 @@ class RFT:
             for i in range(self.nx):
                 for j in range(self.ny):
                     for k in range(self.nt):
-                        self.wind[i, j, k, :] = self.mp.model.wind.value(
-                            self.bl + np.array([self.delta_x * i, self.delta_y * j]))
+                        self.wind[i, j, k, :] = self.mp.model.ff.value(self.bl + np.array(
+                            [self.delta_x * i, self.delta_y * j]))
             # Setting RF function to distance function at t=0
             for i in range(self.nx):
                 for j in range(self.ny):
@@ -322,9 +322,9 @@ class RFT:
                 "y_max": self.tr[1] - epsy,
                 "x_init": self.x_init[0],
                 "y_init": self.x_init[1],
-                "airspeed": self.mp.model.v_a,
-                "t_start": self.mp.model.wind.t_start,
-                "t_end": self.mp.model.wind.t_start + self.max_time,
+                "airspeed": self.mp.model.srf,
+                "t_start": self.mp.model.ff.t_start,
+                "t_end": self.mp.model.ff.t_start + self.max_time,
                 "nt_rft": self.nt
             }
             with open(os.path.join(self.matlabLS_path, 'input', 'args.json'), 'w') as f:
@@ -341,20 +341,20 @@ class RFT:
                         point = Utils.DEG_TO_RAD * np.array(self.proj(*point, inverse=True))
                     grid[i, j, :] = point
 
-            ts = np.linspace(self.mp.model.wind.t_start, self.mp.model.wind.t_start + self.max_time, self.nt)
+            ts = np.linspace(self.mp.model.ff.t_start, self.mp.model.ff.t_start + self.max_time, self.nt)
 
-            t0 = self.mp.model.wind.t_start
-            if self.mp.model.wind.t_end is None:
+            t0 = self.mp.model.ff.t_start
+            if self.mp.model.ff.t_end is None:
                 delta_t = 0.
             else:
-                delta_t = (self.mp.model.wind.t_end - self.mp.model.wind.t_start) / (self.nt - 1)
+                delta_t = (self.mp.model.ff.t_end - self.mp.model.ff.t_start) / (self.nt - 1)
             for k in range(self.nt):
                 t = t0 + k * delta_t
                 for i in range(self.nx):
                     for j in range(self.ny):
                         point = np.zeros(2)
                         point[:] = grid[i, j]
-                        value = self.mp.model.wind.value(t, point)
+                        value = self.mp.model.ff.value(t, point)
                         uv[k, i, j, :] = value
 
             if self.mp.coords == Utils.COORD_GCS:
@@ -458,7 +458,7 @@ class RFT:
             dset[:, :, :] = self.phi.transpose((2, 0, 1))
 
             dset = f.create_dataset('ts', (nt,), dtype='f8')
-            dset[:] = np.linspace(self.mp.model.wind.t_start, self.mp.model.wind.t_start + self.max_time, nt)
+            dset[:] = np.linspace(self.mp.model.ff.t_start, self.mp.model.ff.t_start + self.max_time, nt)
 
             dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
             X, Y = np.meshgrid(self.bl[0] + self.delta_x * np.arange(self.nx),
@@ -541,7 +541,7 @@ class RFT:
 
         def f(x, t):
             u = self.control(x)
-            return - model.dyn.value(x, u, 0.)
+            return - model.dyn.value(0., x, u)
 
         timestamps = np.linspace(0., T, N_disc)
         dt = T / N_disc

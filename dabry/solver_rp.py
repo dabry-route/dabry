@@ -60,7 +60,7 @@ class SolverRP:
         self.geod_l = Utils.distance(self.x_init, self.x_target, coords=self.mp.coords)
 
         if max_time is None:
-            self.T = 1.5 * self.geod_l / mp.model.v_a
+            self.T = 1.5 * self.geod_l / mp.model.srf
         else:
             self.T = max_time
 
@@ -85,7 +85,7 @@ class SolverRP:
         status = 2 if self.rft.has_reached() else 0
         if status:
             self.t_target = self.rft.get_time(self.mp.x_target)
-            duration = self.t_target - self.mp.model.wind.t_start
+            duration = self.t_target - self.mp.model.ff.t_start
             traj = self.get_opti_traj()
             fake_pcl = Particle(0, 0, self.t_target, traj.points[-1], np.zeros(2), duration)
             bests = {0: fake_pcl}
@@ -98,7 +98,7 @@ class SolverRP:
     def get_opti_traj(self, int_step=100):
         self.mp.load_feedback(FunFB(lambda x: self.control(x, backward=True), no_time=True))
         sc = DistanceSC(lambda x: self.mp.distance(x, self.mp.x_init), self.mp.geod_l * 0.001)
-        duration = self.t_target - self.mp.model.wind.t_start
+        duration = self.t_target - self.mp.model.ff.t_start
         traj = self.mp.integrate_trajectory(self.mp.x_target, sc, int_step=duration / int_step,
                                             t_init=self.t_target,
                                             max_iter=100,

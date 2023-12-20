@@ -78,10 +78,10 @@ if __name__ == '__main__':
         pb = IndexedProblem(_pb_id)
         if args.airspeed is not None:
             pb.update_airspeed(float(args.airspeed))
-        t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.v_a
+        t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.srf
         solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=1, mode=args.energy)
         res = solver_ef.solve(verbose=2)
-        ddf.dump_wind(pb.model.wind, nx=101, ny=101, nt=10, bl=pb.bl, tr=pb.tr, coords=pb.coords)
+        ddf.dump_wind(pb.model.ff, nx=101, ny=101, nt=10, bl=pb.bl, tr=pb.tr, coords=pb.coords)
         extremals = solver_ef.get_trajs()
         ddf.dump_trajs(extremals)
         ddf.dump_trajs([res.traj])
@@ -139,7 +139,7 @@ if __name__ == '__main__':
 
         if not cache_wind:
             chrono.start('Dumping windfield to file')
-            mdfm.dump_wind(pb.model.wind, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
+            mdfm.dump_wind(pb.model.ff, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
             chrono.stop()
 
         # Setting the extremal solver
