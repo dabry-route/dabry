@@ -226,23 +226,22 @@ class HTargetFB(Feedback):
         pass
 
 
-# class MapFB(Feedback):
-#
-#     def __init__(self, grid, values):
-#         """
-#         :param grid: Grid of points for discretization (nx, ny, 2)
-#         :param values: Heading values on the grid (nx - 1, ny - 1)
-#         """
-#         self.grid = np.array(grid)
-#         self.values = np.array(values)
-#         super().__init__(2, UniformWind(np.array((0, 0))))
-#
-#     def value(self, _, x):
-#         xx = (x[0] - self.grid[0, 0, 0]) / (self.grid[-1, 0, 0] - self.grid[0, 0, 0])
-#         yy = (x[1] - self.grid[0, 0, 1]) / (self.grid[0, -1, 1] - self.grid[0, 0, 1])
-#
-#         nx, ny, _ = self.grid.shape
-#         i = int((nx - 1) * xx)
-#         j = int((ny - 1) * yy)
-#
-#         return self.values[i, j]
+class MapFB(Feedback):
+
+    def __init__(self, grid, values):
+        """
+        :param grid: Grid of points for discretization (nx, ny, 2)
+        :param values: Heading values on the grid (nx - 1, ny - 1)
+        """
+        self.grid = np.array(grid)
+        self.values = np.array(values)
+
+    def value(self, _, x):
+        xx = (x[0] - self.grid[0, 0, 0]) / (self.grid[-1, 0, 0] - self.grid[0, 0, 0])
+        yy = (x[1] - self.grid[0, 0, 1]) / (self.grid[0, -1, 1] - self.grid[0, 0, 1])
+
+        nx, ny, _ = self.grid.shape
+        i = int((nx - 1) * xx)
+        j = int((ny - 1) * yy)
+
+        return self.values[i, j]

@@ -172,6 +172,7 @@ data/*
 /misc/
 /local/
 /utils/
+env-display
 
 /ze_pipeline.sh
 /DABRYPATH

@@ -12,6 +12,7 @@ from numpy import arctan2 as atan2
 from numpy import sin, cos, pi
 from shapely.geometry import Point
 
+from dabry.feedback import MapFB
 from dabry.misc import Utils, Chrono, Debug
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
@@ -1522,9 +1523,9 @@ class SolverEF:
             adjoints = adjoints[::-1]
             controls = controls[::-1]
         asp_init = self.asp_init if self.mode == 0 else self.mp.aero.asp_opti(np.linalg.norm(adjoints[0]))
-        return AugmentedTraj(ts, points, adjoints, controls, nt - 1, self.mp.coords,
-                             info=f'opt_m{int(self.mode)}_{asp_init:.5g}',
-                             constant_asp=self.mp.srf_max if self.mode == 0 else None)
+        return Trajectory(ts, points, self.mp.coords, controls=controls, costates=adjoints,
+                          info_dict=dict(info=f'opt_m{int(self.mode)}_{asp_init:.5g}',
+                                         srf_const=self.mp.srf_max if self.mode == 0 else None))
 
     def get_trajs(self, primal_only=False, dual_only=False):
         res = []
@@ -1562,9 +1563,8 @@ class SolverEF:
                     except KeyError:
                         pass
                 res.append(
-                    AugmentedTraj(timestamps, points, adjoints, controls, last_index=n - 1, coords=self.mp.coords,
-                                  label=k,
-                                  type=Utils.TRAJ_PMP, info=f'ef_{i}{add_info}', transver=transver, energy=energy))
+                    Trajectory(timestamps, points, self.mp.coords, controls=controls, costates=adjoints,
+                               cost=energy, info_dict=dict(label=k, type=Utils.TRAJ_PMP, info=f'ef_{i}{add_info}')))
 
         return res
 
@@ -1587,7 +1587,7 @@ class SolverEF:
             yy = (x[1] - y0) / (y1 - y0)
             return int((nx - 1) * xx), int((ny - 1) * yy)
 
-        for traj in self.ef_dual.trajs.values():
+        for traj in self.ef_dual.trajs:
             for pcl in traj.particles:
                 i, j = index(pcl.state)
                 if pcl.cost < costs[i, j]:
@@ -1606,11 +1606,11 @@ class Debugger:
     def show_points(self):
         ax = plt.figure().add_subplot(projection='3d')
         n = 0
-        for traj in self.solver.ef.trajs.values():
+        for traj in self.solver.ef.trajs:
             n += len(traj.particles)
         points = np.zeros((n, 3))
         i = 0
-        for traj in self.solver.ef.trajs.values():
+        for traj in self.solver.ef.trajs:
             for pcl in traj.particles:
                 points[i, :] = pcl.state[0], pcl.state[1], pcl.cost
                 i += 1
@@ -1624,11 +1624,10 @@ class Debugger:
         n = len(self.solver.ef.trajs)
         points = np.zeros((n, 3))
         labels = np.zeros(n, dtype=int)
-        for i, key in enumerate(self.solver.ef.trajs.keys()):
-            traj = self.solver.ef.trajs[key]
+        for i, traj in enumerate(self.solver.ef.trajs):
             pcl = traj.get_last()
             points[i, :] = pcl.state[0], pcl.state[1], pcl.cost
-            labels[i] = key
+            labels[i] = i
 
         ax.scatter(points[:, 0], points[:, 1])
         for i in range(n):

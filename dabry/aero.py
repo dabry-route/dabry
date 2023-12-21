@@ -2,7 +2,6 @@ from abc import ABC
 
 import numpy as np
 import scipy.optimize
-from ambiance import ambiance
 
 """
 aero.py
@@ -121,6 +120,7 @@ class ComAircraftAero(LLAero):
         """
         :param level: Flight level in hPa
         """
+        import ambiance
         # Coefficients from A330-300
         a = ambiance.Atmosphere.from_pressure(level * 100)
         rho = a.density[0]

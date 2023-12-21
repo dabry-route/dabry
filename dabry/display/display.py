@@ -6,20 +6,22 @@ import warnings
 import webbrowser
 from datetime import datetime
 from math import floor
+from typing import Optional
 
 import h5py
 import matplotlib
 import matplotlib.cm as mpl_cm
 import scipy.ndimage
 import tqdm
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from matplotlib.widgets import Slider
 from mpl_toolkits.basemap import Basemap
+from numpy import ndarray
 from pyproj import Proj, Geod
 from scipy.interpolate import griddata
 
-import plotly.express
-
-from dabryvisu.misc import *
+from .misc import *
 
 state_names = [r"$x\:[m]$", r"$y\:[m]$"]
 control_names = [r"$u\:[rad]$"]
@@ -36,10 +38,10 @@ class Display:
         """
         self.coords = coords
 
-        self.x_min = None
-        self.x_max = None
-        self.y_min = None
-        self.y_max = None
+        self.x_min: Optional[float] = None
+        self.x_max: Optional[float] = None
+        self.y_min: Optional[float] = None
+        self.y_max: Optional[float] = None
 
         self.x_offset = 0.
         self.y_offset = 0.
@@ -47,22 +49,17 @@ class Display:
         self.x_offset_gcs = 0.2
         self.y_offset_gcs = 0.2
 
-        # Main figure
-        self.mainfig = None
-        self.mainax = None
+        self.main_fig: Optional[Figure] = None
+        self.main_ax: Optional[Axes] = None
 
         self.fsc = None
 
         # The object that handles plot, scatter, contourf... whatever cartesian or gcs
-        self.ax = None
+        self.ax: Optional[Axes] = None
 
-        # Single plots figure
-        self.spfig = None
         # Adjoint figure
-        self.afig = None
-        self.map = None
-        self.map_adjoint = None
-        self.display_setup = False
+        self.map: Optional[Basemap] = None
+        self.display_setup: bool = False
         self.cm = None
         self.selected_cm = windy_cm  # custom_cm  # windy_cm
         self.cm_norm_min = 0.
@@ -113,22 +110,14 @@ class Display:
         self.traj_filter = []
         # 0 for no aggregation (fronts), 1 for aggregation and time cursor, 2 for aggrgation and no time cursor
         self.mode_aggregated = 0
-        self.mode_controls = False
-        # Whether to print wind in tiles (False) or by interpolation (True)
-        self.mode_wind = False
-        # Whether to display extremal field or not
-        self.mode_ef = True
-        # Whether to display zones where windfield is equal to airspeed
-        self.mode_speed = True
-        # Whether to display trajectories annotation
-        self.mode_annot = False
-        # Whether to display wind colors
-        self.mode_wind_color = True
-        # Whether to display energy as colors
-        self.mode_energy = True
-        # Whether to draw extremal fields or not
-        self.mode_ef_display = True
-        # Whether to rescale wind
+        self.mode_controls = False  # Whether to print wind in tiles (False) or by interpolation (True)
+        self.mode_wind = False  # Whether to display extremal field or not
+        self.mode_ef = True  # Whether to display zones where windfield is equal to airspeed
+        self.mode_speed = True  # Whether to display trajectories annotation
+        self.mode_annot = False  # Whether to display wind colors
+        self.mode_wind_color = True  # Whether to display energy as colors
+        self.mode_energy = True  # Whether to draw extremal fields or not
+        self.mode_ef_display = True  # Whether to rescale wind
         self.rescale_wind = True
 
         # True if wind norm colobar is displayed, False if energy colorbar is displayed
@@ -310,11 +299,11 @@ class Display:
         # plt.rc('font', family=self.fsc.font_family)
         plt.rc('mathtext', fontset=self.fsc.mathtext_fontset)
 
-        self.mainfig = plt.figure(num=f"dabryvisu ({self.coords})",
-                                  constrained_layout=False,
-                                  figsize=(12, 8))
-        self.mainfig.canvas.mpl_disconnect(self.mainfig.canvas.manager.key_press_handler_id)
-        self.mainfig.subplots_adjust(
+        self.main_fig = plt.figure(num=f"dabryvisu ({self.coords})",
+                                   constrained_layout=False,
+                                   figsize=(12, 8))
+        self.main_fig.canvas.mpl_disconnect(self.main_fig.canvas.manager.key_press_handler_id)
+        self.main_fig.subplots_adjust(
             top=0.93,
             bottom=0.11,
             left=0.1,
@@ -322,11 +311,11 @@ class Display:
             hspace=0.155,
             wspace=0.13
         )
-        self.mainfig.suptitle(self.title)
+        self.main_fig.suptitle(self.title)
         if self.mode_3d:
-            self.mainax = self.mainfig.add_subplot(projection='3d')
+            self.main_ax = self.main_fig.add_subplot(projection='3d')
         else:
-            self.mainax = self.mainfig.add_subplot(box_aspect=1., anchor='C')
+            self.main_ax = self.main_fig.add_subplot(box_aspect=1., anchor='C')
 
         self.setup_map()
         # self.setup_components()
@@ -349,7 +338,7 @@ class Display:
         # self.control_button.labels[0].set_fontsize(self.fsc.button_fontsize)
         # self.control_button.on_clicked(lambda event: self.toggle_controls())
 
-        self.ax_info = self.mainfig.text(0.34, 0.025, ' ')
+        self.ax_info = self.main_fig.text(0.34, 0.025, ' ')
 
         self.setup_slider()
 
@@ -357,9 +346,9 @@ class Display:
         self.leg_labels = []
 
     def setup_slider(self):
-        self.ax_timeslider = self.mainfig.add_axes([0.03, 0.25, 0.0225, 0.63])
-        self.ax_timedisplay = self.mainfig.text(0.03, 0.04, f'', fontsize=self.fsc.timedisp_major)
-        self.ax_timedisp_minor = self.mainfig.text(0.03, 0.018, f'', fontsize=self.fsc.timedisp_minor)
+        self.ax_timeslider = self.main_fig.add_axes([0.03, 0.25, 0.0225, 0.63])
+        self.ax_timedisplay = self.main_fig.text(0.03, 0.04, f'', fontsize=self.fsc.timedisp_major)
+        self.ax_timedisp_minor = self.main_fig.text(0.03, 0.018, f'', fontsize=self.fsc.timedisp_minor)
         val_init = 1.
         self.time_slider = Slider(
             ax=self.ax_timeslider,
@@ -383,7 +372,7 @@ class Display:
         gcs = (self.coords == 'gcs')
 
         if self.mode_3d:
-            self.ax = self.mainax
+            self.ax = self.main_ax
             self.ax.set_xlim(self.x_min - self.x_offset * (self.x_max - self.x_min),
                                  self.x_max + self.x_offset * (self.x_max - self.x_min))
             self.ax.set_ylim(self.y_min - self.y_offset * (self.y_max - self.y_min),
@@ -395,7 +384,7 @@ class Display:
             kwargs = {
                 'resolution': 'c',
                 'projection': self.projection,
-                'ax': self.mainax
+                'ax': self.main_ax
             }
             # Don't plot coastal lines features less than 1000km^2
             # kwargs['area_thresh'] = (6400e3 * np.pi / 180) ** 2 * (self.x_max - self.x_min) * 0.5 * (
@@ -505,22 +494,22 @@ class Display:
 
         if cartesian:
             if self.axes_equal:
-                self.mainax.axis('equal')
-            self.mainax.set_xlim(self.x_min - self.x_offset * (self.x_max - self.x_min),
-                                 self.x_max + self.x_offset * (self.x_max - self.x_min))
-            self.mainax.set_ylim(self.y_min - self.y_offset * (self.y_max - self.y_min),
-                                 self.y_max + self.y_offset * (self.y_max - self.y_min))
-            self.mainax.set_xlabel('$x$ [m]')
-            self.mainax.set_ylabel('$y$ [m]')
-            self.mainax.grid(visible=True, linestyle='-.', linewidth=0.5)
-            self.mainax.tick_params(direction='in')
+                self.main_ax.axis('equal')
+            self.main_ax.set_xlim(self.x_min - self.x_offset * (self.x_max - self.x_min),
+                                  self.x_max + self.x_offset * (self.x_max - self.x_min))
+            self.main_ax.set_ylim(self.y_min - self.y_offset * (self.y_max - self.y_min),
+                                  self.y_max + self.y_offset * (self.y_max - self.y_min))
+            self.main_ax.set_xlabel('$x$ [m]')
+            self.main_ax.set_ylabel('$y$ [m]')
+            self.main_ax.grid(visible=True, linestyle='-.', linewidth=0.5)
+            self.main_ax.tick_params(direction='in')
             formatter = matplotlib.ticker.ScalarFormatter(useMathText=True)
             formatter.set_powerlimits([-3, 4])
-            self.mainax.xaxis.set_major_formatter(formatter)
-            self.mainax.yaxis.set_major_formatter(formatter)
+            self.main_ax.xaxis.set_major_formatter(formatter)
+            self.main_ax.yaxis.set_major_formatter(formatter)
 
         if cartesian:
-            self.ax = self.mainax
+            self.ax = self.main_ax
         if gcs:
             self.ax = self.map
 
@@ -704,16 +693,14 @@ class Display:
                         if self.engy_max is None or cmax > self.engy_max:
                             self.engy_max = cmax
 
-                    _traj['type'] = traj.attrs['type']
-                    li = _traj['last_index'] = traj.attrs['last_index']
-                    _traj['interrupted'] = traj.attrs['interrupted']
-                    _traj['coords'] = traj.attrs['coords']
-                    _traj['label'] = traj.attrs['label']
                     # Backward compatibility
                     if 'info' in traj.attrs.keys():
                         _traj['info'] = traj.attrs['info']
                     else:
                         _traj['info'] = ''
+
+                    if 'info_dict' in traj.attrs.keys():
+                        _traj['info_dict'] = traj['info_dict']
 
                     # Label trajectories belonging to extremal fields
                     if _traj['info'].startswith('ef'):
@@ -725,7 +712,7 @@ class Display:
 
                     # Adapt time window to trajectories' timestamps
 
-                    tl = np.min(_traj['ts'][:li + 1])
+                    tl = np.min(_traj['ts'])
                     if self.tl_traj is None or tl < self.tl_traj:
                         self.tl_traj = tl
                     tu = np.max(_traj['ts'])
@@ -1100,7 +1087,7 @@ class Display:
             if self.coords == 'gcs':
                 self.wind_colorbar = self.ax.colorbar(self.sm_wind, pad=0.1)
             elif self.coords == 'cartesian':
-                self.wind_colorbar = self.mainfig.colorbar(self.sm_wind, ax=self.ax, pad=0.03)
+                self.wind_colorbar = self.main_fig.colorbar(self.sm_wind, ax=self.ax, pad=0.03)
             self.wind_colorbar.set_label('Wind [m/s]', labelpad=10)
             self.active_windcb = True
 
@@ -1281,15 +1268,15 @@ class Display:
         points = trajs[itr]['data']
         # controls = trajs[itr]['controls']
         ts = trajs[itr]['ts']
-        last_index = trajs[itr]['last_index']
-        label = trajs[itr]['label']
-        idfr = label
-        interrupted = trajs[itr]['interrupted']
-        _type = trajs[itr]['type']
         try:
             info = trajs[itr]['info']
         except KeyError:
             info = ''
+
+        #TODO Change this
+        label = 0
+        _type = 'pmp'
+        interrupted = False
 
         annot_label = None
         linewidth = None
@@ -1316,7 +1303,7 @@ class Display:
 
         # Determine range of indexes that can be plotted
         il = 0
-        iu = last_index
+        iu = ts.shape[0]
 
         if ef_id is None or self.mode_aggregated != 2:
 
@@ -1327,7 +1314,7 @@ class Display:
                 pass
 
             at_least_one = False
-            for i in range(last_index):
+            for i in range(ts.shape[0]):
                 if (not backward and ts[i] < self.tl) or (backward and ts[i] > self.tu):
                     il += 1
                 elif (not backward and ts[i] > self.tcur) or (backward and ts[i] < self.tcur):
@@ -1371,15 +1358,12 @@ class Display:
             'color': color['steps'],
             'linestyle': ls,
             'label': p_label,
-            'gid': idfr,
             'zorder': ZO_TRAJS,
             'alpha': 0.7,
             'linewidth': 2.5 if linewidth is None else linewidth,
         }
-        px = np.zeros(iu - il + 1)
-        px[:] = points[il:iu + 1, 0]
-        py = np.zeros(iu - il + 1)
-        py[:] = points[il:iu + 1, 1]
+        px = points[:, 0].copy()
+        py = points[:, 1].copy()
         if self.coords == 'gcs':
             kwargs['latlon'] = True
             px[:] = RAD_TO_DEG * px
@@ -1449,8 +1433,8 @@ class Display:
                   'zorder': ZO_TRAJS,
                   'label': info,
                   }
-        px = points[iu, 0]
-        py = points[iu, 1]
+        px = points[-1, 0]
+        py = points[-1, 1]
         if self.coords == 'gcs':
             kwargs['latlon'] = True
             px = RAD_TO_DEG * px
@@ -1464,7 +1448,7 @@ class Display:
                 self.traj_annot.append(self.ax.annotate(str(annot_label), xy=(px, py), fontsize='x-small'))
             else:
 
-                self.traj_annot.append(self.mainax.annotate(str(annot_label), xy=self.map(px, py), fontsize='x-small'))
+                self.traj_annot.append(self.main_ax.annotate(str(annot_label), xy=self.map(px, py), fontsize='x-small'))
 
         # Heading vectors
         factor = 1. if self.coords == 'cartesian' else EARTH_RADIUS
@@ -1501,7 +1485,7 @@ class Display:
             kwargs['latlon'] = True
             scatterax = self.map
         else:
-            scatterax = self.mainax
+            scatterax = self.main_ax
 
         # Init point
         if self.x_init is not None:
@@ -1538,7 +1522,7 @@ class Display:
             return
         ma = np.ma.masked_array(self.obstacles, mask=self.obstacles < -0.5)
         if self.coords == 'cartesian':
-            ax = self.mainax
+            ax = self.main_ax
             kwargs = {}
             factor = 1.
         else:
@@ -1566,7 +1550,7 @@ class Display:
         if self.penalty is None:
             return
         if self.coords == 'cartesian':
-            ax = self.mainax
+            ax = self.main_ax
             kwargs = {}
             factor = 1.
         else:
@@ -1602,10 +1586,10 @@ class Display:
             self.draw_pen()
             self.draw_solver()
             if self.leg is None:
-                self.leg = self.mainax.legend(handles=self.leg_handles, labels=self.leg_labels, loc='center left',
-                                              bbox_to_anchor=(1.2, 0.2), handletextpad=0.5, handlelength=0.5,
-                                              markerscale=2)
-            self.mainfig.canvas.draw()
+                self.leg = self.main_ax.legend(handles=self.leg_handles, labels=self.leg_labels, loc='center left',
+                                               bbox_to_anchor=(1.2, 0.2), handletextpad=0.5, handlelength=0.5,
+                                               markerscale=2)
+            self.main_fig.canvas.draw()
 
     def draw_calibration(self):
         if self.coords == 'gcs':
@@ -1685,7 +1669,7 @@ class Display:
         self.draw_all()
 
     def legend(self):
-        self.mainfig.legend()
+        self.main_fig.legend()
 
     def toggle_controls(self):
         self.mode_controls = not self.mode_controls
@@ -1738,7 +1722,7 @@ class Display:
             if self.t_tick is not None:
                 ft_tick = f'{self.t_tick / 3600:.1f}h' if self.t_tick > 1800. else f'{self.t_tick:.2E}'
                 self.title += f' (ticks : {ft_tick})'
-            self.mainfig.suptitle(self.title)
+            self.main_fig.suptitle(self.title)
         except TypeError:
             pass
 
@@ -1782,9 +1766,9 @@ class Display:
     def show(self, noparams=False, block=False):
         if not noparams:
             self.show_params()
-        self.mainfig.savefig(self.output_imgpath, **self.img_params)
+        self.main_fig.savefig(self.output_imgpath, **self.img_params)
 
-        self.mainfig.canvas.mpl_connect('key_press_event', self.keyboard)
+        self.main_fig.canvas.mpl_connect('key_press_event', self.keyboard)
         plt.show(block=block)
 
     def set_mode(self, flags):
@@ -1821,10 +1805,10 @@ class Display:
             self.reload_time(val)
             kwargs = {}
             if mini:
-                extent = self.mainax.get_window_extent().transformed(self.mainfig.dpi_scale_trans.inverted())
+                extent = self.main_ax.get_window_extent().transformed(self.main_fig.dpi_scale_trans.inverted())
                 kwargs['bbox_inches'] = extent
                 kwargs['dpi'] = 50
-            self.mainfig.savefig(os.path.join(anim_path, f'{i:0>4}.png'), **kwargs)
+            self.main_fig.savefig(os.path.join(anim_path, f'{i:0>4}.png'), **kwargs)
 
         pattern_in = os.path.join(anim_path, '*.png')
         first_file_in = os.path.join(anim_path, '0000.png')

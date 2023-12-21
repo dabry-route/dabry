@@ -111,9 +111,6 @@ class FrontendHandler:
             except KeyboardInterrupt:
                 pass
 
-    def show_params(self):
-        from IPython.core.display import HTML
-        return HTML(filename=os.path.join(self.output_dir, self.example_name(), 'params.html'))
 
     def example_name(self):
         return ('example_' if self.mode == 'notebook' else '') + f'{self.dd.value}'

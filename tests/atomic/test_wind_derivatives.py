@@ -33,7 +33,7 @@ class WindTester:
         return np.array([x, y])
 
     def setup(self):
-        wind_samples = np.array([self.wind.value(, 0., self.r_point() for _ in range(self.N_samples)])
+        wind_samples = np.array([self.wind.value(0., self.r_point()) for _ in range(self.N_samples)])
         self.wind_mean = np.mean(wind_samples)
         self.wind_mean_norm = np.linalg.norm(self.wind_mean)
 
@@ -54,9 +54,9 @@ class WindTester:
             dy = np.array([0., self.eps_y])
 
             dwind_est = np.column_stack((1 / (2 * self.eps_x) * (
-                        self.wind.value(, 0., p + dx - self.wind.value(, 0., p - dx),
+                        self.wind.value(0., p + dx) - self.wind.value(0., p - dx)),
                                          1 / (2 * self.eps_y) * (
-                                                     self.wind.value(, 0., p + dy - self.wind.value(, 0., p - dy)))
+                                                     self.wind.value(0., p + dy) - self.wind.value(0., p - dy))))
 
             err_x = np.linalg.norm(dwind[:, 0] - dwind_est[:, 0])
             err_y = np.linalg.norm(dwind[:, 1] - dwind_est[:, 1])
