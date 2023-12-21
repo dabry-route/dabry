@@ -12,10 +12,9 @@ from numpy import arctan2 as atan2
 from numpy import sin, cos, pi
 from shapely.geometry import Point
 
-from dabry.feedback import MapFB
 from dabry.misc import Utils, Chrono, Debug
 from dabry.problem import NavigationProblem
-from dabry.trajectory import AugmentedTraj
+from dabry.trajectory import Trajectory
 
 """
 solver_ef.py
@@ -105,14 +104,14 @@ class PartialTraj:
 
     def to_traj(self, coords):
         n = len(self.particles)
-        ts = np.zeros(n)
+        times = np.zeros(n)
         states = np.zeros((n, 2))
         adjoints = np.zeros((n, 2))
         for i, pcl in enumerate(self.particles):
-            ts[i] = pcl.t
+            times[i] = pcl.t
             states[i, :] = pcl.state
             adjoints[i, :] = pcl.adjoint
-        return AugmentedTraj(ts, states, adjoints, np.zeros(n), n - 1, coords)
+        return Trajectory(times, states, coords, costates=adjoints)
 
     def __getitem__(self, item):
         return self.particles[item - self.id_start]

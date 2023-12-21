@@ -465,7 +465,7 @@ class Utils:
         return (bl_lon < p_lon < tr_lon or bl_lon < p_lon + 360 < tr_lon) and bl[1] < p[1] < tr[1]
 
     @staticmethod
-    def interpolate(values, bl, spacings, state_ex):
+    def interpolate(values, bl, spacings, state_ex, ndim_values_data=1):
         """
         Interpolates `values` (possibly multidimensional per node) defined over the grid at the given `state`.
         Adapted from hj_reachability package
@@ -477,7 +477,8 @@ class Utils:
         weight_hi = position - index_lo
         weight_lo = 1 - weight_hi
         index_lo, index_hi = tuple(
-            np.clip(index, 0, np.array(values.shape[:-1]) - np.ones(len(values.shape[:-1]), dtype=np.int32))
+            np.clip(index, 0, np.array(values.shape[:-ndim_values_data])
+                    - np.ones(values.ndim - ndim_values_data, dtype=np.int32))
             for index in (index_lo, index_hi))
         weight = functools.reduce(lambda x, y: x * y, np.ix_(*np.stack([weight_lo, weight_hi], -1)))
         return np.sum(

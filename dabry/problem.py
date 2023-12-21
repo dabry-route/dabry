@@ -1,13 +1,16 @@
 import json
 import math
 import os
+from datetime import datetime
 from typing import Optional, List
+import scipy.integrate as scitg
 
 import numpy as np
 from numpy import ndarray, pi
 
 from dabry.aero import MermozAero, Aero
 from dabry.ddf_manager import DDFmanager
+from dabry.feedback import GSTargetFB
 from dabry.misc import Utils
 from dabry.model import Model
 from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, Obstacle, MeanObs, LSEMaxiObs
@@ -140,7 +143,7 @@ class NavigationProblem:
         kwargs['x_init'] = self.x_target.copy()
         kwargs['x_target'] = self.x_init.copy()
 
-        for attr in ['model', 'geod_l', 'descr', 'domain', 'l_ref', 'frame_offset', 'io']:
+        for attr in ['model', 'geod_l', 'descr', 'domain', 'l_ref', 'frame_offset', 'io', '_domain_obs']:
             del kwargs[attr]
 
         return NavigationProblem(**kwargs)
@@ -174,20 +177,15 @@ class NavigationProblem:
         else:
             return obs_list
 
-    # TODO: reimplement this
     def orthodromic(self):
-        # fb = GSTargetFB(self.model.ff, self.model.srf, self.x_target, self.coords)
-        # self.load_feedback(fb)
-        # sc = DistanceSC(lambda x: self.distance(x, self.x_target), self.geod_l * 0.01)
-        # traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale / 2000, max_iter=6000,
-        #                                  t_init=self.model.ff.t_start)
-        # if sc.value(0, traj.points[traj.last_index]):
-        #     return traj.timestamps[traj.last_index] - self.model.ff.t_start
-        # else:
-        #     return -1
-        return -1
+        fb = GSTargetFB(self.model.ff, self.srf_max, self.x_target)
+        f = lambda x, t: self.model.dyn(t, x, fb.value(t, x))
+        t_max = 2 * self.time_scale
+        res = scitg.odeint(f, self.x_init, np.linspace(0, t_max, 100))
 
-    # TODO: reimplement this
+
+
+    #TODO: reimplement this
     def htarget(self):
         # fb = HTargetFB(self.x_target, self.coords)
         # self.load_feedback(fb)
@@ -202,8 +200,8 @@ class NavigationProblem:
 
     @classmethod
     def from_database(cls, x_init: ndarray, x_target: ndarray, srf: float,
-                      t_start: float, t_end: float, obstacles: Optional[List[Obstacle]] = None,
-                      resolution='0.5', pressure_level='1000'):
+                      t_start: [float, datetime], t_end: [float, datetime], obstacles: Optional[List[Obstacle]] = None,
+                      resolution='0.5', pressure_level='1000', data_path: Optional[str] = None):
         """
         :param x_init: Initial position (lon, lat)
         :param x_target: Target position (lon, lat)
@@ -213,6 +211,7 @@ class NavigationProblem:
         :param obstacles: List of obstacle objects
         :param resolution: The weather model grid resolution in degrees, e.g. '0.5'
         :param pressure_level: The pressure level in hPa, e.g. '1000', '500', '200'
+        :param data_path: Force path to data
         :return:
         """
         bl_lon = Utils.RAD_TO_DEG * min(Utils.ang_principal(x_init[0]), Utils.ang_principal(x_target[0]))
@@ -225,8 +224,9 @@ class NavigationProblem:
         tr_lon = math.ceil((tr_lon + 5) / 10) * 10
         tr_lat = math.ceil((tr_lat + 5) / 10) * 10
         tr = Utils.DEG_TO_RAD * np.array((tr_lon, tr_lat))
-        ff = DiscreteWind.from_cds(np.array((Utils.RAD_TO_DEG * bl, Utils.RAD_TO_DEG * tr)), t_start, t_end,
-                                   resolution=resolution, pressure_level=pressure_level)
+        grid_bounds = np.array((bl, tr)).transpose()
+        ff = DiscreteWind.from_cds(grid_bounds, t_start, t_end, resolution=resolution,
+                                   pressure_level=pressure_level, data_path=data_path)
 
         if obstacles is None:
             obstacles = []

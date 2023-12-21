@@ -4,7 +4,7 @@ import sys
 import warnings
 from datetime import datetime, timedelta
 from time import strftime
-from typing import Optional
+from typing import Optional, List
 
 import cdsapi
 import h5py
@@ -15,6 +15,7 @@ from numpy import ndarray
 
 from dabry.misc import Utils
 from dabry.penalty import DiscretePenalty
+from dabry.trajectory import Trajectory
 from dabry.wind import Wind, DiscreteWind
 
 """
@@ -57,18 +58,18 @@ class DDFmanager:
         self.cache_wind = cache_wind
         self.cache_rff = cache_rff
 
-    def setup(self, module_dir=None):
+    def setup(self, module_dir: Optional[str] = None):
         if module_dir is not None:
             self.module_dir = module_dir
         else:
             path = os.environ.get('DABRYPATH')
             if path is None:
-                raise Exception('Unable to set output dir automatically. Please set DABRYPATH variable.')
+                path = '..'
             self.module_dir = path
         self.cds_wind_db_dir = os.path.join(self.module_dir, 'data', 'cds')
 
-    def set_case(self, case_name):
-        self.setup()
+    def set_case(self, case_name, module_dir: Optional[str] = None):
+        self.setup(module_dir=module_dir)
         self.case_name = case_name.split('/')[-1]
         if self.module_dir is None:
             raise Exception('Output directory not specified yet')
@@ -95,59 +96,39 @@ class DDFmanager:
     def save_script(self, script_path):
         shutil.copy(script_path, self.case_dir)
 
-    def dump_trajs(self, traj_list, filename=None, no_relabel=False):
+    def dump_trajs(self, trajs: List[Trajectory], filename=None):
         filename = self.trajs_filename if filename is None else filename
         filepath = os.path.join(self.case_dir, filename)
         with h5py.File(filepath, "a") as f:
             index = 0
             if len(f.keys()) != 0:
                 index = int(max(f.keys(), key=int)) + 1
-            for i, traj in enumerate(traj_list):
+            for i, traj in enumerate(trajs):
                 trajgroup = f.create_group(str(index + i))
-                trajgroup.attrs['type'] = traj.type
+                if traj.info_dict is not None:
+                    for k, v in traj.info_dict.items():
+                        trajgroup.attrs[k] = v
                 trajgroup.attrs['coords'] = traj.coords
-                trajgroup.attrs['interrupted'] = traj.interrupted
-                trajgroup.attrs['last_index'] = traj.last_index
-                if not no_relabel:
-                    trajgroup.attrs['label'] = index + i
-                else:
-                    trajgroup.attrs['label'] = traj.label
-                trajgroup.attrs['info'] = traj.info
-                if hasattr(traj, 'constant_asp') and traj.constant_asp is not None:
-                    trajgroup.attrs['constant_airspeed'] = traj.constant_asp
-                n = traj.last_index + 1
-                dset = trajgroup.create_dataset('data', (n, 2), dtype='f8')
-                dset[:, :] = traj.points[:n]
+                n = traj.times.shape[0]
+                dset = trajgroup.create_dataset('data', traj.states.shape, dtype='f8')
+                dset[:] = traj.states
 
-                dset = trajgroup.create_dataset('ts', (n,), dtype='f8')
-                dset[:] = traj.timestamps[:n]
+                dset = trajgroup.create_dataset('ts', traj.times.shape, dtype='f8')
+                dset[:] = traj.times
 
-                dset = trajgroup.create_dataset('controls', (n,), dtype='f8')
-                dset[:] = traj.controls[:n]
+                if traj.controls is not None:
+                    dset = trajgroup.create_dataset('controls', traj.controls.shape, dtype='f8')
+                    dset[:] = traj.controls
 
-                if hasattr(traj, 'adjoints'):
-                    dset = trajgroup.create_dataset('adjoints', (n, 2), dtype='f8', fillvalue=0.)
-                    dset[:, :] = traj.adjoints[:n]
+                if traj.costates is not None:
+                    dset = trajgroup.create_dataset('adjoints', traj.costates.shape, dtype='f8')
+                    dset[:] = traj.costates
 
-                if hasattr(traj, 'transver'):
-                    dset = trajgroup.create_dataset('transver', n, dtype='f8', fillvalue=0.)
-                    dset[:] = traj.transver[:n]
+                if traj.cost is not None:
+                    dset = trajgroup.create_dataset('cost', n, dtype='f8')
+                    dset[:] = traj.cost
 
-                if hasattr(traj, 'airspeed'):
-                    dset = trajgroup.create_dataset('airspeed', n, dtype='f8', fillvalue=0.)
-                    dset[:] = traj.airspeed[:n]
-
-                if hasattr(traj, 'energy'):
-                    dset = trajgroup.create_dataset('energy', n - 1, dtype='f8', fillvalue=0.)
-                    dset[:] = traj.energy[:n - 1]
-
-    def log(self, pb, file=None):
-        self.ps.load_from_problem(pb)
-        self.ps.dump()
-        if file is not None:
-            self.save_script(file)
-
-    # def dump_obs(self, pb: NavigationProblem, nx=100, ny=100):
+    # def dump_obs(self, nx=100, ny=100):
     #     filepath = os.path.join(self.case_dir, self.obs_filename)
     #     with h5py.File(os.path.join(filepath), 'w') as f:
     #         f.attrs['coords'] = pb.coords
@@ -172,7 +153,8 @@ class DDFmanager:
     #         dset = f.create_dataset('data', (nx, ny), dtype='f8')
     #         dset[:, :] = obs_id
 
-    def _grib_date_to_unix(self, grib_filename):
+    @staticmethod
+    def grib_date_to_unix(grib_filename):
         date, hm = grib_filename.split('_')[2:4]
         hours = int(hm[:2])
         minutes = int(hm[2:])
@@ -207,8 +189,9 @@ class DDFmanager:
                 raise Exception('Missing bounding box (bl, tr) to sample analytical flow field')
             return DiscreteWind.from_wind(ff, np.array((bl, tr)).transpose(), nx=nx, ny=ny, nt=nt, force_no_diff=True)
         else:
-            warnings.warn('Grid shape (nt, nx, ny) provided but resampling of DiscreteWind not implemented yet.'
-                          'Continuing with wind native grid')
+            if nx is not None or ny is not None or nt is not None:
+                warnings.warn('Grid shape (nt, nx, ny) provided but resampling of DiscreteWind not implemented yet. '
+                              'Continuing with wind native grid')
             return ff
 
     @classmethod
@@ -301,7 +284,7 @@ class DDFmanager:
         for k, grbfile in enumerate(srcfiles):
             UV = process(grbfile, nx=nx, ny=ny)
             UVs[k, :] = UV
-            dates[k] = self._grib_date_to_unix(os.path.basename(grbfile))
+            dates[k] = DDFmanager.grib_date_to_unix(os.path.basename(grbfile))
 
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = coords
@@ -316,9 +299,10 @@ class DDFmanager:
 
         return nt, nx, ny
 
-    def format_cname(self, x_init, x_target, t_start):
+    @staticmethod
+    def format_cname(x_init, x_target, t_start):
         """
-        Stardand case name
+        Standard case name
         """
         slon = str(abs(round(x_init[0]))) + ('W' if x_init[0] < 0 else 'E')
         slat = str(abs(round(x_init[1]))) + ('S' if x_init[1] < 0 else 'N')
@@ -372,17 +356,20 @@ class DDFmanager:
         self.case_dir = output_dir
         print(self.dump_wind_from_grib2(grib_fps, bl, tr))
 
-    def days_between(self, start_date, stop_date):
+    @staticmethod
+    def days_between(start_date, stop_date):
         l = []
         day_count = (stop_date - start_date).days + 1
         for single_date in [d for d in (start_date + timedelta(n) for n in range(day_count)) if d <= stop_date]:
             l.append(strftime("%Y%m%d", single_date.timetuple()))
         return l
 
-    def retrieve_wind(self, start_date, stop_date, level='1000', res='0.5'):
+    @staticmethod
+    def query_era5(start_date: datetime, stop_date: datetime,
+                   output_dir: str, pressure_level='1000', resolution='0.5'):
         in_cache = []
-        days_required = self.days_between(start_date, stop_date)
-        db_path = os.path.join(self.cds_wind_db_dir, res, level)
+        days_required = DDFmanager.days_between(start_date, stop_date)
+        db_path = os.path.join(output_dir, resolution, pressure_level)
         if not os.path.exists(db_path):
             os.makedirs(db_path)
         for wind_file in os.listdir(db_path):
@@ -403,7 +390,7 @@ class DDFmanager:
             server = cdsapi.Client()
             kwargs = {
                 "variable": ['u_component_of_wind', 'v_component_of_wind', 'specific_rain_water_content'],
-                "pressure_level": level,
+                "pressure_level": pressure_level,
                 "product_type": "reanalysis",
                 "year": day_required[:4],
                 "month": day_required[4:6],

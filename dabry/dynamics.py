@@ -63,6 +63,9 @@ class Dynamics(ABC):
         """
         pass
 
+    def __call__(self, t: float, x: ndarray, u: ndarray) -> ndarray:
+        return self.value(t, x, u)
+
 
 class ZermeloR2Dyn(Dynamics):
     """
@@ -97,7 +100,7 @@ class ZermeloS2Dyn(Dynamics):
         wind_gradient = np.zeros((x.size, x.size))
         wind_gradient[:] = self.ff.d_value(t, x)
         res = self._factor * np.column_stack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
-                                              np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
+                                              -np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
                                               (u + self.ff.value(t, x)) +
                                               np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1]))
         return res

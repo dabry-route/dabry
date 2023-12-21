@@ -1,11 +1,9 @@
 import numpy as np
 
-from dabry.feedback import FunFB
 from dabry.misc import Utils
 from dabry.problem import NavigationProblem
 from dabry.rft import RFT
 from dabry.solver_ef import EFOptRes, Particle
-from dabry.stoppingcond import DistanceSC
 
 """
 solver_rp.py
@@ -96,17 +94,5 @@ class SolverRP:
         return EFOptRes(status, bests, trajs, self.mp)
 
     def get_opti_traj(self, int_step=100):
-        self.mp.load_feedback(FunFB(lambda x: self.control(x, backward=True), no_time=True))
-        sc = DistanceSC(lambda x: self.mp.distance(x, self.mp.x_init), self.mp.geod_l * 0.001)
-        duration = self.t_target - self.mp.model.ff.t_start
-        traj = self.mp.integrate_trajectory(self.mp.x_target, sc, int_step=duration / int_step,
-                                            t_init=self.t_target,
-                                            max_iter=100,
-                                            backward=True)
-        traj.timestamps = traj.timestamps[:traj.last_index + 1]
-        traj.points = traj.points[:traj.last_index + 1]
-        traj.controls = traj.controls[:traj.last_index + 1]
-        traj.flip()
-        traj.info = 'rft'
-        traj.type = Utils.TRAJ_INT
-        return traj
+        #TODO: reimplement this
+        pass

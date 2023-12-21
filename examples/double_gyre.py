@@ -1,7 +1,7 @@
 import os
 
 from dabry.misc import Utils, Chrono
-from dabry.problem import NPDoubleGyreLi, NPDoubleGyreKularatne, NP3vor
+from dabry.problem import NPDoubleGyreLi
 from dabry.solver_ef import SolverEF
 
 if __name__ == '__main__':

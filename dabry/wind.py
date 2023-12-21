@@ -55,6 +55,8 @@ class Wind(ABC):
         # False if dualization operation leaves wind unchanged
         self.dualizable = True
 
+        self.coords = Utils.COORD_CARTESIAN
+
     def value(self, t, x):
         if self._lch is None:
             return self._value(t, x)
@@ -171,7 +173,7 @@ class DiscreteWind(Wind):
 
         self.is_dumpable = 2
 
-        if bounds.shape[0] != len(values.shape) - 1:
+        if bounds.shape[0] != values.ndim - 1:
             raise Exception(f'Incompatible shape for values and bounds: '
                             f'values has {len(values.shape) - 1} + 1 dimensions '
                             f'so bounds must be of shape ({len(values.shape) - 1}, 2) ({bounds.shape} given)')
@@ -180,8 +182,8 @@ class DiscreteWind(Wind):
         self.bounds = bounds
         self.coords = coords
 
-        self.spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(self.values.shape[1:2]) -
-                                                         np.ones(bounds.shape[0]).astype(np.int32))
+        self.spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(self.values.shape[:-1]) -
+                                                         np.ones(self.values.ndim - 1))
 
         self.grad_values = grad_values
 
@@ -231,7 +233,7 @@ class DiscreteWind(Wind):
         bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) +
                           (grid_bounds[0], grid_bounds[1]), axis=0)
         shape = (() if t_end is None else (nt,)) + (nx, ny)
-        spacings = (bounds[:, 1] - bounds[:, 0]) / (shape - np.ones(bounds.shape[0]).astype(np.int32))
+        spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(shape) - np.ones(bounds.shape[0]))
         _nt = nt if t_end is not None else 1
         values = np.zeros(shape + (2,))
         grad_values = np.zeros(shape + (2, 2)) if not kwargs.get('force_no_diff') else None
@@ -255,33 +257,41 @@ class DiscreteWind(Wind):
 
     @classmethod
     def from_cds(cls, grid_bounds: ndarray, t_start: Union[float | datetime], t_end: Union[float | datetime],
-                 i_member: Optional[int] = None, resolution='0.5', pressure_level='1000'):
+                 i_member: Optional[int] = None, resolution='0.5', pressure_level='1000',
+                 data_path: Optional[str] = None):
         """
-        :param grid_bounds: A (2,2) array where the zeroth element is the bottom left corner vector
-        and the first element is the top right corner vector
+        :param grid_bounds: A (2,2) array where the zeroth element corresponds to the bounds of the zeroth axis
+        and the first element to the bounds of the first axis
         :param t_start: The required start time for wind
         :param t_end: The required end time for wind
         :param i_member: The reanalysis ensemble member number
         :param resolution: The weather model grid resolution in degrees, e.g. '0.5'
         :param pressure_level: The pressure level in hPa, e.g. '1000', '500', '200'
+        :param data_path: Force path to data to this value
         :return: A DiscreteWind corresponding to the query
         """
-        dirpath = os.path.join(os.environ.get('DABRYPATH'), 'data', 'cds', resolution, pressure_level)
+        if data_path is None:
+            dirpath = os.path.join(os.environ.get('DABRYPATH'), 'data', 'cds', resolution, pressure_level)
+        else:
+            dirpath = os.path.join(data_path, resolution, pressure_level)
+        t_start = t_start.timestamp() if isinstance(t_start, datetime) else t_start
+        t_end = t_end.timestamp() if isinstance(t_end, datetime) else t_end
         single_frame = abs(t_start - t_end) < 60
-        bl, tr = grid_bounds[0], grid_bounds[1]
+        bl, tr = grid_bounds.transpose()[0], grid_bounds.transpose()[1]
         bl_d, tr_d = bl * Utils.RAD_TO_DEG, tr * Utils.RAD_TO_DEG
 
         lon_b = Utils.rectify(bl_d[0], tr_d[0])
-        with sorted(os.listdir(dirpath))[0] as wind_file:
-            wind_start_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
-        with sorted(os.listdir(dirpath))[-1] as wind_file:
-            wind_stop_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
-        date_start, date_end = wind_start_date, wind_stop_date
-        for t_bound, wind_date_bound, date_bound, op in zip((t_start, t_end), (wind_start_date, wind_stop_date),
-                                                            (date_start, date_end), ('<', '>')):
+        wind_file = sorted(os.listdir(dirpath))[0]
+        wind_start_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
+        wind_file = sorted(os.listdir(dirpath))[-1]
+        wind_stop_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
+        dates = [wind_start_date, wind_stop_date]
+        for k, (t_bound, wind_date_bound, op) in enumerate(zip((t_start, t_end), (wind_start_date, wind_stop_date),
+                                                            ('<', '>'))):
             adj = "lower" if op == "<" else "upper"
             if t_bound is None:
-                print(f'[CDS wind] Using wind time {adj} bound {date_bound}')
+                print(f'[CDS wind] Using wind time {adj} bound {wind_date_bound}')
+                dates[k] = wind_date_bound
             else:
                 if not isinstance(t_bound, datetime):
                     # Assuming float
@@ -290,6 +300,9 @@ class DiscreteWind(Wind):
                     _date_bound = t_bound
                 if (op == '<' and _date_bound < wind_date_bound) or (op == '>' and _date_bound > wind_date_bound):
                     print(f'[CDS wind] Clipping {adj} bound to wind time bound {wind_date_bound}')
+                    dates[k] = wind_date_bound
+                else:
+                    dates[k] = _date_bound
 
         grb = pygrib.open(os.path.join(dirpath, os.listdir(dirpath)[0]))
         grb_u = grb.select(name='U component of wind')
@@ -313,13 +326,14 @@ class DiscreteWind(Wind):
         # Get wind and timestamps
         uv_frames = []
         ts = []
-        start_date_rounded = datetime(date_start.year, date_start.month, date_start.day, 0, 0)
-        stop_date_rounded = datetime(date_end.year, date_end.month, date_end.day, 0, 0) + timedelta(days=1)
-        startd_rounded = datetime(date_start.year, date_start.month, date_start.day, 3 * (date_start.hour // 3), 0)
-        stopd_rounded = datetime(date_end.year, date_end.month, date_end.day, 0, 0) + timedelta(
-            hours=3 * (1 + (date_end.hour // 3)))
+        start_date_rounded = datetime(dates[0].year, dates[0].month, dates[0].day, 0, 0)
+        stop_date_rounded = datetime(dates[1].year, dates[1].month, dates[1].day, 0, 0) + timedelta(days=1)
+        startd_rounded = datetime(dates[0].year, dates[0].month, dates[0].day, 3 * (dates[0].hour // 3), 0)
+        stopd_rounded = datetime(dates[1].year, dates[1].month, dates[1].day, 0, 0) + timedelta(
+            hours=3 * (1 + (dates[1].hour // 3)))
         one = False
-        for wind_file in tqdm(sorted(os.listdir(dirpath))):
+        wind_srcfiles = []
+        for wind_file in sorted(os.listdir(dirpath)):
             wind_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
             if wind_date < start_date_rounded:
                 continue
@@ -327,6 +341,9 @@ class DiscreteWind(Wind):
                 continue
             if one and single_frame:
                 break
+            wind_srcfiles.append(wind_file)
+
+        for wind_file in tqdm(wind_srcfiles):
             grb = pygrib.open(os.path.join(dirpath, wind_file))
             grb_u = grb.select(name='U component of wind')
             grb_v = grb.select(name='V component of wind')
@@ -365,7 +382,8 @@ class DiscreteWind(Wind):
 
         values = np.array(uv_frames)
 
-        return cls(values, np.stack((np.array((ts[0], ts[-1])), grid_bounds)), Utils.COORD_GCS, grad_values=None)
+        return cls(values, np.column_stack((np.array((ts[0], ts[-1])), grid_bounds.transpose())).transpose(),
+                   Utils.COORD_GCS, grad_values=None)
 
     def value(self, t, x):
         """
@@ -374,7 +392,7 @@ class DiscreteWind(Wind):
         :param x: Position
         :return: Interpolated wind vector
         """
-        return Utils.interpolate(self.values, self.bounds, self.spacings, np.array((t,) + tuple(x)))
+        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)))
 
     def d_value(self, t, x):
         """
@@ -383,7 +401,8 @@ class DiscreteWind(Wind):
         :param x: Position
         :return: Interpolated wind jacobian at requested time and position
         """
-        return Utils.interpolate(self.grad_values, self.bounds, self.spacings, np.array((t,) + tuple(x)))
+        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)),
+                                 ndim_values_data=2)
 
     def compute_derivatives(self):
         """
@@ -553,7 +572,7 @@ class DiscreteWind(Wind):
     def dualize(self):
         # Override method so that the dual of a DiscreteWind stays a DiscreteWind and
         # is not casted to Wind
-        wind = DiscreteWind.from_wind(-1. * self, self.bounds, self.coords, self.values.shape[1], self.values.shape[2])
+        wind = DiscreteWind.from_wind(-1. * self, self.bounds, self.values.shape[1], self.values.shape[2])
         if self.t_end is not None:
             wind.t_start = self.t_end
             wind.t_end = self.t_start

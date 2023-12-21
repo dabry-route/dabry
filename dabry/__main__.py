@@ -3,13 +3,11 @@ import os.path
 import sys
 from datetime import datetime
 
-import numpy as np
-
 from dabry.ddf_manager import DDFmanager
 from dabry.misc import Utils, Chrono
-from dabry.problem import IndexedProblem, DatabaseProblem
+from dabry.problem import all_problems, NavigationProblem
 from dabry.solver_ef import SolverEF
-from dabry.solver_rp import SolverRP
+from dabry.wind import DiscreteWind
 
 """
 __main__.py
@@ -49,7 +47,7 @@ if __name__ == '__main__':
     parser_real.add_argument('x_target_lat', help='Initial point latitude in degrees')
     parser_real.add_argument('start_date', help='Start date')
     parser_real.add_argument('airspeed', help='Airspeed in meters per seconds')
-    parser_real.add_argument('altitude', help='Pressure level in hPa')
+    parser_real.add_argument('pressure_level', help='Pressure level in hPa')
     parser_real.add_argument('--rft', help='Perform front tracking', action='store_const', const=True,
                              default=False)
 
@@ -58,89 +56,61 @@ if __name__ == '__main__':
         test_dir = os.path.dirname(__file__)
         pb_id = args.test_id
         try:
-            _pb_id = int(pb_id)
+            pb_id = int(pb_id)
         except ValueError:
-            if type(pb_id) == str:
-                try:
-                    _pb_id = list(map(lambda x: x[1], IndexedProblem.problems)).index(pb_id)
-                except ValueError:
-                    print(f'Unknown problem "{pb_id}"')
-                    print(f'Available problems : {sorted(list(map(lambda x: x[1], IndexedProblem.problems)))}')
-                    exit(1)
-            else:
-                print(f'Please provide problem number (int) or problem name (string)')
-                exit(1)
-        pb_name = IndexedProblem.problems[_pb_id][1]
-        ddf = DDFmanager()
-        ddf.setup()
-        ddf.set_case(f'{pb_name}')
-        ddf.clean_output_dir()
-        pb = IndexedProblem(_pb_id)
+            pass
+        if isinstance(pb_id, str):
+            try:
+                pb = all_problems[pb_id][0]()
+            except KeyError:
+                raise KeyError(f'Available problems : {list(all_problems.keys())}')
+            pb_name = pb_id
+        elif isinstance(pb_id, int):
+            # Assuming int
+            try:
+                pb = list(all_problems.values())[pb_id][0]()
+            except IndexError:
+                raise IndexError(f'Available problems : {list(all_problems.keys())}')
+            pb_name = list(all_problems.keys())[pb_id]
+        else:
+            raise Exception(f'Please provide problem number (int) or problem name (string)')
+        pb.io.set_case(pb_name)
+        pb.io.clean_output_dir()
         if args.airspeed is not None:
             pb.update_airspeed(float(args.airspeed))
         t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.srf
         solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=1, mode=args.energy)
         res = solver_ef.solve(verbose=2)
-        ddf.dump_wind(pb.model.ff, nx=101, ny=101, nt=10, bl=pb.bl, tr=pb.tr, coords=pb.coords)
+        pb.save_ff()
         extremals = solver_ef.get_trajs()
-        ddf.dump_trajs(extremals)
-        ddf.dump_trajs([res.traj])
-        ddf.ps.load_from_problem(pb)
-        ddf.ps.dump()
-        print(f'Results saved to {ddf.case_dir}')
+        pb.io.dump_trajs(extremals)
+        pb.io.dump_trajs([res.traj])
+        pb.save_info()
+        print(f'Results saved to {pb.io.case_dir}')
 
     else:
-
-        x_init, x_target, start_date, airspeed, level = Utils.process_pb_params(args.x_init_lon,
-                                                                                args.x_init_lat,
-                                                                                args.x_target_lon,
-                                                                                args.x_target_lat,
-                                                                                args.start_date,
-                                                                                args.airspeed,
-                                                                                args.altitude)
-
-        duration = 2 * Utils.distance(Utils.DEG_TO_RAD * x_init, Utils.DEG_TO_RAD * x_target,
-                                      coords=Utils.COORD_GCS) / airspeed
+        x_init_deg, x_target_deg, start_date, airspeed, pressure_level = \
+            Utils.process_pb_params(args.x_init_lon, args.x_init_lat, args.x_target_lon, args.x_target_lat,
+                                    args.start_date, args.airspeed, args.pressure_level)
+        x_init, x_target = Utils.DEG_TO_RAD * x_init_deg, Utils.DEG_TO_RAD * x_target_deg
+        duration = 2 * Utils.distance(x_init, x_target, coords=Utils.COORD_GCS) / airspeed
         stop_date = datetime.fromtimestamp(start_date.timestamp() + duration)
 
-        ddf = DDFmanager()
-        ddf.setup()
+        # Not an available parameter for the moment
+        resolution = '0.5'
 
-        ddf.retrieve_wind(start_date, stop_date, level=level, res='0.5')
-        case_name = ddf.format_cname(x_init, x_target, start_date.timestamp())
+        cds_dir = os.path.join('..', 'data', 'cds')
+        DDFmanager.query_era5(start_date, stop_date, cds_dir, pressure_level=pressure_level, resolution=resolution)
+        pb = NavigationProblem.from_database(x_init, x_target, airspeed, start_date.timestamp(), stop_date.timestamp(),
+                                             resolution=resolution, pressure_level=pressure_level, data_path=cds_dir)
 
-        cache_wind = False
-        cache_rff = False
+        case_name = DDFmanager.format_cname(x_init_deg, x_target_deg, start_date.timestamp())
+        pb.io.set_case('main_' + case_name)
+        pb.io.clean_output_dir()
 
-        # This instance prints absolute elapsed time between operations
+        pb.save_ff()
+
         chrono = Chrono()
-
-        # Create a file manager to dump problem data
-        mdfm = DDFmanager(cache_wind=cache_wind, cache_rff=cache_rff)
-        mdfm.setup()
-        case_name = f'zermelo_{case_name}'
-        mdfm.set_case(case_name)
-        mdfm.clean_output_dir()
-
-        # Space and time discretization
-        # Will be used to save wind when wind is analytical and shall be sampled
-        # Will also be used by front tracking module
-        nx_rft = 101
-        ny_rft = 101
-        nt_rft = 20
-
-        pb = DatabaseProblem(x_init=Utils.DEG_TO_RAD * x_init,
-                             x_target=Utils.DEG_TO_RAD * x_target, airspeed=airspeed,
-                             t_start=start_date.timestamp(), t_end=stop_date.timestamp(),
-                             altitude=level,
-                             resolution='0.5')
-
-        # pb.flatten()
-
-        if not cache_wind:
-            chrono.start('Dumping windfield to file')
-            mdfm.dump_wind(pb.model.ff, nx=nx_rft, ny=ny_rft, nt=nt_rft, bl=pb.bl, tr=pb.tr)
-            chrono.stop()
 
         # Setting the extremal solver
         solver_ef = solver = SolverEF(pb, pb.time_scale, max_steps=700, rel_nb_ceil=0.02, quick_solve=True)
@@ -151,46 +121,20 @@ if __name__ == '__main__':
         if res_ef.status:
             # Solution found
             # Save optimal trajectory
-            mdfm.dump_trajs([res_ef.traj])
+            pb.io.dump_trajs([res_ef.traj])
             print(f'Target reached in : {Utils.time_fmt(res_ef.duration)}')
         else:
             print('No solution found')
 
-        # Save extremal field for display purposes
         extremals = solver_ef.get_trajs()
-        mdfm.dump_trajs(extremals)
-        mdfm.dump_obs(pb, nx_rft, ny_rft)
+        pb.io.dump_trajs(extremals)
+        # pb.io.dump_obs(pb, nx_rft, ny_rft)
 
         pb.orthodromic()
-        mdfm.dump_trajs([pb.trajs[-1]])
+        # mdfm.dump_trajs([pb.trajs[-1]])
 
-        # pb.flatten()
-
-        # Setting the front tracking solver
-        if args.rft:
-            solver_rp = SolverRP(pb, nx_rft, ny_rft, nt_rft)
-            if cache_rff:
-                solver_rp.rft.load_cache(os.path.join(mdfm.case_dir, 'rff.h5'))
-
-            chrono.start('Solving problem using reachability front tracking (RFT)')
-            res_rp = solver_rp.solve()
-            chrono.stop()
-            if res_rp.status:
-                # Save optimal trajectory
-                mdfm.dump_trajs([res_rp.traj])
-                print(f'Target reached in : {Utils.time_fmt(res_rp.duration)}')
-
-            # Save fronts for display purposes
-            if not cache_rff:
-                solver_rp.rft.dump_rff(mdfm.case_dir)
-
-        # Extract information for display and write it to output
-        mdfm.ps.load_from_problem(pb)
-        mdfm.ps.dump()
+        pb.save_info()
         # Also copy the script that produced the result to output dir for later reproduction
-        mdfm.save_script(__file__)
+        pb.io.save_script(__file__)
 
-        # mdfm.set_case('example_dakar-natal-constr*')
-        # mdfm.dump_trajs([res_ef.traj])
-
-        print(f'Results saved to {mdfm.case_dir}')
+        print(f'Results saved to {pb.io.case_dir}')
