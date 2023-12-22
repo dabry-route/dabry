@@ -5,7 +5,7 @@ import sys
 #import pandas as pd
 #from dash import Input, State, Output, Dash
 
-from .frontend import FrontendHandler
+from frontend import FrontendHandler
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Trajectory planning display tool')

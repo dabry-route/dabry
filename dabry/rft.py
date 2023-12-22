@@ -13,7 +13,7 @@ from numpy import cos, sin
 from dabry.misc import Utils
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
-from dabry.wind import DiscreteWind
+from dabry.flowfield import DiscreteFF
 
 """
 rft.py
@@ -358,7 +358,7 @@ class RFT:
                         uv[k, i, j, :] = value
 
             if self.mp.coords == Utils.COORD_GCS:
-                dwind = DiscreteWind(wdata={'data': uv, 'grid': grid, 'ts': ts, 'coords': self.mp.coords})
+                dwind = DiscreteFF(wdata={'data': uv, 'grid': grid, 'ts': ts, 'coords': self.mp.coords})
                 m = 0.5 * (self.mp.x_init + self.mp.x_target)
                 dwind.flatten(proj='ortho', lon_0=m[0], lat_0=m[1])
                 # dwind.flatten(proj='omerc',

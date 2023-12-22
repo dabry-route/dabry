@@ -16,12 +16,12 @@ from numpy import ndarray
 from dabry.misc import Utils
 from dabry.penalty import DiscretePenalty
 from dabry.trajectory import Trajectory
-from dabry.wind import Wind, DiscreteWind
+from dabry.flowfield import FlowField, DiscreteFF
 
 """
 ddf_manager.py
 Handles the writing and reading of special data format for trajectories, 
-wind, reachability functions and obstacles.
+flow field, reachability functions and obstacles.
 
 Copyright (C) 2021 Bastien Schnitzler 
 (bastien dot schnitzler at live dot fr)
@@ -46,16 +46,16 @@ class DDFmanager:
     This class handles the writing and reading of Dabry Data Format (DDF) files
     """
 
-    def __init__(self, cache_wind=False, cache_rff=False):
+    def __init__(self, cache_ff=False, cache_rff=False):
         self.module_dir: Optional[str] = None
-        self.cds_wind_db_dir: Optional[str] = None
+        self.cds_ff_db_dir: Optional[str] = None
         self.case_dir: Optional[str] = None
         self.trajs_filename = 'trajectories.h5'
-        self.wind_filename = 'wind'
+        self.ff_filename = 'ff'
         self.obs_filename = 'obs.h5'
         self.pen_filename = 'penalty.h5'
         self.case_name: Optional[str] = None
-        self.cache_wind = cache_wind
+        self.cache_ff = cache_ff
         self.cache_rff = cache_rff
 
     def setup(self, module_dir: Optional[str] = None):
@@ -66,7 +66,7 @@ class DDFmanager:
             if path is None:
                 path = '..'
             self.module_dir = path
-        self.cds_wind_db_dir = os.path.join(self.module_dir, 'data', 'cds')
+        self.cds_ff_db_dir = os.path.join(self.module_dir, 'data', 'cds')
 
     def set_case(self, case_name, module_dir: Optional[str] = None):
         self.setup(module_dir=module_dir)
@@ -81,7 +81,7 @@ class DDFmanager:
         if not os.path.exists(self.case_dir):
             return
         for filename in os.listdir(self.case_dir):
-            if filename.endswith('wind.h5') and self.cache_wind:
+            if filename.endswith('ff.h5') and self.cache_ff:
                 continue
             if filename.endswith('rff.h5') and self.cache_rff:
                 continue
@@ -171,36 +171,36 @@ class DDFmanager:
                 for attr, val in traj.attrs.items():
                     print(f'{attr} : {val}')
 
-    def dump_wind(self, ff: Wind, nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
+    def dump_ff(self, ff: FlowField, nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
                   bl: Optional[ndarray] = None, tr: Optional[ndarray] = None):
-        filepath = os.path.join(self.case_dir, self.wind_filename)
-        if os.path.exists(filepath) and self.cache_wind:
+        filepath = os.path.join(self.case_dir, self.ff_filename)
+        if os.path.exists(filepath) and self.cache_ff:
             return
-        DDFmanager.dump_wind_to_file(ff, filepath, nx=nx, ny=ny, nt=nt, bl=bl, tr=tr, fmt='h5')
+        DDFmanager.dump_ff_to_file(ff, filepath, nx=nx, ny=ny, nt=nt, bl=bl, tr=tr, fmt='h5')
 
     @staticmethod
-    def _cast_to_discrete_wind(ff: Wind, nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
+    def _cast_to_discrete_ff(ff: FlowField, nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
                                bl: Optional[ndarray] = None, tr: Optional[ndarray] = None):
-        if not isinstance(ff, DiscreteWind):
+        if not isinstance(ff, DiscreteFF):
             nx = 50 if nx is None else nx
             ny = 50 if ny is None else ny
             nt = 25 if nt is None else nt
             if bl is None or tr is None:
                 raise Exception('Missing bounding box (bl, tr) to sample analytical flow field')
-            return DiscreteWind.from_wind(ff, np.array((bl, tr)).transpose(), nx=nx, ny=ny, nt=nt, force_no_diff=True)
+            return DiscreteFF.from_ff(ff, np.array((bl, tr)).transpose(), nx=nx, ny=ny, nt=nt, force_no_diff=True)
         else:
             if nx is not None or ny is not None or nt is not None:
-                warnings.warn('Grid shape (nt, nx, ny) provided but resampling of DiscreteWind not implemented yet. '
-                              'Continuing with wind native grid')
+                warnings.warn('Grid shape (nt, nx, ny) provided but resampling of DiscreteFF not implemented yet. '
+                              'Continuing with flow field native grid')
             return ff
 
     @classmethod
-    def dump_wind_to_file(cls, ff: Wind, filepath: str, fmt='npz',
+    def dump_ff_to_file(cls, ff: FlowField, filepath: str, fmt='npz',
                           nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
                           bl: Optional[ndarray] = None, tr: Optional[ndarray] = None):
         if fmt not in ['h5', 'npz']:
             raise Exception(f'Unknown output format "{fmt}"')
-        dff = DDFmanager._cast_to_discrete_wind(ff, nx, ny, nt, bl, tr)
+        dff = DDFmanager._cast_to_discrete_ff(ff, nx, ny, nt, bl, tr)
         if fmt == 'h5':
             with h5py.File(filepath + '.' + fmt, 'w') as f:
                 f.attrs['coords'] = dff.coords
@@ -237,13 +237,13 @@ class DDFmanager:
             dset = f.create_dataset('grid', penalty.grid.shape, dtype='f8')
             dset[:] = penalty.grid
 
-    def dump_wind_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Utils.COORD_GCS):
+    def dump_ff_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Utils.COORD_GCS):
         if coords == Utils.COORD_CARTESIAN:
             print('Cartesian conversion not handled yet', file=sys.stderr)
             exit(1)
         if type(srcfiles) == str:
             srcfiles = [srcfiles]
-        filename = self.wind_filename if dstname is None else dstname
+        filename = self.ff_filename if dstname is None else dstname
         filepath = os.path.join(self.case_dir, filename)
 
         def process(grbfile, setup=False, nx=None, ny=None):
@@ -354,7 +354,7 @@ class DDFmanager:
         grib_fps = list(map(lambda gf: os.path.join(data_dir, gf), gribfiles))
 
         self.case_dir = output_dir
-        print(self.dump_wind_from_grib2(grib_fps, bl, tr))
+        print(self.dump_ff_from_grib2(grib_fps, bl, tr))
 
     @staticmethod
     def days_between(start_date, stop_date):
@@ -372,8 +372,8 @@ class DDFmanager:
         db_path = os.path.join(output_dir, resolution, pressure_level)
         if not os.path.exists(db_path):
             os.makedirs(db_path)
-        for wind_file in os.listdir(db_path):
-            wf_date = wind_file.split('.')[0]
+        for ff_file in os.listdir(db_path):
+            wf_date = ff_file.split('.')[0]
             if wf_date in days_required:
                 in_cache.append(wf_date)
         for wf_date in in_cache:
@@ -422,8 +422,8 @@ class DDFmanager:
             # kwargs['time'] = f'00/to/21/by/3'
             # kwargs['target'] = os.path.join(res_path, wind_name)
 
-            wind_name = f'{day_required}.grb2'
-            server.retrieve("reanalysis-era5-pressure-levels", kwargs, os.path.join(db_path, wind_name))
+            ff_name = f'{day_required}.grb2'
+            server.retrieve("reanalysis-era5-pressure-levels", kwargs, os.path.join(db_path, ff_name))
             # server.retrieve(kwargs)
 
 
@@ -436,4 +436,4 @@ if __name__ == '__main__':
     data_filepath = os.path.join(data_dir, 'gfs_4_20220324_1200_000.grb2')
     bl = np.array((-50., -40.))
     tr = np.array((10., 40.))
-    mdfm.dump_wind_from_grib2(data_filepath, bl, tr)
+    mdfm.dump_ff_from_grib2(data_filepath, bl, tr)

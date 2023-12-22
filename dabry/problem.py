@@ -3,9 +3,9 @@ import math
 import os
 from datetime import datetime
 from typing import Optional, List
-import scipy.integrate as scitg
 
 import numpy as np
+import scipy.integrate as scitg
 from numpy import ndarray, pi
 
 from dabry.aero import MermozAero, Aero
@@ -15,9 +15,9 @@ from dabry.misc import Utils
 from dabry.model import Model
 from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, Obstacle, MeanObs, LSEMaxiObs
 from dabry.penalty import Penalty
-from dabry.wind import RankineVortexWind, UniformWind, DiscreteWind, LinearWind, RadialGaussWind, DoubleGyreWind, \
-    PointSymWind, LCWind, LinearWindT, BandWind, TrapWind, ChertovskihWind, \
-    Wind
+from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, LinearFF, RadialGaussFF, DoubleGyreFF, \
+    PointSymFF, LCFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
+    FlowField
 
 """
 problem.py
@@ -43,7 +43,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 class NavigationProblem:
 
-    def __init__(self, ff: Wind, x_init: ndarray, x_target: ndarray, srf_max: float,
+    def __init__(self, ff: FlowField, x_init: ndarray, x_target: ndarray, srf_max: float,
                  obstacles: Optional[List[Obstacle]] = None,
                  bl: Optional[ndarray] = None, tr: Optional[ndarray] = None,
                  name: Optional[str] = None, time_scale: Optional[float] = None,
@@ -71,7 +71,7 @@ class NavigationProblem:
         # Bound computation domain on wind grid limits
         if bl is None or tr is None:
             ff = self.model.ff
-            if type(ff) == DiscreteWind:
+            if type(ff) == DiscreteFF:
                 self.bl = np.array((ff.bounds[0, 0], ff.bounds[1, 0]))
                 self.tr = np.array((ff.bounds[0, 1], ff.bounds[1, 1]))
             else:
@@ -182,10 +182,11 @@ class NavigationProblem:
         f = lambda x, t: self.model.dyn(t, x, fb.value(t, x))
         t_max = 2 * self.time_scale
         res = scitg.odeint(f, self.x_init, np.linspace(0, t_max, 100))
+        # TODO continue implementation
+        return -1
 
 
-
-    #TODO: reimplement this
+    # TODO: reimplement this
     def htarget(self):
         # fb = HTargetFB(self.x_target, self.coords)
         # self.load_feedback(fb)
@@ -225,7 +226,7 @@ class NavigationProblem:
         tr_lat = math.ceil((tr_lat + 5) / 10) * 10
         tr = Utils.DEG_TO_RAD * np.array((tr_lon, tr_lat))
         grid_bounds = np.array((bl, tr)).transpose()
-        ff = DiscreteWind.from_cds(grid_bounds, t_start, t_end, resolution=resolution,
+        ff = DiscreteFF.from_cds(grid_bounds, t_start, t_end, resolution=resolution,
                                    pressure_level=pressure_level, data_path=data_path)
 
         if obstacles is None:
@@ -298,12 +299,12 @@ class NP3vor(NavigationProblem):
         #             omega3 = f * np.array(list(map(float, row)))
         #             break
 
-        vortex1 = RankineVortexWind(omega1, f * fs * -1., f * 1e-1)
-        vortex2 = RankineVortexWind(omega2, f * fs * -0.8, f * 1e-1)
-        vortex3 = RankineVortexWind(omega3, f * fs * 0.8, f * 1e-1)
-        const_wind = UniformWind(np.array([0., 0.]))
+        vortex1 = RankineVortexFF(omega1, f * fs * -1., f * 1e-1)
+        vortex2 = RankineVortexFF(omega2, f * fs * -0.8, f * 1e-1)
+        vortex3 = RankineVortexFF(omega3, f * fs * 0.8, f * 1e-1)
+        const_wind = UniformFF(np.array([0., 0.]))
 
-        ff = LCWind(np.array((3., 1., 1., 1.)),
+        ff = LCFF(np.array((3., 1., 1., 1.)),
                     (const_wind, vortex1, vortex2, vortex3))
 
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
@@ -324,7 +325,7 @@ class NPLinear(NavigationProblem):
         bl = f * np.array([-0.2, -1.])
         tr = f * np.array([1.2, 1.])
 
-        ff = LinearWind(gradient, origin, value_origin)
+        ff = LinearFF(gradient, origin, value_origin)
 
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
 
@@ -340,7 +341,7 @@ class NPDoubleGyreLi(NavigationProblem):
         bl = sf * np.array((-10, -10))
         tr = sf * np.array((510, 510))
 
-        ff = DoubleGyreWind(0., 0., 500., 500., 1.)
+        ff = DoubleGyreFF(0., 0., 500., 500., 1.)
 
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
 
@@ -356,7 +357,7 @@ class NPDoubleGyreKularatne(NavigationProblem):
         bl = sf * np.array((0.5, 0.5))
         tr = sf * np.array((2.5, 2.5))
 
-        ff = DoubleGyreWind(0.5, 0.5, 2., 2., pi * 0.02)
+        ff = DoubleGyreFF(0.5, 0.5, 2., 2., pi * 0.02)
 
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
 
@@ -373,7 +374,7 @@ class NPPointSymTechy(NavigationProblem):
         # To get w as wind value at start point, choose gamma = w / 0.583
         gamma = v_a / sf * 1.
         omega = 0.
-        ff = PointSymWind(sf * 0.5, sf * 0.3, gamma, omega)
+        ff = PointSymFF(sf * 0.5, sf * 0.3, gamma, omega)
 
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
 
@@ -388,15 +389,15 @@ class NP3obs(NavigationProblem):
         bl = sf * np.array((-0.15, -1.15))
         tr = sf * np.array((1.15, 1.15))
 
-        const_wind = UniformWind(np.array([1., 1.]))
+        const_wind = UniformFF(np.array([1., 1.]))
 
         c1 = sf * np.array((0.5, 0.))
         c2 = sf * np.array((0.5, 0.1))
         c3 = sf * np.array((0.5, -0.1))
 
-        wind_obstacle1 = RadialGaussWind(c1[0], c1[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
-        wind_obstacle2 = RadialGaussWind(c2[0], c2[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
-        wind_obstacle3 = RadialGaussWind(c3[0], c3[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
+        wind_obstacle1 = RadialGaussFF(c1[0], c1[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
+        wind_obstacle2 = RadialGaussFF(c2[0], c2[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
+        wind_obstacle3 = RadialGaussFF(c3[0], c3[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
 
         ff = wind_obstacle1 + wind_obstacle2 + wind_obstacle3 + const_wind
 
@@ -406,7 +407,7 @@ class NP3obs(NavigationProblem):
 class NPSanjuanDublinOrtho(NavigationProblem):
     def __init__(self):
         v_a = 23.
-        ff = DiscreteWind.from_h5(os.path.join(os.environ.get('DABRYPATH'),
+        ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
                                                'data_demo/ncdc/san-juan-dublin-flattened-ortho.mz/wind.h5'))
 
         # point = np.array([-66.116666, 18.465299])
@@ -435,8 +436,8 @@ class NPBigRankine(NavigationProblem):
         omega = f * np.array(((0.2, -0.2), (0.8, 0.2)))
 
         vortex = [
-            RankineVortexWind(omega[0], f * fs * -7., f * 1.),
-            RankineVortexWind(omega[1], f * fs * -7., f * 1.)
+            RankineVortexFF(omega[0], f * fs * -7., f * 1.),
+            RankineVortexFF(omega[1], f * fs * -7., f * 1.)
         ]
 
         ff = vortex[0] + vortex[1]
@@ -463,8 +464,8 @@ class NP4vor(NavigationProblem):
                               (0.5, -0.5)))
         strength = f * fs * np.array([1., -1., 1.5, -1.5])
         radius = f * np.array([1e-1, 1e-1, 1e-1, 1e-1])
-        vortices = [RankineVortexWind(omega[i], strength[i], radius[i]) for i in range(len(omega))]
-        const_wind = UniformWind(np.array([0., 0.]))
+        vortices = [RankineVortexFF(omega[i], strength[i], radius[i]) for i in range(len(omega))]
+        const_wind = UniformFF(np.array([0., 0.]))
 
         ff = sum(vortices, const_wind)
 
@@ -488,7 +489,7 @@ class NPMovor(NavigationProblem):
         gamma = f * fs * -1. * np.ones(nt)
         radius = f * 1e-1 * np.ones(nt)
 
-        ff = RankineVortexWind(omega, gamma, radius, t_end=1. * f / v_a)
+        ff = RankineVortexFF(omega, gamma, radius, t_end=1. * f / v_a)
 
         super().__init__(ff, x_init, x_target, v_a)
 
@@ -512,7 +513,7 @@ class NPTVLinear(NavigationProblem):
         bl = f * np.array([-0.2, -1.])
         tr = f * np.array([1.2, 1.])
 
-        ff = LinearWindT(gradient, origin, value_origin, t_end=0.5 * f / v_a)
+        ff = LinearFFT(gradient, origin, value_origin, t_end=0.5 * f / v_a)
 
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
 
@@ -546,16 +547,16 @@ class NPMovors(NavigationProblem):
             gamma = g * np.ones(nt)
             radius = r * np.ones(nt)
 
-            vortices.append(RankineVortexWind(omega, gamma, radius, t_end=1. * f / v_a))
+            vortices.append(RankineVortexFF(omega, gamma, radius, t_end=1. * f / v_a))
 
         obstacles = []
-        # obstacles.append(RadialGaussWind(f * 0.5, f * 0.15, f * 0.1, 1 / 2 * 0.2, 10*v_a))
-        winds = [UniformWind(np.array((-5., 0.)))] + vortices + obstacles
-        # const_wind = UniformWind(np.array([0., 5.]))
+        # obstacles.append(RadialGaussFF(f * 0.5, f * 0.15, f * 0.1, 1 / 2 * 0.2, 10*v_a))
+        winds = [UniformFF(np.array((-5., 0.)))] + vortices + obstacles
+        # const_wind = UniformFF(np.array([0., 5.]))
         N = len(winds) - len(obstacles)
         M = len(obstacles)
 
-        ff = LCWind(np.array(tuple(1 / N for _ in range(N)) + tuple(1. for _ in range(M))), tuple(winds))
+        ff = LCFF(np.array(tuple(1 / N for _ in range(N)) + tuple(1. for _ in range(M))), tuple(winds))
 
         super().__init__(ff, x_init, x_target, v_a)
 
@@ -569,11 +570,11 @@ class NPGyreRhoads(NavigationProblem):
         bl = sf * np.array((-1, -0.5))
         tr = sf * np.array((1., 0.5))
 
-        ff = DoubleGyreWind(sf * 0, sf * -0.5, sf * 2, sf * 2, 30.)
+        ff = DoubleGyreFF(sf * 0, sf * -0.5, sf * 2, sf * 2, 30.)
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr, time_scale=3. * self.geod_l / v_a)
 
 
-class NPBandWind(NavigationProblem):
+class NPBandFF(NavigationProblem):
     def __init__(self):
         v_a = 20.7
         sf = 1.
@@ -582,12 +583,12 @@ class NPBandWind(NavigationProblem):
         bl = sf * np.array((15, 15))
         tr = sf * np.array((85, 85))
 
-        band_wind = BandWind(np.array((0., 50.)), np.array((1., 0.)), np.array((-20., 0.)), 20)
-        ff = DiscreteWind.from_wind(band_wind, np.array((bl, tr)))
+        band_wind = BandFF(np.array((0., 50.)), np.array((1., 0.)), np.array((-20., 0.)), 20)
+        ff = DiscreteFF.from_ff(band_wind, np.array((bl, tr)))
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
 
 
-class NPTrapWind(NavigationProblem):
+class NPTrapFF(NavigationProblem):
     def __init__(self):
         v_a = 23.
         sf = 3e6
@@ -603,7 +604,7 @@ class NPTrapWind(NavigationProblem):
             center[10 + k] = sf * np.array((0.05 * k, 0.))
         radius = sf * 0.2 * np.ones(nt)
 
-        ff = TrapWind(wind_value, center, radius, t_end=400000)
+        ff = TrapFF(wind_value, center, radius, t_end=400000)
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
 
 
@@ -614,7 +615,7 @@ class NPSanjuanDublinOrthoTV(NavigationProblem):
         x_target = np.array((-1.8e6, 0.5e6))
         bl = np.array((-2.3e6, -1.5e6))
         tr = np.array((2e6, 2e6))
-        ff = DiscreteWind.from_h5(os.path.join(os.environ.get('DABRYPATH'),
+        ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
                                                'data_demo/ncdc/san-juan-dublin-flattened-ortho-tv.mz/wind.h5'))
 
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr, autoframe=True)
@@ -626,7 +627,7 @@ class NPObs(NavigationProblem):
         sf = 3e6
         x_init = sf * np.array((0.1, 0.))
         x_target = sf * np.array((0.9, 0.))
-        ff = UniformWind(np.array((5., 5.)))
+        ff = UniformFF(np.array((5., 5.)))
 
         obstacles = []
         # obstacles.append(CircleObs(sf * np.array((0.4, 0.1)), sf * 0.1))
@@ -645,7 +646,7 @@ class NPChertovskih(NavigationProblem):
         x_target = np.array((-0.7, -6))
         bl = np.array((-1.5, -6.2))
         tr = np.array((1.5, 0.2))
-        ff = ChertovskihWind()
+        ff = ChertovskihFF()
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
 
 
@@ -654,7 +655,7 @@ class NPDakarNatalConstr(NavigationProblem):
         v_a = 23.
         x_init = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
         x_target = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
-        ff = DiscreteWind.from_h5(os.path.join(os.environ.get('DABRYPATH'),
+        ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
                                                'data_demo/ncdc/44W_16S_9W_25N_20210929_00/wind.h5'))
         obstacles = [LSEMaxiObs([
             GreatCircleObs(Utils.DEG_TO_RAD * np.array((-17, 10)),
@@ -680,8 +681,8 @@ all_problems = {'3vor': (NP3vor, 'Three vortices'),
                 'tvlinear': (NPTVLinear, 'Linear flow field varying in time'),
                 'movors': (NPMovors, 'Multiple moving small vortices'),
                 'gyre-rhoads2010': (NPGyreRhoads, 'Gyre flow field Rhoads 2010'),
-                'band': (NPBandWind, 'Band of flow field'),
-                'trap': (NPTrapWind, 'Trap of flow field'),
+                'band': (NPBandFF, 'Band of flow field'),
+                'trap': (NPTrapFF, 'Trap of flow field'),
                 'sanjuan-dublin-ortho-tv': (NPSanjuanDublinOrthoTV, 'San-Juan Dublin Ortho proj Unsteady'),
                 'obs': (NPObs, 'Obstacle'),
                 'chertovskih2020': (NPChertovskih, 'Chertovskih 2020'),

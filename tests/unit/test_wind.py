@@ -1,10 +1,10 @@
 import unittest
 import numpy as np
-from dabry.wind import DiscreteWind
+from dabry.flowfield import DiscreteFF
 from dabry.misc import Utils
 
 
-class TestWind(unittest.TestCase):
+class TestFF(unittest.TestCase):
 
     def test_create(self):
         nt, nx, ny = 10, 20, 20
@@ -12,7 +12,7 @@ class TestWind(unittest.TestCase):
         values = np.random.random((nt, nx, ny, 2))
         bounds = np.random.random((3, 2))
         coords = Utils.COORD_CARTESIAN
-        wind = DiscreteWind(values, bounds, coords)
+        wind = DiscreteFF(values, bounds, coords)
 
 
 if __name__ == '__main__':

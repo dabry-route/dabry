@@ -3,12 +3,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-from dabry.wind import VortexWind, RadialGaussWind, RankineVortexWind, DoubleGyreWind, PointSymWind, DiscreteWind, \
-    TrapWind
-from dabry.misc import Utils
+from dabry.flowfield import TrapFF
 
 
-class WindTester:
+class FFTester:
 
     def __init__(self, x_min, x_max, y_min, y_max, wind, N_samples=10000, eps=1e-6, rtol=1e-6):
         self.x_min = x_min
@@ -84,24 +82,24 @@ if __name__ == '__main__':
     y_min, y_max = -1. * l_factor, 3 * l_factor
     x_center, y_center = 1. * l_factor, 1. * l_factor
     radius = 0.2 * l_factor
-    # wind = VortexWind(x_center, y_center, radius)
-    # wind = RankineVortexWind(x_center, y_center, 20., radius)
-    # wind = PointSymWind(x_center, y_center, 20. / l_factor, 10/ l_factor)
-    # wind2 = DoubleGyreWind(x_center, y_center, (x_max - x_min)/5., (y_max - y_min)/5., 20.)
-    # wind2 = RadialGaussWind(x_center, y_center, radius, 1/3 * np.log(0.5), 20.)
-    wind = TrapWind(np.array(10.).reshape((1,1)), np.zeros((1, 2)), np.array(l_factor).reshape((1, 1)))
-    # wind = DiscreteWind(interp='linear')
-    # total_wind = DiscreteWind(force_analytical=True, interp='linear')
+    # wind = VortexFF(x_center, y_center, radius)
+    # wind = RankineVortexFF(x_center, y_center, 20., radius)
+    # wind = PointSymFF(x_center, y_center, 20. / l_factor, 10/ l_factor)
+    # wind2 = DoubleGyreFF(x_center, y_center, (x_max - x_min)/5., (y_max - y_min)/5., 20.)
+    # wind2 = RadialGaussFF(x_center, y_center, radius, 1/3 * np.log(0.5), 20.)
+    wind = TrapFF(np.array(10.).reshape((1,1)), np.zeros((1, 2)), np.array(l_factor).reshape((1, 1)))
+    # wind = DiscreteFF(interp='linear')
+    # total_wind = DiscreteFF(force_analytical=True, interp='linear')
     # total_wind.load('/home/bastien/Documents/work/dabry/output/example_wf_san-juan_dublin/wind.h5')
     x_min, x_max = -1. * l_factor, 3 * l_factor
     y_min, y_max = -1. * l_factor, 3 * l_factor
 
-    tester = WindTester(x_min,
-                        x_max,
-                        y_min,
-                        y_max,
-                        wind,
-                        eps=1e-8,
-                        rtol=1e-4)
+    tester = FFTester(x_min,
+                      x_max,
+                      y_min,
+                      y_max,
+                      wind,
+                      eps=1e-8,
+                      rtol=1e-4)
     tester.setup()
     tester.test()

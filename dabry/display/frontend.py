@@ -1,12 +1,13 @@
+import json
 import os.path
+import sys
+
 import easygui
 import h5py
-import json
-import sys
 import numpy as np
 
-from .display import Display
 from dabry.misc import Utils
+from display import Display
 
 
 class FrontendHandler:
@@ -23,7 +24,8 @@ class FrontendHandler:
     def setup(self):
         base_path = os.environ.get('DABRYPATH')
         if base_path is None:
-            raise Exception('No path to Dabry module. Please set environment variable DABRYPATH and retry.')
+            # raise Exception('No path to Dabry module. Please set environment variable DABRYPATH and retry.')
+            base_path = '.'
         self.output_dir = os.path.join(base_path, 'output')
 
     def configure(self):
@@ -33,10 +35,11 @@ class FrontendHandler:
         self.display.setup()
         self.display.draw_all()
 
-    def select_example(self, *args, select_latest=False, select_last=False):
+    def select_example(self, select_latest=False, select_last=False):
         """
         Prompts user case selection depending on context. Sets cache accordingly
         """
+
         class ns:
             def __init__(self, value):
                 self.__dict__.update(value=value)
@@ -81,7 +84,7 @@ class FrontendHandler:
                 f.writelines(sel_dir)
 
     def run_frontend(self, noparams=True, noshow=False, block=False, movie=False, frames=None, fps=None,
-                     movie_format='apng', mini= False, flags='', mode_3d=False):
+                     movie_format='apng', mini=False, flags='', mode_3d=False):
         if self.mode in ['notebook', 'default']:
             self.example_dir = os.path.join(self.output_dir, self.example_name())
         elif self.mode == 'user':
@@ -110,7 +113,6 @@ class FrontendHandler:
                 self.display.show(noparams=noparams, block=block)
             except KeyboardInterrupt:
                 pass
-
 
     def example_name(self):
         return ('example_' if self.mode == 'notebook' else '') + f'{self.dd.value}'
@@ -193,24 +195,3 @@ class FrontendHandler:
         for i, rti in enumerate(reach_time_int):
             self.pp_params[f'reach_time_int_{i}'] = rti
             self.pp_params[f'length_int_{i}'] = length_int[i]
-
-    def show_pp(self):
-        def ft(value):
-            # value is expected in seconds
-            if value > 4000.:
-                return f'{value / 3600.:.2f} h'
-            return f'{value:.2f} s'
-
-        def fl(value):
-            # value expected in meters
-            if value > 1000.:
-                return f'{value / 1000.:.2f} km'
-            return f'{value:.2f} m'
-
-        s = "| Id | Name | Duration | Length | Mean groundspeed | \n|---|:---:|---|---|---|\n"
-        for tst in self.traj_stats:
-            s += f"| {tst['id']} | {tst['name']} | {ft(tst['duration'])} | {fl(tst['length'])} | {3.6 * tst['length'] / tst['duration']:.2f} km/h |\n"
-
-        from IPython.core.display import display, Markdown
-        # display(HTML("<style>.rendered_html { font-size: 30px; }</style>"))
-        display(Markdown(s))

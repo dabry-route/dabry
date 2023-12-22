@@ -5,7 +5,7 @@ from numpy import cos, sin
 from numpy import ndarray
 
 from dabry.misc import Utils
-from dabry.wind import Wind
+from dabry.flowfield import FlowField
 
 """
 dynamics.py
@@ -38,7 +38,7 @@ class Dynamics(ABC):
     x_dot = f(t, x, u)
     """
 
-    def __init__(self, ff: Wind):
+    def __init__(self, ff: FlowField):
         self.ff = ff
 
     @abstractmethod
@@ -72,7 +72,7 @@ class ZermeloR2Dyn(Dynamics):
     Zermelo dynamics in planar R^2 space
     """
 
-    def __init__(self, ff: Wind):
+    def __init__(self, ff: FlowField):
         super().__init__(ff)
 
     def value(self, t, x, u):
@@ -88,7 +88,7 @@ class ZermeloS2Dyn(Dynamics):
     Coordinates are (longitude, latitude).
     """
 
-    def __init__(self, ff: Wind):
+    def __init__(self, ff: FlowField):
         super().__init__(ff)
         self._factor = 1 / Utils.EARTH_RADIUS
 

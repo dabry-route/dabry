@@ -89,7 +89,7 @@ if __name__ == '__main__':
     if args.idtest != -1:
         unit_pb = int(sys.argv[1])
     else:
-        problems = list(range(len(IndexedProblem.problems)))
+        problems = len(all_problems)
 
     if unit_pb >= 0:
         test.solve(unit_pb, args.debug, args.output)

@@ -7,7 +7,6 @@ from dabry.ddf_manager import DDFmanager
 from dabry.misc import Utils, Chrono
 from dabry.problem import all_problems, NavigationProblem
 from dabry.solver_ef import SolverEF
-from dabry.wind import DiscreteWind
 
 """
 __main__.py
@@ -99,7 +98,7 @@ if __name__ == '__main__':
         # Not an available parameter for the moment
         resolution = '0.5'
 
-        cds_dir = os.path.join('..', 'data', 'cds')
+        cds_dir = os.path.join('data', 'cds')
         DDFmanager.query_era5(start_date, stop_date, cds_dir, pressure_level=pressure_level, resolution=resolution)
         pb = NavigationProblem.from_database(x_init, x_target, airspeed, start_date.timestamp(), stop_date.timestamp(),
                                              resolution=resolution, pressure_level=pressure_level, data_path=cds_dir)

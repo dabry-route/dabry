@@ -4,7 +4,7 @@ import numpy as np
 
 from .dynamics import ZermeloS2Dyn, Dynamics, ZermeloR2Dyn
 from .misc import Utils
-from .wind import UniformWind, Wind, DiscreteWind
+from .flowfield import UniformFF, FlowField, DiscreteFF
 
 """
 model.py
@@ -41,8 +41,8 @@ class Model:
         self.coords = Model.which_coords(dyn.ff)
 
     @classmethod
-    def which_coords(cls, ff: Wind):
-        return Utils.COORD_GCS if isinstance(ff, DiscreteWind) and ff.coords == Utils.COORD_GCS else\
+    def which_coords(cls, ff: FlowField):
+        return Utils.COORD_GCS if isinstance(ff, DiscreteFF) and ff.coords == Utils.COORD_GCS else\
             Utils.COORD_CARTESIAN
 
     @property
@@ -50,17 +50,17 @@ class Model:
         return self.dyn.ff
 
     @classmethod
-    def zermelo_R2(cls, ff: Optional[Wind]):
+    def zermelo_R2(cls, ff: Optional[FlowField]):
         if ff is None:
-            ff = UniformWind(np.zeros(2))
+            ff = UniformFF(np.zeros(2))
         return cls(ZermeloR2Dyn(ff))
 
     @classmethod
-    def zermelo_S2(cls, ff: Wind):
+    def zermelo_S2(cls, ff: FlowField):
         return cls(ZermeloS2Dyn(ff))
 
     @classmethod
-    def zermelo(cls, ff: Wind):
+    def zermelo(cls, ff: FlowField):
         coords = Model.which_coords(ff)
         if coords == Utils.COORD_CARTESIAN:
             return cls.zermelo_R2(ff)

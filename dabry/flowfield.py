@@ -14,7 +14,7 @@ from tqdm import tqdm
 from dabry.misc import Utils
 
 """
-wind.py
+flowfield.py
 Flow fields for navigation problems.
 
 Copyright (C) 2021 Bastien Schnitzler 
@@ -35,14 +35,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
-class Wind(ABC):
+class FlowField(ABC):
 
     def __init__(self, _lch=None, _rch=None, _op=None, t_start=0., t_end=None, nt_int=None):
         self._lch = _lch
         self._rch = _rch
         self._op = _op
 
-        # When wind is time-varying, bounds for the time window
+        # When flow field is time-varying, bounds for the time window
         # A none upper bound means no time variation
         self.t_start = t_start
         self.t_end = t_end
@@ -51,8 +51,8 @@ class Wind(ABC):
         # flow fields depend on time-varying parameters
         self.nt_int = nt_int
 
-        # True if dualization operation flips wind (mulitplication by -1)
-        # False if dualization operation leaves wind unchanged
+        # True if dualization operation flips flow field (mulitplication by -1)
+        # False if dualization operation leaves flow field unchanged
         self.dualizable = True
 
         self.coords = Utils.COORD_CARTESIAN
@@ -103,35 +103,35 @@ class Wind(ABC):
 
     def __add__(self, other):
         """
-        Add windfields
-        :param other: Another windfield
-        :return: The sum of the two windfields
+        Add flow fields
+        :param other: Another flow field
+        :return: The sum of the two flow fields
         """
-        if not isinstance(other, Wind):
+        if not isinstance(other, FlowField):
             raise TypeError(f"Unsupported type for addition : {type(other)}")
-        return Wind(_lch=self, _rch=other, _op='+')
+        return FlowField(_lch=self, _rch=other, _op='+')
 
     def __sub__(self, other):
         """
-        Substracts windfields
-        :param other: Another windfield
-        :return: The substraction of the two windfields
+        Substracts flow fields
+        :param other: Another flow fields
+        :return: The substraction of the two flow fields
         """
-        if not isinstance(other, Wind):
+        if not isinstance(other, FlowField):
             raise TypeError(f"Unsupported type for substraction : {type(other)}")
-        return Wind(_lch=self, _rch=other, _op='-')
+        return FlowField(_lch=self, _rch=other, _op='-')
 
     def __mul__(self, other):
         """
-        Handles the scaling of a windfield by a real number
+        Handles the scaling of a flow field by a real number
         :param other: A real number (float)
-        :return: The scaled windfield
+        :return: The scaled flow field
         """
         if isinstance(other, int):
             other = float(other)
         if not isinstance(other, float):
             raise TypeError(f"Unsupported type for multiplication : {type(other)}")
-        return Wind(_lch=self, _rch=other, _op='*', t_start=self.t_start, t_end=self.t_end)
+        return FlowField(_lch=self, _rch=other, _op='*', t_start=self.t_start, t_end=self.t_end)
 
     def __rmul__(self, other):
         return self.__mul__(other)
@@ -147,7 +147,7 @@ class Wind(ABC):
         nt = self.nt_int
         if nt == 1:
             return 0, 0.
-        # Bounds may not be in the right order if wind is dualized
+        # Bounds may not be in the right order if flow field is dualized
         t_min, t_max = min(self.t_start, self.t_end), max(self.t_start, self.t_end)
         # Clip time to bounds
         if t <= t_min:
@@ -162,9 +162,9 @@ class Wind(ABC):
         return i, alpha
 
 
-class DiscreteWind(Wind):
+class DiscreteFF(FlowField):
     """
-    Handles wind loading from H5 format and derivative computation
+    Handles flow field loading from H5 format and derivative computation
     """
 
     def __init__(self, values: ndarray, bounds: ndarray, coords: str, grad_values: Optional[ndarray] = None,
@@ -194,41 +194,39 @@ class DiscreteWind(Wind):
     @classmethod
     def from_h5(cls, filepath, **kwargs):
         """
-        Loads wind data from H5 wind data
-        :param filepath: The H5 file contaning wind data
+        Loads flow field data from H5 flow field data
+        :param filepath: The H5 file contaning flow field data
         """
 
-        # Fill the wind data array
-        # print(f'{"Loading wind values...":<30}', end='')
-        with h5py.File(filepath, 'r') as wind_data:
-            coords = wind_data.attrs['coords']
+        with h5py.File(filepath, 'r') as ff_data:
+            coords = ff_data.attrs['coords']
 
             # Checking consistency before loading
             Utils.ensure_coords(coords)
 
-            values = np.array(wind_data['data'])
+            values = np.array(ff_data['data'])
 
             # Time bounds
-            t_start = wind_data['ts'][0]
-            t_end = None if wind_data['ts'].shape[0] == 1 else wind_data['ts'][-1]
+            t_start = ff_data['ts'][0]
+            t_end = None if ff_data['ts'].shape[0] == 1 else ff_data['ts'][-1]
 
             # Detecting millisecond-formated timestamps
-            if np.any(np.array(wind_data['ts']) > 1e11):
+            if np.any(np.array(ff_data['ts']) > 1e11):
                 t_start /= 1000.
                 if t_end is not None:
                     t_end /= 1000.
-            f = Utils.DEG_TO_RAD if wind_data.attrs['units_grid'] == Utils.U_DEG else 1.
+            f = Utils.DEG_TO_RAD if ff_data.attrs['units_grid'] == Utils.U_DEG else 1.
 
             bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) +
-                              (f * wind_data['grid'][0, 0],
-                               f * wind_data['grid'][-1, -1]), axis=0)
+                              (f * ff_data['grid'][0, 0],
+                               f * ff_data['grid'][-1, -1]), axis=0)
 
         return cls(values, bounds, coords, **kwargs)
 
     @classmethod
-    def from_wind(cls, wind: Wind, grid_bounds, nx=100, ny=100, nt=50, **kwargs):
-        t_start = wind.t_start
-        t_end = wind.t_end
+    def from_ff(cls, ff: FlowField, grid_bounds, nx=100, ny=100, nt=50, **kwargs):
+        t_start = ff.t_start
+        t_end = ff.t_end
 
         bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) +
                           (grid_bounds[0], grid_bounds[1]), axis=0)
@@ -243,15 +241,15 @@ class DiscreteWind(Wind):
                 for j in range(ny):
                     state = bounds[-2:, 0] + np.diag((i, j)) @ spacings[-2:]
                     if t_end is None:
-                        values[i, j, :] = wind.value(t, state)
+                        values[i, j, :] = ff.value(t, state)
                     else:
-                        values[k, i, j, :] = wind.value(t, state)
+                        values[k, i, j, :] = ff.value(t, state)
                     if not kwargs.get('force_no_diff'):
                         if t_end is None:
-                            grad_values[i, j, ...] = wind.d_value(t, state)
+                            grad_values[i, j, ...] = ff.d_value(t, state)
                         else:
-                            grad_values[k, i, j, ...] = wind.d_value(t, state)
-        coords = Utils.COORD_GCS if isinstance(wind, DiscreteWind) and wind.coords == Utils.COORD_GCS \
+                            grad_values[k, i, j, ...] = ff.d_value(t, state)
+        coords = Utils.COORD_GCS if isinstance(ff, DiscreteFF) and ff.coords == Utils.COORD_GCS \
             else Utils.COORD_CARTESIAN
         return cls(values, bounds, coords, grad_values=grad_values, **kwargs)
 
@@ -262,13 +260,13 @@ class DiscreteWind(Wind):
         """
         :param grid_bounds: A (2,2) array where the zeroth element corresponds to the bounds of the zeroth axis
         and the first element to the bounds of the first axis
-        :param t_start: The required start time for wind
-        :param t_end: The required end time for wind
+        :param t_start: The required start time for flow field
+        :param t_end: The required end time for flow field
         :param i_member: The reanalysis ensemble member number
         :param resolution: The weather model grid resolution in degrees, e.g. '0.5'
         :param pressure_level: The pressure level in hPa, e.g. '1000', '500', '200'
         :param data_path: Force path to data to this value
-        :return: A DiscreteWind corresponding to the query
+        :return: A DiscreteFF corresponding to the query
         """
         if data_path is None:
             dirpath = os.path.join(os.environ.get('DABRYPATH'), 'data', 'cds', resolution, pressure_level)
@@ -387,27 +385,27 @@ class DiscreteWind(Wind):
 
     def value(self, t, x):
         """
-        Return an interpolated wind value based on linear interpolation
+        Return an interpolated flow field value based on linear interpolation
         :param t: Time stamp
         :param x: Position
-        :return: Interpolated wind vector
+        :return: Interpolated flow field vector
         """
         return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)))
 
     def d_value(self, t, x):
         """
-        Return an interpolated wind gradient value based on linear interpolation
+        Return an interpolated flow field gradient value based on linear interpolation
         :param t: Time stamp
         :param x: Position
-        :return: Interpolated wind jacobian at requested time and position
+        :return: Interpolated flow field jacobian at requested time and position
         """
         return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)),
                                  ndim_values_data=2)
 
     def compute_derivatives(self):
         """
-        Computes the derivatives of the windfield with a central difference scheme
-        on the wind native grid
+        Computes the derivatives of the flow field with a central difference scheme
+        on the flow field native grid
         """
         self.grad_values = np.zeros(self.values.shape + (2,))
 
@@ -434,161 +432,26 @@ class DiscreteWind(Wind):
         self.grad_values[:, -1, 0, ...] = self.grad_values[:, -2, 1, ...]
         self.grad_values[:, -1, -1, ...] = self.grad_values[:, -2, -2, ...]
 
-    # def flatten(self, proj='plate-carree', **kwargs):
-    #     """
-    #     Flatten GCS-coordinates wind to euclidean space using given projection
-    #     :return The flattened wind
-    #     """
-    #     if self.coords != Utils.COORD_GCS:
-    #         print('Coordinates must be GCS to flatten', file=sys.stderr)
-    #         exit(1)
-    #     oldgrid = np.zeros(self.grid.shape)
-    #     oldgrid[:] = self.grid
-    #     oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
-    #     if proj == 'plate-carree':
-    #         center = 0.5 * (self.grid[0, 0] + self.grid[-1, -1])
-    #         newgrid = np.zeros(self.grid.shape)
-    #         newgrid[:] = Utils.EARTH_RADIUS * (self.grid - center)
-    #         self.grid[:] = newgrid
-    #         self.x_min = self.grid[0, 0, 0]
-    #         self.y_min = self.grid[0, 0, 1]
-    #         self.x_max = self.grid[-1, -1, 0]
-    #         self.y_max = self.grid[-1, -1, 1]
-    #         f_wind = DiscreteWind()
-    #         nx, ny, _ = self.grid.shape
-    #         bl = self.grid[0, 0]
-    #         tr = self.grid[-1, -1]
-    #         f_wind.load_from_wind(self, nx, ny, bl, tr, coords=Utils.COORD_CARTESIAN)
-    #     elif proj == 'ortho':
-    #         for p in ['lon_0', 'lat_0']:
-    #             if p not in kwargs.keys():
-    #                 print(f'Missing parameter {p} for {proj} flatten type', file=sys.stderr)
-    #                 exit(1)
-    #         # Lon and lats expected in radians
-    #         self.lon_0 = kwargs['lon_0']
-    #         self.lat_0 = kwargs['lat_0']
-    #         # width = kwargs['width']
-    #         # height = kwargs['height']
-    #
-    #         nx, ny, _ = self.grid.shape
-    #
-    #         # Grid
-    #         proj = Proj(proj='ortho', lon_0=Utils.RAD_TO_DEG * self.lon_0, lat_0=Utils.RAD_TO_DEG * self.lat_0)
-    #         oldgrid = np.zeros(self.grid.shape)
-    #         oldgrid[:] = self.grid
-    #         newgrid = np.zeros((2, nx, ny))
-    #         newgrid[:] = proj(Utils.RAD_TO_DEG * self.grid[:, :, 0], Utils.RAD_TO_DEG * self.grid[:, :, 1])
-    #         self.grid[:] = newgrid.transpose((1, 2, 0))
-    #         oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
-    #         self.x_min = self.grid[:, :, 0].min()
-    #         self.y_min = self.grid[:, :, 1].min()
-    #         self.x_max = self.grid[:, :, 0].max()
-    #         self.y_max = self.grid[:, :, 1].max()
-    #
-    #         print(self.x_min, self.x_max, self.y_min, self.y_max)
-    #
-    #         # Wind
-    #         newuv = np.zeros(self.uv.shape)
-    #         for kt in range(self.uv.shape[0]):
-    #             newuv[kt, :] = self._rotate_wind(self.uv[kt, :, :, 0],
-    #                                              self.uv[kt, :, :, 1],
-    #                                              Utils.RAD_TO_DEG * oldgrid[:, :, 0],
-    #                                              Utils.RAD_TO_DEG * oldgrid[:, :, 1])
-    #         self.uv[:] = newuv
-    #     elif proj == 'omerc':
-    #         for p in ['lon_1', 'lat_1', 'lon_2', 'lat_2']:
-    #             if p not in kwargs.keys():
-    #                 print(f'Missing parameter {p} for {proj} flatten type', file=sys.stderr)
-    #                 exit(1)
-    #         # Lon and lats expected in radians
-    #         self.lon_1 = kwargs['lon_1']
-    #         self.lat_1 = kwargs['lat_1']
-    #         self.lon_2 = kwargs['lon_2']
-    #         self.lat_2 = kwargs['lat_2']
-    #         # width = kwargs['width']
-    #         # height = kwargs['height']
-    #
-    #         nx, ny, _ = self.grid.shape
-    #
-    #         # Grid
-    #         proj = Proj(proj='omerc',
-    #                     lon_1=Utils.RAD_TO_DEG * self.lon_1,
-    #                     lat_1=Utils.RAD_TO_DEG * self.lat_1,
-    #                     lon_2=Utils.RAD_TO_DEG * self.lon_2,
-    #                     lat_2=Utils.RAD_TO_DEG * self.lat_2,
-    #                     )
-    #         oldgrid = np.zeros(self.grid.shape)
-    #         oldgrid[:] = self.grid
-    #         newgrid = np.zeros((2, nx, ny))
-    #         newgrid[:] = proj(Utils.RAD_TO_DEG * self.grid[:, :, 0], Utils.RAD_TO_DEG * self.grid[:, :, 1])
-    #         self.grid[:] = newgrid.transpose((1, 2, 0))
-    #         oldbounds = (self.x_min, self.y_min, self.x_max, self.y_max)
-    #         self.x_min = self.grid[:, :, 0].min()
-    #         self.y_min = self.grid[:, :, 1].min()
-    #         self.x_max = self.grid[:, :, 0].max()
-    #         self.y_max = self.grid[:, :, 1].max()
-    #
-    #         print(self.x_min, self.x_max, self.y_min, self.y_max)
-    #
-    #         # Wind
-    #         newuv = np.zeros(self.uv.shape)
-    #         for kt in range(self.uv.shape[0]):
-    #             newuv[kt, :] = self._rotate_wind(self.uv[kt, :, :, 0],
-    #                                              self.uv[kt, :, :, 1],
-    #                                              Utils.RAD_TO_DEG * oldgrid[:, :, 0],
-    #                                              Utils.RAD_TO_DEG * oldgrid[:, :, 1])
-    #         self.uv[:] = newuv
-    #     else:
-    #         print(f"Unknown projection type {proj}", file=sys.stderr)
-    #         exit(1)
-    #
-    #     # self.grid[:] = oldgrid
-    #     # self.x_min, self.y_min, self.x_max, self.y_max = oldbounds
-    #
-    #     self.unstructured = True
-    #     self.coords = Utils.COORD_CARTESIAN
-    #     self.units_grid = 'meters'
-    #     self.is_analytical = False
-    #
-    # def _rotate_wind(self, u, v, x, y):
-    #     if self.bm is None:
-    #         if self.lon_0 is not None:
-    #             self.bm = Basemap(projection='ortho',
-    #                               lon_0=Utils.RAD_TO_DEG * self.lon_0,
-    #                               lat_0=Utils.RAD_TO_DEG * self.lat_0)
-    #         else:
-    #             self.bm = Basemap(projection='omerc',
-    #                               lon_1=Utils.RAD_TO_DEG * self.lon_1,
-    #                               lat_1=Utils.RAD_TO_DEG * self.lat_1,
-    #                               lon_2=Utils.RAD_TO_DEG * self.lon_2,
-    #                               lat_2=Utils.RAD_TO_DEG * self.lat_2,
-    #                               lon_0=Utils.RAD_TO_DEG * 0.5 * (self.lon_1 + self.lon_2),
-    #                               lat_0=Utils.RAD_TO_DEG * 0.5 * (self.lat_1 + self.lat_2),
-    #                               height=Utils.EARTH_RADIUS,
-    #                               width=Utils.EARTH_RADIUS,
-    #                               )
-    #     return np.array(self.bm.rotate_vector(u, v, x, y)).transpose((1, 2, 0))
-
     def dualize(self):
-        # Override method so that the dual of a DiscreteWind stays a DiscreteWind and
-        # is not casted to Wind
-        wind = DiscreteWind.from_wind(-1. * self, self.bounds, self.values.shape[1], self.values.shape[2])
+        # Override method so that the dual of a DiscreteFF stays a DiscreteFF and
+        # is not casted to FlowField
+        ff = DiscreteFF.from_ff(-1. * self, self.bounds, self.values.shape[1], self.values.shape[2])
         if self.t_end is not None:
-            wind.t_start = self.t_end
-            wind.t_end = self.t_start
+            ff.t_start = self.t_end
+            ff.t_end = self.t_start
         else:
-            wind.t_start = self.t_start
-        return wind
+            ff.t_start = self.t_start
+        return ff
 
 
-class TwoSectorsWind(Wind):
+class TwoSectorsFF(FlowField):
 
     def __init__(self,
                  v_w1: float,
                  v_w2: float,
                  x_switch: float):
         """
-        Wind configuration where wind is constant over two half-planes separated by x = x_switch. x-wind is null.
+        Flow field configuration where flow field is constant over two half-planes separated by x = x_switch.
         :param v_w1: y-wind value for x < x_switch
         :param v_w2: y-wind value for x >= x_switch
         :param x_switch: x-coordinate for sectors separation
@@ -607,34 +470,34 @@ class TwoSectorsWind(Wind):
                          [0, 0]])
 
 
-class TSEqualWind(TwoSectorsWind):
+class TSEqualFF(TwoSectorsFF):
 
     def __init__(self, v_w1, v_w2, x_f):
         """
-        TwoSectorsWind but the sector separation is midway to the target
+        TwoSectorsFF but the sector separation is midway to the target
         :param x_f: Target x-coordinate.
         """
         super().__init__(v_w1, v_w2, x_f / 2)
 
 
-class UniformWind(Wind):
+class UniformFF(FlowField):
 
-    def __init__(self, wind_vector: ndarray):
+    def __init__(self, ff_val: ndarray):
         """
-        :param wind_vector: Direction and strength of wind
+        :param ff_val: Direction and strength of flow field
         """
         super().__init__()
-        self.wind_vector = np.array(wind_vector)
+        self.ff_val = np.array(ff_val)
 
     def _value(self, t, x):
-        return self.wind_vector
+        return self.ff_val
 
     def _d_value(self, t, x):
         return np.array([[0., 0.],
                          [0., 0.]])
 
 
-class VortexWind(Wind):
+class VortexFF(FlowField):
 
     def __init__(self,
                  x_omega: float,
@@ -667,7 +530,7 @@ class VortexWind(Wind):
              [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
 
 
-class RankineVortexWind(Wind):
+class RankineVortexFF(FlowField):
 
     def __init__(self, center, gamma, radius, t_start=0., t_end=None):
         """
@@ -743,39 +606,14 @@ class RankineVortexWind(Wind):
                    np.array([[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
                              [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
 
-
-# class VortexBarrierWind(Wind):
-#     def __init__(self,
-#                  x_omega: float,
-#                  y_omega: float,
-#                  gamma: float,
-#                  radius: float):
-#         """
-#         A vortex from potential theory, but add a wind barrier at a given radius
-#
-#         :param x_omega: x_coordinate of vortex center in m
-#         :param y_omega: y_coordinate of vortex center in m
-#         :param gamma: Circulation of the vortex in m^2/s. Positive is ccw vortex.
-#         :param radius: Radius of the barrier in m
-#         """
-#         super().__init__(value_func=self.value, d_value_func=self.d_value)
-#         self.x_omega = x_omega
-#         self.y_omega = y_omega
-#         self.omega = np.array([x_omega, y_omega])
-#         self.gamma = gamma
-#         self.radius = radius
-#         self.zero_ceil = 1e-3
-#         self.descr = f'Vortex barrier'  # ({self.gamma:.2f} m^2/s, at ({self.x_omega:.2f}, {self.y_omega:.2f}))'
-#         self.is_analytical = True
-
-class LinearWind(Wind):
+class LinearFF(FlowField):
     """
-    Constant gradient wind
+    Constant gradient flow field
     """
 
     def __init__(self, gradient: ndarray, origin: ndarray, value_origin: ndarray):
         """
-        :param gradient: The wind gradient
+        :param gradient: The flow field gradient
         :param origin: The origin point for the origin value
         :param value_origin: The origin value
         """
@@ -797,14 +635,14 @@ class LinearWind(Wind):
 
 
 # TODO: Unite with steady linear
-class LinearWindT(Wind):
+class LinearFFT(FlowField):
     """
     Gradient does not vary with space but does vary with time
     """
 
     def __init__(self, gradient, origin, value_origin, t_end):
         """
-        :param gradient: The wind gradient, shape (nt, 2, 2)
+        :param gradient: The flow field gradient, shape (nt, 2, 2)
         :param origin: The origin point for the origin value, shape (2,)
         :param value_origin: The origin value, shape (2,)
         """
@@ -827,10 +665,10 @@ class LinearWindT(Wind):
         return (1 - alpha) * self.gradient[i] + alpha * self.gradient[i + 1]
 
     def dualize(self):
-        return -1. * LinearWindT(self.gradient[::-1, :, :], self.origin, self.value_origin, self.t_end)
+        return -1. * LinearFFT(self.gradient[::-1, :, :], self.origin, self.value_origin, self.t_end)
 
 
-class PointSymWind(Wind):
+class PointSymFF(FlowField):
     """
     From Techy 2011 (DOI 10.1007/s11370-011-0092-9)
     """
@@ -857,7 +695,7 @@ class PointSymWind(Wind):
         return self.mat
 
 
-class DoubleGyreWind(Wind):
+class DoubleGyreFF(FlowField):
     """
     From Li 2020 (DOI 10.1109/JOE.2019.2926822)
     """
@@ -889,7 +727,7 @@ class DoubleGyreWind(Wind):
                                      [-self.kx * sin(xx[0]) * sin(xx[1]), self.ky * cos(xx[0]) * cos(xx[1])]])
 
 
-class DoubleGyreDampedWind(Wind):
+class DoubleGyreDampedFF(FlowField):
 
     def __init__(self,
                  x_center: float,
@@ -902,7 +740,7 @@ class DoubleGyreDampedWind(Wind):
                  lambda_x_damp: float,
                  lambda_y_damp: float):
         super().__init__()
-        self.double_gyre = DoubleGyreWind(x_center, y_center, x_wl, y_wl, ampl)
+        self.double_gyre = DoubleGyreFF(x_center, y_center, x_wl, y_wl, ampl)
         self.center_damp = np.array((x_center_damp, y_center_damp))
         self.lambda_x_damp = lambda_x_damp
         self.lambda_y_damp = lambda_y_damp
@@ -913,14 +751,14 @@ class DoubleGyreDampedWind(Wind):
         return self.double_gyre.value(t, x) * damp
 
 
-class RadialGaussWind(Wind):
+class RadialGaussFF(FlowField):
     def __init__(self, x_center: float, y_center: float, radius: float, sdev: float, v_max: float):
         """
         :param x_center: Center x-coordinate
         :param y_center: Center y-coordinate
-        :param radius: Radial distance of maximum wind value (absolute value)
+        :param radius: Radial distance of maximum flow field value (absolute value)
         :param sdev: Gaussian standard deviation
-        :param v_max: Maximum wind value
+        :param v_max: Maximum flow field value
         """
         super().__init__()
 
@@ -960,9 +798,9 @@ class RadialGaussWind(Wind):
         return np.einsum('i,j->ij', e_r, dv) + self.ampl(r) * nabla_e_r
 
 
-class RadialGaussWindT(Wind):
+class RadialGaussFFT(FlowField):
     """
-    Time-varying version of radial Gauss wind
+    Time-varying version of radial Gauss flow field
     """
 
     def __init__(self, center, radius, sdev, v_max, t_end, t_start=0.):
@@ -971,7 +809,7 @@ class RadialGaussWindT(Wind):
         :param radius: ndarray of size nt
         :param sdev: ndarray of size nt
         :param v_max: ndarray of size nt
-        :param t_end: end of time window. Wind is supposed to be regularly sampled in the time window
+        :param t_end: end of time window. Flow field is supposed to be regularly sampled in the time window
         :param t_start: beginning of time window.
         """
         super().__init__(t_start=t_start, t_end=t_end,
@@ -1030,9 +868,9 @@ class RadialGaussWindT(Wind):
         return np.einsum('i,j->ij', e_r, dv) + self.ampl(t, r) * nabla_e_r
 
 
-class BandGaussWind(Wind):
+class BandGaussFF(FlowField):
     """
-    Linear band of gaussian wind
+    Linear band of gaussian flow field
     """
 
     def __init__(self, origin, vect, ampl, sdev):
@@ -1056,9 +894,9 @@ class BandGaussWind(Wind):
                                 1 / dx * (self.value(t, x + np.array((0., dx))) - self.value(t, x))))
 
 
-class BandWind(Wind):
+class BandFF(FlowField):
     """
-    Band of wind. NON DIFFERENTIABLE (should be instanciated as discrete wind)
+    Band of flow field. NON DIFFERENTIABLE (should be instanciated as discrete flow field)
     """
 
     def __init__(self, origin, vect, w_value, width):
@@ -1082,80 +920,81 @@ class BandWind(Wind):
         exit(1)
 
 
-class LCWind(Wind):
+class LCFF(FlowField):
     """
-    Linear combination of winds.
+    Linear combination of flow fields.
     """
 
-    def __init__(self, coeffs, winds):
+    def __init__(self, coeffs, ffs):
         self.coeffs = np.zeros(coeffs.shape[0])
         self.coeffs[:] = coeffs
-        self.winds = winds
+        self.ffs = ffs
 
-        self.lcwind = sum((c * self.winds[i] for i, c in enumerate(self.coeffs)), UniformWind(np.zeros(2)))
+        self.lcff = sum((c * self.ffs[i] for i, c in enumerate(self.coeffs)), UniformFF(np.zeros(2)))
         nt_int = None
         t_start = None
         t_end = None
-        for wind in self.winds:
-            if wind.nt_int is not None and wind.nt_int > 1:
+        for ff in self.ffs:
+            if ff.nt_int is not None and ff.nt_int > 1:
                 if nt_int is None:
-                    nt_int = wind.nt_int
-                    t_start = wind.t_start
-                    t_end = wind.t_end
+                    nt_int = ff.nt_int
+                    t_start = ff.t_start
+                    t_end = ff.t_end
                 else:
-                    if wind.nt != nt_int or wind.t_start != t_start or wind.t_end != t_end:
-                        print('Cannot handle combination of multiple time-varying winds with '
+                    if ff.nt != nt_int or ff.t_start != t_start or ff.t_end != t_end:
+                        print('Cannot handle combination of multiple time-varying flow fields with '
                               'different parameters for the moment', file=sys.stderr)
                         exit(1)
         super().__init__(t_start, t_end, nt_int)
 
     def value(self, t, x):
-        return self.lcwind.value(t, x)
+        return self.lcff.value(t, x)
 
     def d_value(self, t, x):
-        return self.lcwind.d_value(t, x)
+        return self.lcff.d_value(t, x)
 
     def dualize(self):
         new_coeffs = np.zeros(self.coeffs.shape[0])
         for i, c in enumerate(self.coeffs):
-            if self.winds[i].dualizable:
+            if self.ffs[i].dualizable:
                 new_coeffs[i] = -1. * c
             else:
                 new_coeffs[i] = c
-        return LCWind(new_coeffs, self.winds)
+        return LCFF(new_coeffs, self.ffs)
 
 
-class LVWind(Wind):
+class LVFF(FlowField):
     """
-    Wind varying linearly with time. Wind is spaitially uniform at each timestep.
+    Flow field varying linearly with time, spatially uniform at each timestep.
     """
 
-    def __init__(self, wind_value, gradient, time_scale):
+    def __init__(self, ff_val, gradient, time_scale):
         super().__init__()
-        self.wind_value = np.array(wind_value)
+        self.ff_val = np.array(ff_val)
         self.gradient = np.array(gradient)
         self.t_end = time_scale
 
     def value(self, t, x):
-        return self.wind_value + t * self.gradient
+        return self.ff_val + t * self.gradient
 
     def d_value(self, t, x):
         return np.zeros(2)
 
 
-class TrapWind(Wind):
-    def __init__(self, wind_value, center, radius, rel_wid=0.05, t_start=0., t_end=None):
+class TrapFF(FlowField):
+    def __init__(self, ff_val: ndarray, center: ndarray, radius: ndarray,
+                 rel_wid=0.05, t_start=0., t_end: Optional[float] = None):
         """
-        :param wind_value: (nt,) in meters per second
-        :param center: (nt, 2) in meters
-        :param radius: (nt,) in meters
+        :param ff_val: (nt,)
+        :param center: (nt, 2)
+        :param radius: (nt,)
         """
-        if wind_value.shape[0] != radius.shape[0]:
+        if ff_val.shape[0] != radius.shape[0]:
             raise Exception('Incoherent shapes')
-        super().__init__(t_start=t_start, t_end=t_end, nt_int=wind_value.shape[0])
-        self.wind_value = np.array(wind_value)
-        self.center = np.array(center)
-        self.radius = np.array(radius)
+        super().__init__(t_start=t_start, t_end=t_end, nt_int=ff_val.shape[0])
+        self.ff_val = ff_val.copy()
+        self.center = center.copy()
+        self.radius = radius.copy()
         # Relative obstacle variation width
         self.rel_wid = rel_wid
 
@@ -1166,12 +1005,12 @@ class TrapWind(Wind):
     @staticmethod
     def d_sigmoid(r, wid):
         lam = 4 / wid
-        s = TrapWind.sigmoid(r, wid)
+        s = TrapFF.sigmoid(r, wid)
         return lam * s * (1 - s)
 
     def value(self, t, x):
         i, alpha = self._index(t)
-        wind_value = (1 - alpha) * self.wind_value[i] + (0. if alpha < 1e-3 else alpha * self.wind_value[i + 1])
+        ff_val = (1 - alpha) * self.ff_val[i] + (0. if alpha < 1e-3 else alpha * self.ff_val[i + 1])
         center = (1 - alpha) * self.center[i] + (0. if alpha < 1e-3 else alpha * self.center[i + 1])
         radius = (1 - alpha) * self.radius[i] + (0. if alpha < 1e-3 else alpha * self.radius[i + 1])
         if (x - center) @ (x - center) < 1e-8 * radius ** 2:
@@ -1179,11 +1018,11 @@ class TrapWind(Wind):
         else:
             r = np.linalg.norm((x - center))
             e_r = (x - center) / r
-            return -wind_value * TrapWind.sigmoid(r - radius, radius * self.rel_wid) * e_r
+            return -ff_val * TrapFF.sigmoid(r - radius, radius * self.rel_wid) * e_r
 
     def d_value(self, t, x):
         i, alpha = self._index(t)
-        wind_value = (1 - alpha) * self.wind_value[i] + (0. if alpha < 1e-3 else alpha * self.wind_value[i + 1])
+        ff_val = (1 - alpha) * self.ff_val[i] + (0. if alpha < 1e-3 else alpha * self.ff_val[i + 1])
         center = (1 - alpha) * self.center[i] + (0. if alpha < 1e-3 else alpha * self.center[i + 1])
         radius = (1 - alpha) * self.radius[i] + (0. if alpha < 1e-3 else alpha * self.radius[i + 1])
         if (x - center) @ (x - center) < 1e-8 * radius ** 2:
@@ -1192,11 +1031,11 @@ class TrapWind(Wind):
             r = np.linalg.norm((x - center))
             e_r = (x - center) / r
             P = np.array(((e_r[0], e_r[1]), (-e_r[1] / r, e_r[0] / r)))
-            return -wind_value * (P.transpose() @ np.diag((TrapWind.d_sigmoid(r - radius, radius * self.rel_wid),
-                                                           TrapWind.sigmoid(r - radius, radius * self.rel_wid))) @ P)
+            return -ff_val * (P.transpose() @ np.diag((TrapFF.d_sigmoid(r - radius, radius * self.rel_wid),
+                                                           TrapFF.sigmoid(r - radius, radius * self.rel_wid))) @ P)
 
 
-class ChertovskihWind(Wind):
+class ChertovskihFF(FlowField):
 
     def __init__(self):
         super().__init__()

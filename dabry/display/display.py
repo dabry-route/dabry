@@ -21,7 +21,7 @@ from numpy import ndarray
 from pyproj import Proj, Geod
 from scipy.interpolate import griddata
 
-from .misc import *
+from misc import *
 
 state_names = [r"$x\:[m]$", r"$y\:[m]$"]
 control_names = [r"$u\:[rad]$"]

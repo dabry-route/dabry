@@ -6,7 +6,7 @@ from numpy import ndarray
 from numpy import sin, cos
 
 from dabry.misc import Utils
-from dabry.wind import Wind, UniformWind
+from dabry.flowfield import FlowField
 
 """
 feedback.py
@@ -63,7 +63,7 @@ class FixedHeadingFB(Feedback):
     control law steers perpendicular to the target direction
     """
 
-    def __init__(self, wind: Wind, srf: float, initial_steering: float):
+    def __init__(self, wind: FlowField, srf: float, initial_steering: float):
         """
         :param wind: Wind object
         :param srf: Vehicle's speed relative to flow field
@@ -99,7 +99,7 @@ class GreatCircleFB(Feedback):
     Tries to stay on a great circle when wind allows it.
     """
 
-    def __init__(self, wind: Wind, srf: float, target: ndarray):
+    def __init__(self, wind: FlowField, srf: float, target: ndarray):
         self.wind = wind
         self.srf = srf
         self.lon_t, self.lat_t = target[0], target[1]
@@ -129,7 +129,7 @@ class GSTargetFB(Feedback):
     Control law trying to put ground speed vector towards a fixed target
     """
 
-    def __init__(self, wind: Wind, srf: float, target: ndarray):
+    def __init__(self, wind: FlowField, srf: float, target: ndarray):
         self.wind = wind
         self.srf = srf
         self.target = target.copy()
@@ -191,7 +191,7 @@ class HTargetFB(Feedback):
     def for_S2(cls, target: ndarray):
         cls(target, Utils.COORD_GCS)
 
-    def _value_R2(self, t, x):
+    def _value_R2(self, _, x):
         e_target = np.zeros(2)
         e_target[:] = self.target - x
 
@@ -202,7 +202,7 @@ class HTargetFB(Feedback):
         res = atan2(e_target[1], e_target[0])
         return np.array((np.cos(res), np.sin(res)))
 
-    def _value_S2(self, t, x):
+    def _value_S2(self, _, x):
         # Got to 3D cartesian assuming spherical earth
         lon, lat = x[0], x[1]
         # Vector normal to earth at position
