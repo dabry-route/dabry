@@ -63,31 +63,31 @@ class FixedHeadingFB(Feedback):
     control law steers perpendicular to the target direction
     """
 
-    def __init__(self, wind: FlowField, srf: float, initial_steering: float):
+    def __init__(self, ff: FlowField, srf: float, initial_steering: float):
         """
-        :param wind: Wind object
+        :param ff: Flow field object
         :param srf: Vehicle's speed relative to flow field
         """
-        self.wind = wind
+        self.ff = ff
         self.srf = srf
         self.theta_0 = initial_steering
 
     def value(self, t, x):
-        if self.wind.coords == Utils.COORD_CARTESIAN:
+        if self.ff.coords == Utils.COORD_CARTESIAN:
             e_theta_0 = np.array([np.cos(self.theta_0), np.sin(self.theta_0)])
         else:
             # coords gcs
             e_theta_0 = np.array([np.sin(self.theta_0), np.cos(self.theta_0)])
-        wind = self.wind.value(t, x)
-        wind_ortho = np.cross(e_theta_0, wind)
-        r = -wind_ortho / self.srf
+        ff = self.ff.value(t, x)
+        ff_ortho = np.cross(e_theta_0, ff)
+        r = -ff_ortho / self.srf
         if r > 1.:
             res = np.pi / 2.
         elif r < -1.:
             res = -np.pi / 2.
         else:
             res = np.arcsin(r)
-            if self.wind.coords == Utils.COORD_GCS:
+            if self.ff.coords == Utils.COORD_GCS:
                 res *= -1
         res += self.theta_0
         return np.array((np.cos(res), np.sin(res)))
@@ -96,11 +96,11 @@ class FixedHeadingFB(Feedback):
 class GreatCircleFB(Feedback):
     """
     Control law for GCS problems only.
-    Tries to stay on a great circle when wind allows it.
+    Tries to stay on a great circle when flow field allows it.
     """
 
-    def __init__(self, wind: FlowField, srf: float, target: ndarray):
-        self.wind = wind
+    def __init__(self, ff: FlowField, srf: float, target: ndarray):
+        self.ff = ff
         self.srf = srf
         self.lon_t, self.lat_t = target[0], target[1]
 
@@ -111,9 +111,9 @@ class GreatCircleFB(Feedback):
         u0 = np.arctan(1. / (np.cos(lat) * np.tan(lat_t) / np.sin(lon_t - lon) - np.sin(lat) / np.tan(lon_t - lon)))
 
         e_0 = np.array([np.sin(u0), np.cos(u0)])
-        wind = self.wind.value(t, x)
-        wind_ortho = np.cross(e_0, wind)
-        r = -wind_ortho / self.srf
+        ff = self.ff.value(t, x)
+        ff_ortho = np.cross(e_0, ff)
+        r = -ff_ortho / self.srf
         if r > 1.:
             res = np.pi / 2.
         elif r < -1.:
@@ -129,14 +129,14 @@ class GSTargetFB(Feedback):
     Control law trying to put ground speed vector towards a fixed target
     """
 
-    def __init__(self, wind: FlowField, srf: float, target: ndarray):
-        self.wind = wind
+    def __init__(self, ff: FlowField, srf: float, target: ndarray):
+        self.ff = ff
         self.srf = srf
         self.target = target.copy()
         self.zero_ceil = 1e-3
 
     def value(self, t, x):
-        if self.wind.coords == Utils.COORD_GCS:
+        if self.ff.coords == Utils.COORD_GCS:
             # Got to 3D cartesian assuming spherical earth
             lon, lat = x[0], x[1]
             X3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
@@ -157,9 +157,9 @@ class GSTargetFB(Feedback):
             return 0.
 
         e_target = e_target / np.linalg.norm(e_target)
-        wind = self.wind.value(t, x)
-        wind_ortho = np.cross(e_target, wind)
-        r = -wind_ortho / self.srf
+        ff = self.ff.value(t, x)
+        ff_ortho = np.cross(e_target, ff)
+        r = -ff_ortho / self.srf
         if r > 1.:
             res = np.pi / 2.
         elif r < -1.:
