@@ -50,15 +50,15 @@ class NavigationProblem:
                  aero: Optional[Aero] = None, penalty: Optional[Penalty] = None,
                  autoframe=True):
         self.model = Model.zermelo(ff)
-        self.x_init = x_init.copy()
-        self.x_target = x_target.copy()
+        self.x_init: ndarray = x_init.copy()
+        self.x_target: ndarray = x_target.copy()
         self.srf_max = srf_max
         # self.aero = LLAero(mode='dabry')
         self.aero = MermozAero() if aero is None else aero
 
         # Domain bounding box corners
-        self.bl = bl.copy() if bl is not None else None
-        self.tr = tr.copy() if tr is not None else None
+        self.bl: Optional[ndarray] = bl.copy() if bl is not None else None
+        self.tr: Optional[ndarray] = tr.copy() if tr is not None else None
 
         self.geod_l = Utils.distance(self.x_init, self.x_target, coords=self.coords)
 
@@ -78,9 +78,6 @@ class NavigationProblem:
                 w = 1.15 * self.geod_l
                 self.bl = (self.x_init + self.x_target) / 2. - np.array((w / 2., w / 2.))
                 self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
-        else:
-            self.bl = np.array(bl)
-            self.tr = np.array(tr)
         if self.coords == Utils.COORD_GCS:
             self._domain_obs = NavigationProblem.spherical_frame(bl, tr, offset_rel=0)
             self.domain = lambda x: np.all([obs.value(x) > 0. for obs in self._domain_obs])
@@ -110,8 +107,11 @@ class NavigationProblem:
 
         self.io = DDFmanager()
 
+    def update_ff(self, ff: FlowField):
+        self.model = Model.zermelo(ff)
+
     def save_ff(self):
-        self.io.dump_wind(self.model.ff, bl=self.bl, tr=self.tr)
+        self.io.dump_ff(self.model.ff, bl=self.bl, tr=self.tr)
 
     def save_info(self):
         pb_info = {
@@ -181,7 +181,7 @@ class NavigationProblem:
         fb = GSTargetFB(self.model.ff, self.srf_max, self.x_target)
         f = lambda x, t: self.model.dyn(t, x, fb.value(t, x))
         t_max = 2 * self.time_scale
-        res = scitg.odeint(f, self.x_init, np.linspace(0, t_max, 100))
+        # res = scitg.odeint(f, self.x_init, np.linspace(0, t_max, 100))
         # TODO continue implementation
         return -1
 
@@ -266,13 +266,13 @@ class NP3vor(NavigationProblem):
     def __init__(self):
         v_a = 14.11
 
-        f = 1e6
+        f = 1.
         fs = 15.46
 
         x_init = f * np.array([0., 0.])
         x_target = f * np.array([1., 0.])
 
-        bl = f * np.array([-2, -2])
+        bl = f * np.array([-1, -1])
         tr = f * np.array([2, 2])
 
         omega1 = f * np.array((0.5, 0.8))

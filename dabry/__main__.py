@@ -6,7 +6,7 @@ from datetime import datetime
 from dabry.ddf_manager import DDFmanager
 from dabry.misc import Utils, Chrono
 from dabry.problem import all_problems, NavigationProblem
-from dabry.solver_ef import SolverEF
+from dabry.solver_ef import SolverEFBase
 
 """
 __main__.py
@@ -78,7 +78,7 @@ if __name__ == '__main__':
         if args.airspeed is not None:
             pb.update_airspeed(float(args.airspeed))
         t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.srf
-        solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=1, mode=args.energy)
+        solver_ef = SolverEFBase(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=1, mode=args.energy)
         res = solver_ef.solve(verbose=2)
         pb.save_ff()
         extremals = solver_ef.get_trajs()
@@ -112,7 +112,7 @@ if __name__ == '__main__':
         chrono = Chrono()
 
         # Setting the extremal solver
-        solver_ef = solver = SolverEF(pb, pb.time_scale, max_steps=700, rel_nb_ceil=0.02, quick_solve=True)
+        solver_ef = solver = SolverEFBase(pb, pb.time_scale, max_steps=700, rel_nb_ceil=0.02, quick_solve=True)
 
         chrono.start('Solving problem using extremal field (EF)')
         res_ef = solver_ef.solve()

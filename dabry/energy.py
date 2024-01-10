@@ -3,7 +3,7 @@ import numpy as np
 from dabry.aero import Aero
 from dabry.misc import Chrono
 from dabry.problem import NavigationProblem
-from dabry.solver_ef import SolverEF, Pareto
+from dabry.solver_ef import SolverEFBase, Pareto
 
 
 class EnergyAnalysis:
@@ -50,7 +50,7 @@ class EnergyAnalysis:
             kwargs['max_time'] = self.pb.time_scale
         else:
             kwargs['dt'] = dt
-        solver = SolverEF(self.pb, **kwargs)
+        solver = SolverEFBase(self.pb, **kwargs)
         res_ef = solver.solve(verbose=2)
         chrono.stop()
         if ddf is not None:

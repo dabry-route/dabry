@@ -2,10 +2,10 @@ import os
 
 from dabry.misc import Utils, Chrono
 from dabry.problem import NPDoubleGyreLi
-from dabry.solver_ef import SolverEF
+from dabry.solver_ef import SolverEFBase
 
 if __name__ == '__main__':
-    # First set the path to the Dabry root
+    # First set the Dabry root path
     os.environ.setdefault('DABRYPATH', '/home/bastien/Documents/work/dabry')
     # Create the double gyre navigation problem
     pb = NPDoubleGyreLi()
@@ -16,7 +16,7 @@ if __name__ == '__main__':
 
     # Create the solver
     # Give it the navigation problem and a time scale
-    solver_ef = SolverEF(pb, max_time=pb.time_scale, dt=pb.time_scale / 100)
+    solver_ef = SolverEFBase(pb, max_time=pb.time_scale, dt=pb.time_scale / 100)
 
     chrono = Chrono()
     chrono.start('Solving problem using extremal field (EF)')

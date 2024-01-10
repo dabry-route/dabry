@@ -4,7 +4,7 @@ import sys
 
 from dabry.misc import Chrono
 from dabry.problem import all_problems
-from dabry.solver_ef import SolverEF
+from dabry.solver_ef import SolverEFBase
 from dabry.ddf_manager import DDFmanager
 
 
@@ -27,7 +27,7 @@ class Test:
                 pb.io.set_case(f'_test_{pb_id}')
                 pb.io.clean_output_dir()
             t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.srf
-            solver_ef = SolverEF(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=args.quicksolve)
+            solver_ef = SolverEFBase(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=args.quicksolve)
             res = solver_ef.solve(verbose=1 if args.multithreaded else 2)
             status = 0
             if output:

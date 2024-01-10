@@ -191,6 +191,13 @@ class DiscreteFF(FlowField):
             if self.grad_values is None:
                 self.compute_derivatives()
 
+        if values.ndim == 3:
+            self.value = self._value_steady
+            self.d_value = self._d_value_steady
+        else:
+            self.value = self._value_unsteady
+            self.d_value = self._d_value_unsteady
+
     @classmethod
     def from_h5(cls, filepath, **kwargs):
         """
@@ -224,9 +231,30 @@ class DiscreteFF(FlowField):
         return cls(values, bounds, coords, **kwargs)
 
     @classmethod
-    def from_ff(cls, ff: FlowField, grid_bounds, nx=100, ny=100, nt=50, **kwargs):
+    def from_ff(cls, ff: FlowField, grid_bounds: Union[tuple[ndarray], ndarray],
+                nx=100, ny=100, nt=50, **kwargs):
+        """
+        Create discrete flow field by sampling another flow field
+        :param ff: Flow field
+        :param grid_bounds: if tuple, must be (bl, tr) with bl the bottom left corner vector and tr
+        the top right corner vector. If array, must be a (2, 2) array with array[0] being min an max values
+        for first coordinate and array[1] the min and max values for second coordinate (this is the transpose of the
+        tuple version)
+        :param nx: First dimension discretization number
+        :param ny: Second dimension discretization number
+        :param nt: Time dimension discretization number
+        :param kwargs: Additional kwargs
+        :return: A DiscreteFF object
+        """
         t_start = ff.t_start
         t_end = ff.t_end
+        if isinstance(grid_bounds, tuple):
+            if len(grid_bounds) != 2:
+                raise ValueError('"grid_bounds" provided as a tuple must have two elements')
+            grid_bounds = np.array(grid_bounds).transpose()
+
+        if isinstance(grid_bounds, ndarray) and grid_bounds.shape != (2, 2):
+            raise ValueError('"grid_bounds" provided as an array must have shape (2, 2)')
 
         bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) +
                           (grid_bounds[0], grid_bounds[1]), axis=0)
@@ -390,6 +418,12 @@ class DiscreteFF(FlowField):
         :param x: Position
         :return: Interpolated flow field vector
         """
+        pass
+
+    def _value_steady(self, _, x: ndarray):
+        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, x)
+
+    def _value_unsteady(self, t, x):
         return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)))
 
     def d_value(self, t, x):
@@ -399,6 +433,13 @@ class DiscreteFF(FlowField):
         :param x: Position
         :return: Interpolated flow field jacobian at requested time and position
         """
+        pass
+
+    def _d_value_steady(self, _, x):
+        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, x,
+                                 ndim_values_data=2)
+
+    def _d_value_unsteady(self, t, x):
         return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)),
                                  ndim_values_data=2)
 

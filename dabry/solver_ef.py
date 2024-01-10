@@ -6,11 +6,13 @@ from typing import Optional
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.integrate as scitg
 from alphashape import alphashape
 from numpy import arcsin as asin, ndarray
 from numpy import arctan2 as atan2
 from numpy import sin, cos, pi
 from shapely.geometry import Point
+from tqdm import tqdm
 
 from dabry.feedback import MapFB
 from dabry.misc import Utils, Chrono, Debug
@@ -439,6 +441,22 @@ class ExtremalField(ABC):
         pass
 
 
+class Site:
+    def __init__(self, t_init: float, index_t: int, state: ndarray, costate: ndarray):
+        self.t_init = t_init
+        self.index_t = index_t
+        self.state = state.copy()
+        self.costate = costate.copy()
+        self.traj: Optional[ndarray] = None
+        self.id_check_right = 0
+
+    def assign_traj(self, traj: ndarray):
+        self.traj = traj
+
+    def traj_at_index(self, index: int):
+        return self.traj[index - self.index_t]
+
+
 class ExtremalField2D(ExtremalField):
 
     def __init__(self):
@@ -768,7 +786,146 @@ class CollisionBuffer:
         return res
 
 
-class SolverEF:
+class SolverEFBisection(ABC):
+    _ALL_MODES = ['time', 'energy']
+
+    def __init__(self, mp: NavigationProblem,
+                 total_duration: float,
+                 t_init: Optional[float] = None,
+                 mode: str = 'time',
+                 target_radius: Optional[float] = None,
+                 n_time: int = 100,
+                 n_costate_angle: int = 30,
+                 n_costate_norm: int = 10,
+                 costate_norm_bounds: tuple[float] = (0., 1.),
+                 max_depth: int = 10):
+        if mode not in self._ALL_MODES:
+            raise ValueError('Mode %s is not defined' % mode)
+        if mode == 'energy':
+            raise ValueError('Mode "energy" is not implemented yet')
+        self.mp = mp
+        self.total_duration = total_duration
+        self.t_init = t_init if t_init is not None else self.mp.model.ff.t_start
+        self.target_radius = target_radius if target_radius is not None else \
+            0.05 * np.linalg.norm(self.mp.tr - self.mp.bl)
+        self._target_radius_sq = self.target_radius ** 2
+        self.times = np.linspace(self.t_init, self.t_init + self.total_duration, n_time)
+        self.costate_norm_bounds = costate_norm_bounds
+        self.n_costate_angle = n_costate_angle
+        self.n_costate_norm = n_costate_norm
+        self.max_depth = max_depth
+        self.depth = 0
+        self.layers: Optional[list[tuple[float]]] = None
+        self.trajs: Optional[list[tuple[ndarray]]] = None
+        self._success = False
+        self._tested_layers: Optional[list] = None
+        self._id_group_optitraj: Optional[int] = None
+        self._id_optitraj: Optional[int] = None
+
+    def setup(self):
+        self.layers = []
+        self.trajs = []
+        self._tested_layers = []
+
+    def step(self):
+        angles = np.linspace(0., 2 * np.pi, 2 ** self.depth * self.n_costate_angle + 1)
+        if self.depth != 0:
+            angles = angles[1::2]
+        costate_init = np.stack((np.cos(angles), np.sin(angles)), -1)
+        trajs: list[ndarray] = []
+        for costate in tqdm(costate_init):
+            res = scitg.solve_ivp(self.dyn_augsys, (self.t_init, self.t_init + self.total_duration),
+                                  np.array(tuple(self.mp.x_init) + tuple(costate)), t_eval=self.times,
+                                  events=self.events_init())
+            trajs.append(res.y.transpose())
+        self.trajs.append(tuple(trajs))
+        self.layers.append(tuple(angles))
+        self.depth += 1
+
+    def dyn_augsys(self, t: float, y: ndarray):
+        state, adjoint = y[:2], y[2:4]
+        return np.hstack((-self.mp.srf_max * adjoint / np.linalg.norm(adjoint) + self.mp.model.ff.value(t, state),
+                          -self.mp.model.ff.d_value(t, state).transpose() @ adjoint))
+
+    @property
+    def success(self):
+        to_test = set(range(len(self.layers))).difference(set(self._tested_layers))
+        found = False
+        for trajgroup_id in to_test:
+            trajs = self.trajs[trajgroup_id]
+            for traj in trajs:
+                if np.any(np.sum(np.square(traj[:, :2] - self.mp.x_target), axis=1) - self._target_radius_sq < 0):
+                    found = True
+                    break
+            if found:
+                break
+        if found:
+            self._success = True
+            self._tested_layers = list(range(len(self.layers)))
+        return self._success
+
+    def events_init(self):
+        events = []
+        ex1, ex2 = np.array((1., 0.)), np.array((0., 1.))
+        events.append(lambda _, x: (x[:2] - self.mp.bl) @ (-ex1))
+        events.append(lambda _, x: (x[:2] - self.mp.bl) @ (-ex2))
+        events.append(lambda _, x: (x[:2] - self.mp.tr) @ ex1)
+        events.append(lambda _, x: (x[:2] - self.mp.tr) @ ex2)
+        events.append(lambda _, x: (x[:2] - self.mp.x_target) @ (x[:2] - self.mp.x_target) - self._target_radius_sq)
+        for event in events:
+            event.terminal = True
+        return events
+
+    @property
+    def n_time(self):
+        return self.times.shape[0]
+
+
+class SolverEFResampling(SolverEFBisection):
+
+    def __init__(self, *args, max_dist: Optional[float] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.max_dist = max_dist if max_dist is not None else self.target_radius
+        self._max_dist_sq = self.max_dist ** 2
+        self._sites: Optional[list[Site]] = None
+        self._to_shoot_sites: Optional[list[Site]] = None
+
+    def setup(self):
+        self.trajs = []
+        self._sites = []
+        self._to_shoot_sites = []
+
+    def step(self):
+        trajs: list[ndarray] = []
+        for site in self._to_shoot_sites:
+            res = scitg.solve_ivp(self.dyn_augsys, (site.t_init, self.t_init + self.total_duration),
+                                  np.array(tuple(site.state) + tuple(site.costate)),
+                                  t_eval=np.linspace(site.t_init, self.t_init + self.total_duration,
+                                                     self.times[site.index_t:]),
+                                  events=self.events_init())
+            traj = res.y.transpose()
+            trajs.append(traj)
+            site.assign_traj(traj)
+
+        self.trajs.append(tuple(trajs))
+        self.add_new_sites()
+        self.depth += 1
+
+    def add_new_sites(self):
+        for i_s, site in enumerate(self._sites):
+            site_nb = self._sites[i_s % len(self._sites)]
+            new_id_check_right = site.id_check_right
+            for i in range(site.id_check_right, self.n_time):
+                if np.sum(np.square(site.traj_at_index(i) - site_nb.traj_at_index(i))) > self._max_dist_sq:
+                    # TODO : continue here
+                    pass
+                else:
+                    new_id_check_right = i
+
+
+
+
+class SolverEFBase:
     """
     Solver for the navigation problem using progressive extremal field computation
     """
@@ -1316,8 +1473,8 @@ class SolverEF:
         """
 
         hello = f'{type(self.mp_primal).__name__}'
-        hello += f' | {"TIMEOPT" if self.mode == SolverEF.MODE_TIME else "ENEROPT"}'
-        if self.mode == SolverEF.MODE_TIME:
+        hello += f' | {"TIMEOPT" if self.mode == SolverEFBase.MODE_TIME else "ENEROPT"}'
+        if self.mode == SolverEFBase.MODE_TIME:
             hello += f' | {self.mp_primal.srf_max:.2f} m/s'
         hello += f' | {self.mp_primal.geod_l:.2e} m'
         nowind_time = self.mp_primal.geod_l / self.mp_primal.srf_max
@@ -1599,7 +1756,7 @@ class SolverEF:
 
 class Debugger:
 
-    def __init__(self, solver_ef: SolverEF):
+    def __init__(self, solver_ef: SolverEFBase):
         self.solver = solver_ef
         self.reg = Register()
 
