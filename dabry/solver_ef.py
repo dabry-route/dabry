@@ -1,7 +1,7 @@
 import csv
 import os
 from abc import ABC
-from typing import Optional
+from typing import Optional, Callable, Dict
 
 import h5py
 import matplotlib.pyplot as plt
@@ -442,19 +442,19 @@ class ExtremalField(ABC):
 
 
 class Site:
-    def __init__(self, t_init: float, index_t: int, state: ndarray, costate: ndarray):
+    def __init__(self, t_init: float, index_t: int, state_origin: ndarray, costate_origin: ndarray):
         self.t_init = t_init
         self.index_t = index_t
-        self.state = state.copy()
-        self.costate = costate.copy()
-        self.traj: Optional[ndarray] = None
-        self.id_check_right = 0
+        self.state_origin = state_origin.copy()
+        self.costate_origin = costate_origin.copy()
+        self.traj: Optional[Trajectory] = None
+        self.id_check_right = index_t
 
-    def assign_traj(self, traj: ndarray):
+    def assign_traj(self, traj: Trajectory):
         self.traj = traj
 
     def traj_at_index(self, index: int):
-        return self.traj[index - self.index_t]
+        return np.concatenate((self.traj.states[index - self.index_t], self.traj.costates[index - self.index_t]))
 
 
 class ExtremalField2D(ExtremalField):
@@ -807,24 +807,32 @@ class SolverEFBisection(ABC):
         self.total_duration = total_duration
         self.t_init = t_init if t_init is not None else self.mp.model.ff.t_start
         self.target_radius = target_radius if target_radius is not None else \
-            0.05 * np.linalg.norm(self.mp.tr - self.mp.bl)
+            0.025 * np.linalg.norm(self.mp.tr - self.mp.bl)
         self._target_radius_sq = self.target_radius ** 2
-        self.times = np.linspace(self.t_init, self.t_init + self.total_duration, n_time)
+        self.times = np.linspace(self.t_init, self.t_upper_bound, n_time)
         self.costate_norm_bounds = costate_norm_bounds
         self.n_costate_angle = n_costate_angle
         self.n_costate_norm = n_costate_norm
         self.max_depth = max_depth
         self.depth = 0
-        self.layers: Optional[list[tuple[float]]] = None
-        self.trajs: Optional[list[tuple[ndarray]]] = None
-        self._success = False
-        self._tested_layers: Optional[list] = None
-        self._id_group_optitraj: Optional[int] = None
-        self._id_optitraj: Optional[int] = None
+        self.success = False
+        self.layers: list[tuple[float]] = []
+        self.traj_groups: list[tuple[Trajectory]] = []
+        self._tested_layers: list = []
+        self._id_group_optitraj: int = 0
+        self._id_optitraj: int = 0
+        self.events = {
+            'x1_min': self._event_x1_min,
+            'x2_min': self._event_x2_min,
+            'x1_max': self._event_x1_max,
+            'x2_max': self._event_x2_max,
+            'target': self._event_target
+        }
+        self._events = list(self.events.values())
 
     def setup(self):
         self.layers = []
-        self.trajs = []
+        self.traj_groups = []
         self._tested_layers = []
 
     def step(self):
@@ -832,49 +840,61 @@ class SolverEFBisection(ABC):
         if self.depth != 0:
             angles = angles[1::2]
         costate_init = np.stack((np.cos(angles), np.sin(angles)), -1)
-        trajs: list[ndarray] = []
+        trajs: list[Trajectory] = []
         for costate in tqdm(costate_init):
-            res = scitg.solve_ivp(self.dyn_augsys, (self.t_init, self.t_init + self.total_duration),
-                                  np.array(tuple(self.mp.x_init) + tuple(costate)), t_eval=self.times,
-                                  events=self.events_init())
-            trajs.append(res.y.transpose())
-        self.trajs.append(tuple(trajs))
+            t_eval = self.times
+            res = scitg.solve_ivp(self.dyn_augsys, (self.t_init, self.t_upper_bound),
+                                  np.array(tuple(self.mp.x_init) + tuple(costate)), t_eval=t_eval,
+                                  events=self._event)
+            traj = Trajectory.cartesian(t_eval, res.y.transpose()[:2], costates=res.y.transpose()[2:],
+                                        events=self.t_events_to_dict(res.t_events))
+            if traj.events['target'].shape[0] > 0:
+                self.success = True
+            trajs.append(traj)
+        self.traj_groups.append(tuple(trajs))
         self.layers.append(tuple(angles))
         self.depth += 1
+
+    @property
+    def t_upper_bound(self):
+        return self.t_init + self.total_duration
 
     def dyn_augsys(self, t: float, y: ndarray):
         state, adjoint = y[:2], y[2:4]
         return np.hstack((-self.mp.srf_max * adjoint / np.linalg.norm(adjoint) + self.mp.model.ff.value(t, state),
                           -self.mp.model.ff.d_value(t, state).transpose() @ adjoint))
 
-    @property
-    def success(self):
-        to_test = set(range(len(self.layers))).difference(set(self._tested_layers))
-        found = False
-        for trajgroup_id in to_test:
-            trajs = self.trajs[trajgroup_id]
-            for traj in trajs:
-                if np.any(np.sum(np.square(traj[:, :2] - self.mp.x_target), axis=1) - self._target_radius_sq < 0):
-                    found = True
-                    break
-            if found:
-                break
-        if found:
-            self._success = True
-            self._tested_layers = list(range(len(self.layers)))
-        return self._success
+    @staticmethod
+    def terminal(func):
+        func.terminal = True
+        func.direction = 1.
+        return func
 
-    def events_init(self):
-        events = []
-        ex1, ex2 = np.array((1., 0.)), np.array((0., 1.))
-        events.append(lambda _, x: (x[:2] - self.mp.bl) @ (-ex1))
-        events.append(lambda _, x: (x[:2] - self.mp.bl) @ (-ex2))
-        events.append(lambda _, x: (x[:2] - self.mp.tr) @ ex1)
-        events.append(lambda _, x: (x[:2] - self.mp.tr) @ ex2)
-        events.append(lambda _, x: (x[:2] - self.mp.x_target) @ (x[:2] - self.mp.x_target) - self._target_radius_sq)
-        for event in events:
-            event.terminal = True
-        return events
+    @terminal
+    def _event_x1_min(self, _, x):
+        return (x[:2] - self.mp.bl) @ np.array((-1., 0.))
+
+    @terminal
+    def _event_x2_min(self, _, x):
+        return (x[:2] - self.mp.bl) @ np.array((0., -1.))
+
+    @terminal
+    def _event_x1_max(self, _, x):
+        return (x[:2] - self.mp.tr) @ np.array((1., 0.))
+
+    @terminal
+    def _event_x2_max(self, _, x):
+        return (x[:2] - self.mp.tr) @ np.array((0., 1.))
+
+    @terminal
+    def _event_target(self, _, x):
+        return np.sum(np.square(x[:2] - self.mp.x_target)) - self._target_radius_sq
+
+    def t_events_to_dict(self, t_events: list[ndarray]):
+        d = {}
+        for i, name in enumerate(self.events.keys()):
+            d[name] = t_events[i]
+        return d
 
     @property
     def n_time(self):
@@ -887,42 +907,60 @@ class SolverEFResampling(SolverEFBisection):
         super().__init__(*args, **kwargs)
         self.max_dist = max_dist if max_dist is not None else self.target_radius
         self._max_dist_sq = self.max_dist ** 2
-        self._sites: Optional[list[Site]] = None
-        self._to_shoot_sites: Optional[list[Site]] = None
+        self._sites: list[Site] = []
+        self._to_shoot_sites: list[Site] = []
+        self._solution_sites: list[Site] = []
 
     def setup(self):
-        self.trajs = []
-        self._sites = []
-        self._to_shoot_sites = []
+        super().setup()
+        self._to_shoot_sites = [Site(self.t_init, 0, self.mp.x_init, np.array((np.cos(theta), np.sin(theta))))
+                                for theta in np.linspace(0, 2 * np.pi, self.n_costate_angle, endpoint=False)]
+        self._sites = [site for site in self._to_shoot_sites]
 
     def step(self):
-        trajs: list[ndarray] = []
-        for site in self._to_shoot_sites:
-            res = scitg.solve_ivp(self.dyn_augsys, (site.t_init, self.t_init + self.total_duration),
-                                  np.array(tuple(site.state) + tuple(site.costate)),
-                                  t_eval=np.linspace(site.t_init, self.t_init + self.total_duration,
-                                                     self.times[site.index_t:]),
-                                  events=self.events_init())
-            traj = res.y.transpose()
+        trajs: list[Trajectory] = []
+        for site in tqdm(self._to_shoot_sites):
+            t_eval = np.linspace(site.t_init, self.t_upper_bound, self.n_time - site.index_t)
+            if t_eval.shape[0] <= 1:
+                continue
+            res = scitg.solve_ivp(self.dyn_augsys, (site.t_init, self.t_upper_bound),
+                                  np.array(tuple(site.state_origin) + tuple(site.costate_origin)),
+                                  t_eval=t_eval,
+                                  events=self._events, max_step=1e-2)
+            traj = Trajectory.cartesian(t_eval, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
+                                        events=self.t_events_to_dict(res.t_events))
+            if traj.events['target'].shape[0] > 0:
+                self.success = True
+                self._solution_sites.append(site)
             trajs.append(traj)
             site.assign_traj(traj)
-
-        self.trajs.append(tuple(trajs))
+        self._to_shoot_sites = []
+        self.traj_groups.append(tuple(trajs))
         self.add_new_sites()
         self.depth += 1
 
     def add_new_sites(self):
-        for i_s, site in enumerate(self._sites):
-            site_nb = self._sites[i_s % len(self._sites)]
+        prev_sites = [site for site in self._sites]
+        for i_s, site in enumerate(prev_sites):
+            site_nb = prev_sites[(i_s + 1) % len(prev_sites)]
             new_id_check_right = site.id_check_right
-            for i in range(site.id_check_right, self.n_time):
-                if np.sum(np.square(site.traj_at_index(i) - site_nb.traj_at_index(i))) > self._max_dist_sq:
-                    # TODO : continue here
-                    pass
-                else:
+            new_site: Optional[Site] = None
+            for i in range(site.id_check_right, self.n_time - 1):
+                try:
+                    augstate = site.traj_at_index(i)
+                    augstate_nb = site_nb.traj_at_index(i)
                     new_id_check_right = i
-
-
+                    if np.sum(np.square((augstate - augstate_nb)[:2])) > self._max_dist_sq:
+                        new_site = Site(self.times[i], i, 0.5 * (augstate[:2] + augstate_nb[:2]),
+                                        0.5 * (augstate[2:] + augstate_nb[2:]))
+                        break
+                except IndexError:
+                    continue
+            site.id_check_right = new_id_check_right
+            i_site = self._sites.index(site)
+            if new_site is not None:
+                self._sites = self._sites[:i_site + 1] + [new_site] + self._sites[i_site + 1:]
+                self._to_shoot_sites.append(new_site)
 
 
 class SolverEFBase:

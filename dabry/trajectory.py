@@ -1,6 +1,5 @@
-from typing import Optional
+from typing import Optional, Dict
 
-import numpy as np
 from numpy import ndarray
 
 from dabry.misc import Utils
@@ -39,14 +38,17 @@ class Trajectory:
                  controls: Optional[ndarray] = None,
                  costates: Optional[ndarray] = None,
                  cost: Optional[ndarray] = None,
+                 events: Optional[Dict[str, ndarray]] = None,
                  info_dict: Optional[dict] = None):
         """
         :param times: Time stamps shape (n,)
         :param states: States (n, 2)
+        :param coords: Type of coordinates : 'cartesian or 'gcs'
         :param controls: Controls (n-1, 2)
         :param costates: Costates (n, 2)
         :param cost: Instantaneous cost (n-1,)
-        :param coords: Type of coordinates : 'cartesian or 'gcs'
+        :param events: Dictionary of event time stamps following scipy's solve_ivp behavior
+        :param info_dict: Additional information for the trajectory
         """
         self.times = times.copy()
         self.states = states.copy()
@@ -54,5 +56,31 @@ class Trajectory:
         self.costates = costates.copy() if costates is not None else None
         self.cost = cost.copy() if cost is not None else None
 
+        self.events = events
+
         self.coords = coords
         self.info_dict = info_dict
+
+    @classmethod
+    def cartesian(cls,
+                  times: ndarray,
+                  states: ndarray,
+                  controls: Optional[ndarray] = None,
+                  costates: Optional[ndarray] = None,
+                  cost: Optional[ndarray] = None,
+                  events: Optional[Dict[str, ndarray]] = None,
+                  info_dict: Optional[dict] = None):
+        return cls(times, states, Utils.COORD_CARTESIAN,
+                   controls=controls, costates=costates, cost=cost, events=events, info_dict=info_dict)
+
+    @classmethod
+    def gcs(cls,
+            times: ndarray,
+            states: ndarray,
+            controls: Optional[ndarray] = None,
+            costates: Optional[ndarray] = None,
+            cost: Optional[ndarray] = None,
+            events: Optional[Dict[str, ndarray]] = None,
+            info_dict: Optional[dict] = None):
+        return cls(times, states, Utils.COORD_GCS,
+                   controls=controls, costates=costates, cost=cost, events=events, info_dict=info_dict)

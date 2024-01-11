@@ -314,7 +314,7 @@ class NPLinear(NavigationProblem):
     def __init__(self):
         v_a = 23.
 
-        f = 1e6
+        f = 1.# 1e6
         x_init = f * np.array([0., 0.])
         x_target = f * np.array([1., 0.])
 
