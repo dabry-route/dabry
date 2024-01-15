@@ -5,19 +5,19 @@ from datetime import datetime
 from typing import Optional, List
 
 import numpy as np
-import scipy.integrate as scitg
 from numpy import ndarray, pi
 
 from dabry.aero import MermozAero, Aero
 from dabry.ddf_manager import DDFmanager
 from dabry.feedback import GSTargetFB
-from dabry.misc import Utils
-from dabry.model import Model
-from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, Obstacle, MeanObs, LSEMaxiObs
-from dabry.penalty import Penalty
 from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, LinearFF, RadialGaussFF, DoubleGyreFF, \
     PointSymFF, LCFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
-    FlowField
+    FlowField, VortexFF, ZeroFF
+from dabry.misc import Utils
+from dabry.model import Model
+from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, Obstacle, MeanObs, LSEMaxiObs, \
+    EightFrameObs
+from dabry.penalty import Penalty, CirclePenalty, NullPenalty
 
 """
 problem.py
@@ -42,6 +42,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 class NavigationProblem:
+    PB_STANDARD = {
+        "three_vortices": "3vor"
+    }
 
     def __init__(self, ff: FlowField, x_init: ndarray, x_target: ndarray, srf_max: float,
                  obstacles: Optional[List[Obstacle]] = None,
@@ -90,12 +93,9 @@ class NavigationProblem:
             self.l_ref = self.geod_l
 
         self.obstacles = obstacles if obstacles is not None else []
-        if len(self.obstacles) > 0:
-            for obs in self.obstacles:
-                obs.update_lref(self.l_ref)
 
         if penalty is None:
-            self.penalty = Penalty(lambda _, __: 0., lambda _, __: np.array((0, 0)))
+            self.penalty = NullPenalty()
         else:
             self.penalty = penalty
 
@@ -103,7 +103,7 @@ class NavigationProblem:
         if autoframe:
             bl_frame = self.bl + (self.tr - self.bl) * self.frame_offset / 2.
             tr_frame = self.tr - (self.tr - self.bl) * self.frame_offset / 2.
-            self.obstacles.append(FrameObs(bl_frame, tr_frame))
+            self.obstacles.append(EightFrameObs(bl_frame, tr_frame))
 
         self.io = DDFmanager()
 
@@ -185,7 +185,6 @@ class NavigationProblem:
         # TODO continue implementation
         return -1
 
-
     # TODO: reimplement this
     def htarget(self):
         # fb = HTargetFB(self.x_target, self.coords)
@@ -227,7 +226,7 @@ class NavigationProblem:
         tr = Utils.DEG_TO_RAD * np.array((tr_lon, tr_lat))
         grid_bounds = np.array((bl, tr)).transpose()
         ff = DiscreteFF.from_cds(grid_bounds, t_start, t_end, resolution=resolution,
-                                   pressure_level=pressure_level, data_path=data_path)
+                                 pressure_level=pressure_level, data_path=data_path)
 
         if obstacles is None:
             obstacles = []
@@ -261,60 +260,35 @@ class NavigationProblem:
         obstacles.append(ParallelObs(80 * Utils.DEG_TO_RAD, False))
         return obstacles
 
+    @classmethod
+    def standard(cls, name: str = "", s_name: str = ""):
+        """
+        Creates a NavigationProblem from standard problem list
+        :param name: Full name as a string
+        :param s_name: Short name as a string
+        :return: Corresponding NavigationProblem
+        """
+        if name == "three_vortices" or s_name == cls.PB_STANDARD["three_vortices"]:
+            srf = 1.
 
-class NP3vor(NavigationProblem):
-    def __init__(self):
-        v_a = 14.11
+            x_init = np.array([0., 0.])
+            x_target = np.array([1., 0.])
 
-        f = 1.
-        fs = 15.46
+            bl = np.array([-1, -1])
+            tr = np.array([2, 2])
 
-        x_init = f * np.array([0., 0.])
-        x_target = f * np.array([1., 0.])
+            ff = sum([VortexFF(np.array((0.5, 0.8)), -1.),
+                      VortexFF(np.array((0.8, 0.2)), -0.8),
+                      VortexFF(np.array((0.6, -0.5)), 0.8)], ZeroFF())
 
-        bl = f * np.array([-1, -1])
-        tr = f * np.array([2, 2])
-
-        omega1 = f * np.array((0.5, 0.8))
-        omega2 = f * np.array((0.8, 0.2))
-        omega3 = f * np.array((0.6, -0.5))
-
-        # import csv
-        # with open('/dabry/.seeds/problem0/center1.csv', 'r') as file:
-        #     reader = csv.reader(file)
-        #     for k, row in enumerate(reader):
-        #         if k == seed:
-        #             omega1 = f * np.array(list(map(float, row)))
-        #             break
-        # with open('/dabry/.seeds/problem0/center2.csv', 'r') as file:
-        #     reader = csv.reader(file)
-        #     for k, row in enumerate(reader):
-        #         if k == seed:
-        #             omega2 = f * np.array(list(map(float, row)))
-        #             break
-        # with open('/dabry/.seeds/problem0/center3.csv', 'r') as file:
-        #     reader = csv.reader(file)
-        #     for k, row in enumerate(reader):
-        #         if k == seed:
-        #             omega3 = f * np.array(list(map(float, row)))
-        #             break
-
-        vortex1 = RankineVortexFF(omega1, f * fs * -1., f * 1e-1)
-        vortex2 = RankineVortexFF(omega2, f * fs * -0.8, f * 1e-1)
-        vortex3 = RankineVortexFF(omega3, f * fs * 0.8, f * 1e-1)
-        const_wind = UniformFF(np.array([0., 0.]))
-
-        ff = LCFF(np.array((3., 1., 1., 1.)),
-                    (const_wind, vortex1, vortex2, vortex3))
-
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, obstacles=[CircleObs(np.array((0.5, 0.8)), 0.2)])
 
 
 class NPLinear(NavigationProblem):
     def __init__(self):
-        v_a = 23.
+        v_a = 1.
 
-        f = 1.# 1e6
+        f = 1.  # 1e6
         x_init = f * np.array([0., 0.])
         x_target = f * np.array([1., 0.])
 
@@ -364,8 +338,8 @@ class NPDoubleGyreKularatne(NavigationProblem):
 
 class NPPointSymTechy(NavigationProblem):
     def __init__(self):
-        v_a = 18.
-        sf = 1e6
+        v_a = 1.  # 18.
+        sf = 1.  # 1e6
         x_init = sf * np.array((0., 0.))
         x_target = sf * np.array((1., 0.))
         bl = sf * np.array((-0.1, -1.))
@@ -381,23 +355,23 @@ class NPPointSymTechy(NavigationProblem):
 
 class NP3obs(NavigationProblem):
     def __init__(self):
-        v_a = 23.
-        sf = 3e6
+        v_a = 1.  # 23.
+        sf = 1.  # 3e6
 
         x_init = sf * np.array((0., 0.))
         x_target = sf * np.array((1., 0.))
-        bl = sf * np.array((-0.15, -1.15))
-        tr = sf * np.array((1.15, 1.15))
+        bl = sf * np.array((-0.15, -0.65))
+        tr = sf * np.array((1.15, 0.65))
 
-        const_wind = UniformFF(np.array([1., 1.]))
+        const_wind = UniformFF(np.array([.1, .1]))
 
         c1 = sf * np.array((0.5, 0.))
         c2 = sf * np.array((0.5, 0.1))
         c3 = sf * np.array((0.5, -0.1))
 
-        wind_obstacle1 = RadialGaussFF(c1[0], c1[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
-        wind_obstacle2 = RadialGaussFF(c2[0], c2[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
-        wind_obstacle3 = RadialGaussFF(c3[0], c3[1], sf * 0.1, 1 / 2 * 0.2, v_a * 5.)
+        wind_obstacle1 = RadialGaussFF(c1, sf * 0.1, 0.5 * 0.2, v_a * 5.)
+        wind_obstacle2 = RadialGaussFF(c2, sf * 0.1, 0.5 * 0.2, v_a * 5.)
+        wind_obstacle3 = RadialGaussFF(c3, sf * 0.1, 0.5 * 0.2, v_a * 5.)
 
         ff = wind_obstacle1 + wind_obstacle2 + wind_obstacle3 + const_wind
 
@@ -408,7 +382,7 @@ class NPSanjuanDublinOrtho(NavigationProblem):
     def __init__(self):
         v_a = 23.
         ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
-                                               'data_demo/ncdc/san-juan-dublin-flattened-ortho.mz/wind.h5'))
+                                             'data_demo/ncdc/san-juan-dublin-flattened-ortho.mz/wind.h5'))
 
         # point = np.array([-66.116666, 18.465299])
         # x_init = np.array(proj(*point)) + 500e3 * np.ones(2)
@@ -474,9 +448,9 @@ class NP4vor(NavigationProblem):
 
 class NPMovor(NavigationProblem):
     def __init__(self):
-        v_a = 23.
+        v_a = 1.  # 23.
 
-        f = 1e6
+        f = 1.  # 1e6
         fs = v_a
 
         x_init = f * np.array([0., 0.])
@@ -551,7 +525,7 @@ class NPMovors(NavigationProblem):
 
         obstacles = []
         # obstacles.append(RadialGaussFF(f * 0.5, f * 0.15, f * 0.1, 1 / 2 * 0.2, 10*v_a))
-        winds = [UniformFF(np.array((-5., 0.)))] + vortices + obstacles
+        winds: list[FlowField] = [UniformFF(np.array((-5., 0.)))] + vortices + obstacles
         # const_wind = UniformFF(np.array([0., 5.]))
         N = len(winds) - len(obstacles)
         M = len(obstacles)
@@ -616,7 +590,7 @@ class NPSanjuanDublinOrthoTV(NavigationProblem):
         bl = np.array((-2.3e6, -1.5e6))
         tr = np.array((2e6, 2e6))
         ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
-                                               'data_demo/ncdc/san-juan-dublin-flattened-ortho-tv.mz/wind.h5'))
+                                             'data_demo/ncdc/san-juan-dublin-flattened-ortho-tv.mz/wind.h5'))
 
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr, autoframe=True)
 
@@ -656,7 +630,7 @@ class NPDakarNatalConstr(NavigationProblem):
         x_init = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
         x_target = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
         ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
-                                               'data_demo/ncdc/44W_16S_9W_25N_20210929_00/wind.h5'))
+                                             'data_demo/ncdc/44W_16S_9W_25N_20210929_00/wind.h5'))
         obstacles = [LSEMaxiObs([
             GreatCircleObs(Utils.DEG_TO_RAD * np.array((-17, 10)),
                            Utils.DEG_TO_RAD * np.array((-30, 15))),
@@ -668,8 +642,17 @@ class NPDakarNatalConstr(NavigationProblem):
         super().__init__(ff, x_init, x_target, v_a, obstacles=obstacles)
 
 
-all_problems = {'3vor': (NP3vor, 'Three vortices'),
-                'linear': (NPLinear, 'Linear wind'),
+class NPPenalty(NavigationProblem):
+    def __init__(self):
+        ff = ZeroFF()
+        x_init = np.zeros(2)
+        x_target = np.array((1., 0.))
+        srf = 1.
+        penalty = CirclePenalty(np.array((0.5, 0.)), 0.2, 100.)
+        super().__init__(ff, x_init, x_target, srf, penalty=penalty)
+
+
+all_problems = {'linear': (NPLinear, 'Linear wind'),
                 'double-gyre-li2020': (NPDoubleGyreLi, 'Double gyre Li 2020'),
                 'double-gyre-ku2016': (NPDoubleGyreKularatne, 'Double gyre Kularatne 2016'),
                 'pointsym-techy2011': (NPPointSymTechy, 'Point symmetric Techy 2011'),

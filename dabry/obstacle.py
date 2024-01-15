@@ -1,8 +1,10 @@
-from abc import ABC
+from abc import ABC, abstractmethod
+from typing import Union
 
 import numpy as np
+from numpy import ndarray
 
-from dabry.misc import Utils
+from dabry.misc import Utils, terminal
 
 """
 obstacle.py
@@ -29,45 +31,36 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 class Obstacle(ABC):
 
-    def __init__(self, value_func, ref_point, d_value_func=None, l_ref=None):
-        self.value = value_func
-        # Reference point within obstacle to compute cycle around the obstacle
-        self.ref_point = np.zeros(ref_point.shape)
-        self.ref_point[:] = ref_point
-        # Analytical gradient
-        self._d_value = d_value_func
-        # Reference length for finite differencing
-        self.l_ref = 1 if l_ref is None else l_ref
-        self.eps = self.l_ref * 1e-5
+    def __init__(self):
+        pass
 
-    def value(self, x):
+    @terminal
+    def event(self, _: float, x: ndarray):
+        return self.value(x)
+
+    @abstractmethod
+    def value(self, x: ndarray):
         """
-        Return a negative value if within obstacle, positive if outside and null at the border
+        Return a negative value if within obstacle, positive if outside and zero at the border
         :param x: Position at which to get value (1D numpy array)
         :return: Obstacle function value
         """
         pass
 
-    def d_value(self, x):
+    def d_value(self, x: ndarray) -> ndarray:
         """
         Derivative of obstacle value function
         :param x: Position at which to get derivative (1D numpy array)
         :return: Gradient of obstacle function at point
         """
-        if self._d_value is not None:
-            return self._d_value(x)
-        else:
-            # Finite differencing, centered scheme
-            n = x.shape[0]
-            emat = np.diag(n * (self.eps,))
-            grad = np.zeros(n)
-            for i in range(n):
-                grad[i] = (self.value(x + emat[i]) - self.value(x - emat[i])) / (2 * self.eps)
-            return grad
-
-    def update_lref(self, l_ref):
-        self.l_ref = l_ref
-        self.eps = l_ref * 1e-5
+        # Finite differencing, centered scheme
+        eps = 1e-8
+        n = x.shape[0]
+        emat = np.diag(n * (eps,))
+        grad = np.zeros(n)
+        for i in range(n):
+            grad[i] = (self.value(x + emat[i]) - self.value(x - emat[i])) / (2 * eps)
+        return grad
 
 
 class CircleObs(Obstacle):
@@ -75,18 +68,33 @@ class CircleObs(Obstacle):
     Circle obstacle defined by center and radius
     """
 
-    def __init__(self, center, radius):
+    def __init__(self, center: Union[ndarray, tuple[float]], radius: float):
         self.center = np.zeros(center.shape)
-        self.center[:] = center
+        self.center = center.copy() if isinstance(center, ndarray) else np.array(center)
         self.radius = radius
         self._sqradius = radius ** 2
-        super().__init__(self.value, self.center, self.d_value)
+        super().__init__()
 
-    def value(self, x):
-        return (x[0] - self.center[0]) ** 2 + (x[1] - self.center[1]) ** 2 - self._sqradius
+    def value(self, x: ndarray):
+        return 0.5 * (np.sum(np.square(x[:2] - self.center)) - self._sqradius)
 
-    def d_value(self, x):
+    def d_value(self, x: ndarray) -> ndarray:
         return x - self.center
+
+
+class EightFrameObs(Obstacle):
+    def __init__(self, bl: ndarray, tr: ndarray):
+        self.bl = bl.copy()
+        self.tr = tr.copy()
+        self.center = 0.5 * (self.bl + self.tr)
+        self.scaler = np.diag(2 / (self.tr - self.bl))
+        super().__init__()
+
+    def value(self, x: ndarray):
+        return (1 / 8) * (1. - np.sum(np.power(self.scaler @ (x[:2] - self.center), 8)))
+
+    def d_value(self, x: ndarray) -> ndarray:
+        return np.power(self.scaler @ (x[:2] - self.center), 7)
 
 
 class FrameObs(Obstacle):
@@ -101,7 +109,7 @@ class FrameObs(Obstacle):
         self.tr[:] = tr
         self.center = 0.5 * (bl + tr)
         self.factor = np.diag((1 / (self.tr[0] - self.bl[0]), 1 / (self.tr[1] - self.bl[1])))
-        super().__init__(self.value, self.center, self.d_value)
+        super().__init__()
 
     def value(self, x):
         return min(x[0] - self.bl[0], self.tr[0] - x[0], x[1] - self.bl[1], self.tr[1] - x[1])

@@ -1,5 +1,8 @@
+from abc import abstractmethod
+
 import h5py
 import numpy as np
+from numpy import ndarray
 from scipy.interpolate import RegularGridInterpolator
 
 """
@@ -26,39 +29,48 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 class Penalty:
 
-    def __init__(self, value_func, d_value_func=None, length_scale=None):
-        self._dx = 1e-10 * length_scale if length_scale is not None else 1e-10
-        self.value = value_func
-        if d_value_func is not None:
-            self.d_value = d_value_func
+    def __init__(self, length_scale=None):
+        self._dx = 1e-8 * length_scale if length_scale is not None else 1e-8
 
+    @abstractmethod
     def value(self, t, x):
         pass
 
     def d_value(self, t, x):
         # Finite differencing by default
         dx = self._dx
-        a1 = 1 / (2 * dx) * (self.value(t, x + dx * np.array((1, 0))) - self.value(t ,x - dx * np.array((1, 0))))
+        a1 = 1 / (2 * dx) * (self.value(t, x + dx * np.array((1, 0))) - self.value(t, x - dx * np.array((1, 0))))
         a2 = 1 / (2 * dx) * (self.value(t, x + dx * np.array((0, 1))) - self.value(t, x - dx * np.array((0, 1))))
         return np.hstack((a1, a2))
+
+class NullPenalty(Penalty):
+
+    def __init__(self):
+        super(NullPenalty, self).__init__()
+
+    def value(self, t, x):
+        return 0.
+
+    def d_value(self, t, x):
+        return np.array((0., 0.))
 
 
 class CirclePenalty(Penalty):
 
-    def __init__(self, x_center, radius, amplitude):
-        super().__init__(self.value)
-        self.x_center = np.array(x_center)
+    def __init__(self, center: ndarray, radius: float, amplitude: float):
+        super().__init__()
+        self.center = center.copy()
         self.radius = radius
         self.amplitude = amplitude
 
     def value(self, t, x):
-        return np.max((self.amplitude * 0.5 * (self.radius ** 2 - (x - self.x_center) @ (x - self.x_center)), 0.))
+        return np.max((self.amplitude * 0.5 * (self.radius ** 2 - np.sum(np.square(x - self.center))), 0.))
 
 
 class DiscretePenalty(Penalty):
 
     def __init__(self, *args):
-        super().__init__(self.value)
+        super().__init__()
         self.data = None
         self.ts = None
         self.grid = None

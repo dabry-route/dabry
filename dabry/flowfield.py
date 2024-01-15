@@ -66,13 +66,13 @@ class FlowField(ABC):
             return self._lch.value(t, x) - self._rch.value(t, x)
         if self._op == '*':
             if isinstance(self._lch, float):
-                return self._lch + self._rch.value(t, x)
+                return self._lch * self._rch.value(t, x)
             if isinstance(self._rch, float):
-                return self._lch.value(t, x) + self._rch
+                return self._lch.value(t, x) * self._rch
             raise Exception('Only scaling by float implemented for flow fields')
 
     def d_value(self, t, x):
-        if self._lch is None:
+        if self._lch is None or self._rch is None:
             return self._d_value(t, x)
         if self._op == '+':
             return self._lch.d_value(t, x) + self._rch.d_value(t, x)
@@ -80,9 +80,9 @@ class FlowField(ABC):
             return self._lch.d_value(t, x) - self._rch.d_value(t, x)
         if self._op == '*':
             if isinstance(self._lch, float):
-                return self._lch + self._rch.d_value(t, x)
+                return self._lch * self._rch.d_value(t, x)
             if isinstance(self._rch, float):
-                return self._lch.d_value(t, x) + self._rch
+                return self._lch.d_value(t, x) * self._rch
             raise Exception('Only scaling by float implemented for flow fields')
 
     def _value(self, t, x):
@@ -313,7 +313,7 @@ class DiscreteFF(FlowField):
         wind_stop_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
         dates = [wind_start_date, wind_stop_date]
         for k, (t_bound, wind_date_bound, op) in enumerate(zip((t_start, t_end), (wind_start_date, wind_stop_date),
-                                                            ('<', '>'))):
+                                                               ('<', '>'))):
             adj = "lower" if op == "<" else "upper"
             if t_bound is None:
                 print(f'[CDS wind] Using wind time {adj} bound {wind_date_bound}')
@@ -528,7 +528,7 @@ class UniformFF(FlowField):
         :param ff_val: Direction and strength of flow field
         """
         super().__init__()
-        self.ff_val = np.array(ff_val)
+        self.ff_val = ff_val.copy()
 
     def _value(self, t, x):
         return self.ff_val
@@ -538,46 +538,48 @@ class UniformFF(FlowField):
                          [0., 0.]])
 
 
+class ZeroFF(UniformFF):
+    def __init__(self):
+        super(ZeroFF, self).__init__(np.zeros(2))
+
+
 class VortexFF(FlowField):
 
     def __init__(self,
-                 x_omega: float,
-                 y_omega: float,
-                 gamma: float):
+                 center: ndarray,
+                 circulation: float):
         """
         A vortex from potential flow theory.
-        :param x_omega: x_coordinate of vortex center
-        :param y_omega: y_coordinate of vortex center
-        :param gamma: Circulation of the vortex. Positive is ccw vortex.
+        :param center: 2D vector of center coordinates
+        :param circulation: Circulation of the vortex. Positive is ccw vortex.
         """
         super().__init__()
-        self.x_omega = x_omega
-        self.y_omega = y_omega
-        self.omega = np.array([x_omega, y_omega])
-        self.gamma = gamma
+        self.center = center
+        self.circulation = circulation
 
     def value(self, t, x):
-        r = np.linalg.norm(x - self.omega)
-        e_theta = np.array([-(x - self.omega)[1] / r,
-                            (x - self.omega)[0] / r])
-        return self.gamma / (2 * np.pi * r) * e_theta
+        r = np.linalg.norm(x - self.center)
+        e_theta = np.array([-(x - self.center)[1] / r,
+                            (x - self.center)[0] / r])
+        return self.circulation / (2 * np.pi * r) * e_theta
 
     def d_value(self, t, x):
-        r = np.linalg.norm(x - self.omega)
-        x_omega = self.x_omega
-        y_omega = self.y_omega
-        return self.gamma / (2 * np.pi * r ** 4) * np.array(
-            [[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
-             [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
+        r = np.linalg.norm(x - self.center)
+        return self.circulation / (2 * np.pi * r ** 4) * np.array(
+            [[2 * (x[0] - self.center[0]) * (x[1] - self.center[1]),
+              (x[1] - self.center[1]) ** 2 - (x[0] - self.center[0]) ** 2],
+             [(x[1] - self.center[1]) ** 2 - (x[0] - self.center[0]) ** 2,
+              -2 * (x[0] - self.center[0]) * (x[1] - self.center[1])]])
 
 
 class RankineVortexFF(FlowField):
 
-    def __init__(self, center, gamma, radius, t_start=0., t_end=None):
+    def __init__(self, center: Union[float, ndarray],
+                 circulation: Union[float, ndarray], radius: Union[float, ndarray], t_start=0., t_end=None):
         """
         A vortex from potential theory
         :param center: Coordinates of the vortex center. Shape (2,) if steady else shape (nt, 2)
-        :param gamma: Circulation of the vortex. Positive is ccw vortex. Scalar for steady vortex
+        :param circulation: Circulation of the vortex. Positive is ccw vortex. Scalar for steady vortex
         else shape (nt,)
         :param radius: Radius of the vortex core. Scalar for steady vortex else shape (nt,)
         """
@@ -589,10 +591,10 @@ class RankineVortexFF(FlowField):
             exit(1)
         super().__init__(t_start=t_start, t_end=t_end, nt_int=nt_int)
 
-        self.omega = np.array(center)
-        self.gamma = np.array(gamma)
+        self.center = np.array(center)
+        self.circulation = np.array(circulation)
         self.radius = np.array(radius)
-        if nt_int is not None and not (self.omega.shape[0] == self.gamma.shape[0] == self.radius.shape[0]):
+        if nt_int is not None and not (self.center.shape[0] == self.circulation.shape[0] == self.radius.shape[0]):
             print('Incoherent sizes', file=sys.stderr)
             exit(1)
         self.zero_ceil = 1e-3
@@ -603,10 +605,10 @@ class RankineVortexFF(FlowField):
 
     def params(self, t):
         if self.t_end is None:
-            return self.omega, self.gamma, self.radius
+            return self.center, self.circulation, self.radius
         i, alpha = self._index(t)
-        omega = (1 - alpha) * self.omega[i] + alpha * self.omega[i + 1]
-        gamma = (1 - alpha) * self.gamma[i] + alpha * self.gamma[i + 1]
+        omega = (1 - alpha) * self.center[i] + alpha * self.center[i + 1]
+        gamma = (1 - alpha) * self.circulation[i] + alpha * self.circulation[i + 1]
         radius = (1 - alpha) * self.radius[i] + alpha * self.radius[i + 1]
         return omega, gamma, radius
 
@@ -646,6 +648,7 @@ class RankineVortexFF(FlowField):
             return f / r ** 4 * \
                    np.array([[2 * (x[0] - x_omega) * (x[1] - y_omega), (x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2],
                              [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
+
 
 class LinearFF(FlowField):
     """
@@ -793,17 +796,16 @@ class DoubleGyreDampedFF(FlowField):
 
 
 class RadialGaussFF(FlowField):
-    def __init__(self, x_center: float, y_center: float, radius: float, sdev: float, v_max: float):
+    def __init__(self, center: ndarray, radius: float, sdev: float, v_max: float):
         """
-        :param x_center: Center x-coordinate
-        :param y_center: Center y-coordinate
+        :param center: Center
         :param radius: Radial distance of maximum flow field value (absolute value)
         :param sdev: Gaussian standard deviation
         :param v_max: Maximum flow field value
         """
         super().__init__()
 
-        self.center = np.array((x_center, y_center))
+        self.center = center.copy()
 
         self.radius = radius
         self.sdev = sdev
@@ -966,12 +968,13 @@ class LCFF(FlowField):
     Linear combination of flow fields.
     """
 
-    def __init__(self, coeffs, ffs):
-        self.coeffs = np.zeros(coeffs.shape[0])
-        self.coeffs[:] = coeffs
+    def __init__(self, coeffs: ndarray, ffs: list[FlowField]):
+        if coeffs.shape[0] != len(ffs):
+            raise ValueError('Length mismatch between coeffs and ffs')
+        self.coeffs = coeffs.copy()
         self.ffs = ffs
 
-        self.lcff = sum((c * self.ffs[i] for i, c in enumerate(self.coeffs)), UniformFF(np.zeros(2)))
+        self.lcff = sum((c * self.ffs[i] for i, c in enumerate(self.coeffs)), ZeroFF())
         nt_int = None
         t_start = None
         t_end = None
@@ -1073,7 +1076,7 @@ class TrapFF(FlowField):
             e_r = (x - center) / r
             P = np.array(((e_r[0], e_r[1]), (-e_r[1] / r, e_r[0] / r)))
             return -ff_val * (P.transpose() @ np.diag((TrapFF.d_sigmoid(r - radius, radius * self.rel_wid),
-                                                           TrapFF.sigmoid(r - radius, radius * self.rel_wid))) @ P)
+                                                       TrapFF.sigmoid(r - radius, radius * self.rel_wid))) @ P)
 
 
 class ChertovskihFF(FlowField):

@@ -30,6 +30,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
+def terminal(func):
+    func.terminal = True
+    func.direction = -1.
+    return func
+
+
 class Utils:
     COORD_CARTESIAN = 'cartesian'
     COORD_GCS = 'gcs'
