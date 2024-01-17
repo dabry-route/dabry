@@ -97,6 +97,7 @@ class ZermeloS2Dyn(Dynamics):
                 np.diag([1 / cos(x[1]), 1.]) @ (u + self.ff.value(t, x)))
 
     def d_value__d_state(self, t, x, u):
+        # TODO : rewrite this
         wind_gradient = np.zeros((x.size, x.size))
         wind_gradient[:] = self.ff.d_value(t, x)
         res = self._factor * np.column_stack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],

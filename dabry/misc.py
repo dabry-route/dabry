@@ -36,6 +36,34 @@ def terminal(func):
     return func
 
 
+def directional_timeopt_control(ff_val: ndarray, d: ndarray, srf_max: float):
+    """
+    :param ff_val: Flow field vector
+    :param d: Direction vector (norm has no importance)
+    :param srf_max: Maximum speed relative to ff
+    :return: Control vector
+    """
+    _d = d / np.linalg.norm(d)
+    n = np.array(((0., -1.), (1., 0.))) @ _d
+    ff_ortho = ff_val @ n
+    angle = np.arctan2(np.sqrt(np.max((srf_max ** 2 - ff_ortho ** 2, 0.))), ff_ortho)
+    u = srf_max * np.array(((np.cos(angle), -np.sin(angle)), (np.sin(angle), np.cos(angle)))) @ (-n)
+    return ff_val + u
+
+
+def csv_to_dict(csv_file_path):
+    data_dict = {}
+    with open(csv_file_path, 'r') as csvfile:
+        import csv
+        csv_reader = csv.reader(csvfile)
+        header = next(csv_reader)  # skip header
+        for row in csv_reader:
+            key = row[0]
+            values = row[1:]
+            data_dict[key] = dict(zip(header[1:], values))
+    return data_dict
+
+
 class Utils:
     COORD_CARTESIAN = 'cartesian'
     COORD_GCS = 'gcs'

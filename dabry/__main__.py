@@ -77,7 +77,7 @@ if __name__ == '__main__':
         pb.io.clean_output_dir()
         if args.airspeed is not None:
             pb.update_airspeed(float(args.airspeed))
-        t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.l_ref / pb.model.srf
+        t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.geod_l / pb.model.srf
         solver_ef = SolverEFBase(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=1, mode=args.energy)
         res = solver_ef.solve(verbose=2)
         pb.save_ff()

@@ -24,8 +24,7 @@ class FrontendHandler:
     def setup(self):
         base_path = os.environ.get('DABRYPATH')
         if base_path is None:
-            # raise Exception('No path to Dabry module. Please set environment variable DABRYPATH and retry.')
-            base_path = '.'
+            raise Exception('No path to Dabry module. Please set environment variable DABRYPATH and retry.')
         self.output_dir = os.path.join(base_path, 'output')
 
     def configure(self):

@@ -87,14 +87,14 @@ class EightFrameObs(Obstacle):
         self.bl = bl.copy()
         self.tr = tr.copy()
         self.center = 0.5 * (self.bl + self.tr)
-        self.scaler = np.diag(2 / (self.tr - self.bl))
+        self.scaler = np.diag(1 / (0.5 * (self.tr - self.bl)))
         super().__init__()
 
     def value(self, x: ndarray):
-        return (1 / 8) * (1. - np.sum(np.power(self.scaler @ (x[:2] - self.center), 8)))
+        return (1 / 8) * (1. - np.sum(np.power(np.dot(x[..., :2] - self.center, self.scaler), 8), -1))
 
     def d_value(self, x: ndarray) -> ndarray:
-        return np.power(self.scaler @ (x[:2] - self.center), 7)
+        return np.power(np.dot(x[..., :2] - self.center, self.scaler), 7)
 
 
 class FrameObs(Obstacle):
@@ -102,30 +102,28 @@ class FrameObs(Obstacle):
     Rectangle obstacle acting as a frame
     """
 
-    def __init__(self, bl, tr):
-        self.bl = np.zeros(bl.shape)
-        self.bl[:] = bl
-        self.tr = np.zeros(tr.shape)
-        self.tr[:] = tr
+    def __init__(self, bl: ndarray, tr: ndarray):
+        self.bl = bl.copy()
+        self.tr = tr.copy()
         self.center = 0.5 * (bl + tr)
-        self.factor = np.diag((1 / (self.tr[0] - self.bl[0]), 1 / (self.tr[1] - self.bl[1])))
+        self.scaler = np.diag(1 / (0.5 * (self.tr - self.bl)))
         super().__init__()
 
     def value(self, x):
-        return min(x[0] - self.bl[0], self.tr[0] - x[0], x[1] - self.bl[1], self.tr[1] - x[1])
+        return 1. - np.max(np.abs(np.dot(x[..., :2] - self.center, self.scaler)), -1)
 
     def d_value(self, x):
-        xx = self.factor @ (x - self.center)
-        a, b = xx[0], xx[1]
-        # Going clockwise through cases
-        if a > b and a > -b:
-            return np.array((1., 0.))
-        elif b < a < -b:
-            return np.array((0., -1.))
-        elif a < b and a < -b:
-            return np.array((-1., 0.))
-        else:
-            return np.array((0., 1.))
+        xx = np.dot(x[..., :2] - self.center, self.scaler)
+        c1 = np.dot(xx, np.array((1., 1.)))
+        c2 = np.dot(xx, np.array((1., -1.)))
+        g1 = np.dot(np.ones(xx.shape), np.diag((1., 0.)))
+        g2 = np.dot(np.ones(xx.shape), np.diag((0., 1.)))
+        g3 = np.dot(np.ones(xx.shape), np.diag((-1., 0.)))
+        g4 = np.dot(np.ones(xx.shape), np.diag((0., -1.)))
+        return np.where((c1 > 0) * (c2 > 0), g1,
+                        np.where((c1 > 0) * (c2 < 0), g2,
+                                 np.where((c1 < 0) * (c2 < 0), g3,
+                                          g4)))
 
 
 class GreatCircleObs(Obstacle):

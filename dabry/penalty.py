@@ -43,6 +43,7 @@ class Penalty:
         a2 = 1 / (2 * dx) * (self.value(t, x + dx * np.array((0, 1))) - self.value(t, x - dx * np.array((0, 1))))
         return np.hstack((a1, a2))
 
+
 class NullPenalty(Penalty):
 
     def __init__(self):
@@ -96,7 +97,8 @@ class DiscretePenalty(Penalty):
         y = np.zeros(ny)
         x[:] = self.grid[:, 0, 0]
         y[:] = self.grid[0, :, 1]
-        self.itp = RegularGridInterpolator((self.ts, x, y), self.data, method='linear', bounds_error=False, fill_value=0.)
+        self.itp = RegularGridInterpolator((self.ts, x, y), self.data, method='linear', bounds_error=False,
+                                           fill_value=0.)
 
     def load(self, filepath):
         with h5py.File(filepath, 'r') as f:

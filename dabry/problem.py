@@ -5,15 +5,16 @@ from datetime import datetime
 from typing import Optional, List
 
 import numpy as np
+import yaml
 from numpy import ndarray, pi
 
 from dabry.aero import MermozAero, Aero
 from dabry.ddf_manager import DDFmanager
 from dabry.feedback import GSTargetFB
-from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, LinearFF, RadialGaussFF, DoubleGyreFF, \
+from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, LinearFF, RadialGaussFF, GyreFF, \
     PointSymFF, LCFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
     FlowField, VortexFF, ZeroFF
-from dabry.misc import Utils
+from dabry.misc import Utils, csv_to_dict
 from dabry.model import Model
 from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, Obstacle, MeanObs, LSEMaxiObs, \
     EightFrameObs
@@ -42,70 +43,62 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 class NavigationProblem:
-    PB_STANDARD = {
-        "three_vortices": "3vor"
-    }
+    ALL = csv_to_dict(os.path.join(os.path.dirname(__file__), 'problems.csv'))
 
     def __init__(self, ff: FlowField, x_init: ndarray, x_target: ndarray, srf_max: float,
                  obstacles: Optional[List[Obstacle]] = None,
                  bl: Optional[ndarray] = None, tr: Optional[ndarray] = None,
-                 name: Optional[str] = None, time_scale: Optional[float] = None,
-                 aero: Optional[Aero] = None, penalty: Optional[Penalty] = None,
+                 name: Optional[str] = None, aero: Optional[Aero] = None, penalty: Optional[Penalty] = None,
                  autoframe=True):
         self.model = Model.zermelo(ff)
         self.x_init: ndarray = x_init.copy()
         self.x_target: ndarray = x_target.copy()
-        self.srf_max = srf_max
-        # self.aero = LLAero(mode='dabry')
-        self.aero = MermozAero() if aero is None else aero
+        self.srf_max: float = srf_max
+        self.aero: Aero = MermozAero() if aero is None else aero
 
         # Domain bounding box corners
-        self.bl: Optional[ndarray] = bl.copy() if bl is not None else None
-        self.tr: Optional[ndarray] = tr.copy() if tr is not None else None
+        self.bl: ndarray = bl.copy() if bl is not None else np.array(())
+        self.tr: ndarray = tr.copy() if tr is not None else np.array(())
 
-        self.geod_l = Utils.distance(self.x_init, self.x_target, coords=self.coords)
+        self.scale_length = Utils.distance(self.x_init, self.x_target, coords=self.coords)
+        self.scale_time = self.scale_length / self.srf_max
 
-        # It is usually sufficient to scale time on geodesic / srf
-        # but for some problems it isn't
-        self.time_scale = self.geod_l / self.srf_max if time_scale is None else time_scale
+        self.name = 'Unnamed problem' if name is None else name
 
-        self.descr = 'Unnamed problem' if name is None else name
+        self.obstacles: list[Obstacle] = obstacles if obstacles is not None else []
+        self.penalty: Penalty = NullPenalty() if penalty is None else penalty
+
+        self.io = DDFmanager()
 
         # Bound computation domain on wind grid limits
-        if bl is None or tr is None:
+        if bl.size == 0 or tr.size == 0:
             ff = self.model.ff
             if type(ff) == DiscreteFF:
                 self.bl = np.array((ff.bounds[0, 0], ff.bounds[1, 0]))
                 self.tr = np.array((ff.bounds[0, 1], ff.bounds[1, 1]))
             else:
-                w = 1.15 * self.geod_l
+                w = 1.15 * self.scale_length
                 self.bl = (self.x_init + self.x_target) / 2. - np.array((w / 2., w / 2.))
                 self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
-        if self.coords == Utils.COORD_GCS:
-            self._domain_obs = NavigationProblem.spherical_frame(bl, tr, offset_rel=0)
-            self.domain = lambda x: np.all([obs.value(x) > 0. for obs in self._domain_obs])
-        else:
-            self.domain = lambda x: self.bl[0] < x[0] < self.tr[0] and self.bl[1] < x[1] < self.tr[1]
 
-        if self.bl is not None and self.tr is not None:
-            self.l_ref = self.distance(self.bl, self.tr)
-        else:
-            self.l_ref = self.geod_l
-
-        self.obstacles = obstacles if obstacles is not None else []
-
-        if penalty is None:
-            self.penalty = NullPenalty()
-        else:
-            self.penalty = penalty
-
-        self.frame_offset = 0.05
+        frame_offset = 0.05
         if autoframe:
-            bl_frame = self.bl + (self.tr - self.bl) * self.frame_offset / 2.
-            tr_frame = self.tr - (self.tr - self.bl) * self.frame_offset / 2.
-            self.obstacles.append(EightFrameObs(bl_frame, tr_frame))
+            if self.coords == Utils.COORD_CARTESIAN:
+                bl_frame = self.bl + (self.tr - self.bl) * frame_offset / 2.
+                tr_frame = self.tr - (self.tr - self.bl) * frame_offset / 2.
+                self.obstacles.append(FrameObs(bl_frame, tr_frame))
+            else:
+                self.obstacles.extend(NavigationProblem.spherical_frame(bl, tr, offset_rel=0))
 
-        self.io = DDFmanager()
+        # Creation of non-dimensionalized version of problem
+        self._x_init = self.x_init / self.scale_length
+        self._x_target = self.x_target / self.scale_length
+        self._bl = self.bl / self.scale_length
+        self._tr = self.tr / self.scale_length
+        self._srf_max = self.srf_max / self.scale_speed
+        # ff
+        # obstacles
+        # penalty
 
     def update_ff(self, ff: FlowField):
         self.model = Model.zermelo(ff)
@@ -126,11 +119,15 @@ class NavigationProblem:
             json.dump(pb_info, f, indent=4)
 
     @property
+    def scale_speed(self):
+        return self.scale_length / self.scale_time
+
+    @property
     def coords(self):
         return self.model.coords
 
     def __str__(self):
-        return str(self.descr)
+        return str(self.name)
 
     def dualize(self):
         """
@@ -143,7 +140,7 @@ class NavigationProblem:
         kwargs['x_init'] = self.x_target.copy()
         kwargs['x_target'] = self.x_init.copy()
 
-        for attr in ['model', 'geod_l', 'descr', 'domain', 'l_ref', 'frame_offset', 'io', '_domain_obs']:
+        for attr in ['model', 'geod_l', 'name', 'io']:
             del kwargs[attr]
 
         return NavigationProblem(**kwargs)
@@ -261,14 +258,43 @@ class NavigationProblem:
         return obstacles
 
     @classmethod
-    def standard(cls, name: str = "", s_name: str = ""):
+    def base_name(cls, name: str):
+        for group, prbs in cls.ALL.items():
+            for b_name, attrs in prbs:
+                if b_name == name:
+                    return name
+                if attrs['s_name'] == name:
+                    return b_name
+        raise ValueError('Cannot resolve problem name "%s"' % name)
+
+    @classmethod
+    def from_name(cls, name: str):
         """
-        Creates a NavigationProblem from standard problem list
-        :param name: Full name as a string
-        :param s_name: Short name as a string
+        Creates a NavigationProblem from problem list
+        :param name: Full name as a string. May be the short name of a problem as defined in ALL.
         :return: Corresponding NavigationProblem
         """
-        if name == "three_vortices" or s_name == cls.PB_STANDARD["three_vortices"]:
+        b_name = cls.base_name(name)
+        if b_name == "linear":
+            srf = 1.
+
+            f = 1.
+            x_init = f * np.array([0., 0.])
+            x_target = f * np.array([1., 0.])
+
+            g = 1.
+            gradient = np.array([[0., g], [0., 0.]])
+            origin = np.array([0., 0.])
+            value_origin = np.array([0., 0.])
+
+            bl = f * np.array([-0.2, -1.])
+            tr = f * np.array([1.2, 1.])
+
+            ff = LinearFF(gradient, origin, value_origin)
+
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
+
+        if b_name == "three_vortices":
             srf = 1.
 
             x_init = np.array([0., 0.])
@@ -281,271 +307,229 @@ class NavigationProblem:
                       VortexFF(np.array((0.8, 0.2)), -0.8),
                       VortexFF(np.array((0.6, -0.5)), 0.8)], ZeroFF())
 
-            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, obstacles=[CircleObs(np.array((0.5, 0.8)), 0.2)])
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
+        if b_name == "gyre":
+            srf = 0.05
 
-class NPLinear(NavigationProblem):
-    def __init__(self):
-        v_a = 1.
+            sf = 1.
 
-        f = 1.  # 1e6
-        x_init = f * np.array([0., 0.])
-        x_target = f * np.array([1., 0.])
+            x_init = sf * np.array((0.6, 0.6))
+            x_target = sf * np.array((2.4, 2.4))
+            bl = sf * np.array((0.5, 0.5))
+            tr = sf * np.array((2.5, 2.5))
 
-        gradient = np.array([[0., v_a / f], [0., 0.]])
-        origin = np.array([0., 0.])
-        value_origin = np.array([0., 0.])
+            ff = GyreFF(0.5, 0.5, 2., 2., pi * 0.02)
 
-        bl = f * np.array([-0.2, -1.])
-        tr = f * np.array([1.2, 1.])
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
-        ff = LinearFF(gradient, origin, value_origin)
+        if b_name == "gyre_li2020":
+            v_a = 0.6
 
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
+            sf = 1.
 
+            x_init = sf * np.array((125., 125.))
+            x_target = sf * np.array((375., 375.))
+            bl = sf * np.array((-10, -10))
+            tr = sf * np.array((510, 510))
 
-class NPDoubleGyreLi(NavigationProblem):
-    def __init__(self):
-        v_a = 0.6
+            ff = GyreFF(0., 0., 500., 500., 1.)
 
-        sf = 1.
+            return cls(ff, x_init, x_target, v_a, bl=bl, tr=tr, name=b_name)
 
-        x_init = sf * np.array((125., 125.))
-        x_target = sf * np.array((375., 375.))
-        bl = sf * np.array((-10, -10))
-        tr = sf * np.array((510, 510))
+        if b_name == "point_symmetric_techy2011":
+            srf = 1.
+            sf = 1.
+            x_init = sf * np.array((0., 0.))
+            x_target = sf * np.array((1., 0.))
+            bl = sf * np.array((-0.1, -1.))
+            tr = sf * np.array((1.1, 1.))
 
-        ff = DoubleGyreFF(0., 0., 500., 500., 1.)
+            # To get w as wind value at start point, choose gamma = w / 0.583
+            gamma = srf / sf * 1.
+            omega = 0.
+            ff = PointSymFF(sf * 0.5, sf * 0.3, gamma, omega)
 
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
+        if b_name == "three_obstacles":
+            srf = 1.
+            sf = 1.
 
-class NPDoubleGyreKularatne(NavigationProblem):
-    def __init__(self):
-        v_a = 0.05
+            x_init = sf * np.array((0., 0.))
+            x_target = sf * np.array((1., 0.))
+            bl = sf * np.array((-0.15, -0.65))
+            tr = sf * np.array((1.15, 0.65))
 
-        sf = 1.
+            const_wind = UniformFF(np.array([.1, .1]))
 
-        x_init = sf * np.array((0.6, 0.6))
-        x_target = sf * np.array((2.4, 2.4))
-        bl = sf * np.array((0.5, 0.5))
-        tr = sf * np.array((2.5, 2.5))
+            c1 = sf * np.array((0.5, 0.))
+            c2 = sf * np.array((0.5, 0.1))
+            c3 = sf * np.array((0.5, -0.1))
 
-        ff = DoubleGyreFF(0.5, 0.5, 2., 2., pi * 0.02)
+            wind_obstacle1 = RadialGaussFF(c1, sf * 0.1, 0.5 * 0.2, srf * 5.)
+            wind_obstacle2 = RadialGaussFF(c2, sf * 0.1, 0.5 * 0.2, srf * 5.)
+            wind_obstacle3 = RadialGaussFF(c3, sf * 0.1, 0.5 * 0.2, srf * 5.)
 
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
+            ff = wind_obstacle1 + wind_obstacle2 + wind_obstacle3 + const_wind
 
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
-class NPPointSymTechy(NavigationProblem):
-    def __init__(self):
-        v_a = 1.  # 18.
-        sf = 1.  # 1e6
-        x_init = sf * np.array((0., 0.))
-        x_target = sf * np.array((1., 0.))
-        bl = sf * np.array((-0.1, -1.))
-        tr = sf * np.array((1.1, 1.))
+        if b_name == "big_rankine":
+            srf = 1.
 
-        # To get w as wind value at start point, choose gamma = w / 0.583
-        gamma = v_a / sf * 1.
-        omega = 0.
-        ff = PointSymFF(sf * 0.5, sf * 0.3, gamma, omega)
+            f = 1.
+            fs = srf
 
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
+            x_init = f * np.array([0., 0.])
+            x_target = f * np.array([1., 0.])
 
+            bl = f * np.array([-0.2, -1.])
+            tr = f * np.array([1.2, 1.])
+            omega = f * np.array(((0.2, -0.2), (0.8, 0.2)))
 
-class NP3obs(NavigationProblem):
-    def __init__(self):
-        v_a = 1.  # 23.
-        sf = 1.  # 3e6
+            vortex = [
+                RankineVortexFF(omega[0], f * fs * -7., f * 1.),
+                RankineVortexFF(omega[1], f * fs * -7., f * 1.)
+            ]
 
-        x_init = sf * np.array((0., 0.))
-        x_target = sf * np.array((1., 0.))
-        bl = sf * np.array((-0.15, -0.65))
-        tr = sf * np.array((1.15, 0.65))
+            ff = vortex[0] + vortex[1]
 
-        const_wind = UniformFF(np.array([.1, .1]))
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
-        c1 = sf * np.array((0.5, 0.))
-        c2 = sf * np.array((0.5, 0.1))
-        c3 = sf * np.array((0.5, -0.1))
+        if b_name == "four_vortices":
+            srf = 1.
 
-        wind_obstacle1 = RadialGaussFF(c1, sf * 0.1, 0.5 * 0.2, v_a * 5.)
-        wind_obstacle2 = RadialGaussFF(c2, sf * 0.1, 0.5 * 0.2, v_a * 5.)
-        wind_obstacle3 = RadialGaussFF(c3, sf * 0.1, 0.5 * 0.2, v_a * 5.)
+            f = 1.
+            fs = srf
 
-        ff = wind_obstacle1 + wind_obstacle2 + wind_obstacle3 + const_wind
+            x_init = f * np.array([0., 0.])
+            x_target = f * np.array([1., 0.])
 
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
-
-
-class NPSanjuanDublinOrtho(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-        ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
-                                             'data_demo/ncdc/san-juan-dublin-flattened-ortho.mz/wind.h5'))
-
-        # point = np.array([-66.116666, 18.465299])
-        # x_init = np.array(proj(*point)) + 500e3 * np.ones(2)
-        x_init = np.array((-5531296, 2020645))
-
-        # point = np.array([-6.2602732, 53.3497645])
-        # x_target = np.array(proj(*point)) - 500e3 * np.ones(2)
-        x_target = np.array((-415146, 511759))
-
-        super().__init__(ff, x_init, x_target, v_a)
-
-
-class NPBigRankine(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-
-        f = 1e6
-        fs = v_a
-
-        x_init = f * np.array([0., 0.])
-        x_target = f * np.array([1., 0.])
-
-        bl = f * np.array([-0.2, -1.])
-        tr = f * np.array([1.2, 1.])
-        omega = f * np.array(((0.2, -0.2), (0.8, 0.2)))
-
-        vortex = [
-            RankineVortexFF(omega[0], f * fs * -7., f * 1.),
-            RankineVortexFF(omega[1], f * fs * -7., f * 1.)
-        ]
-
-        ff = vortex[0] + vortex[1]
-
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
-
-
-class NP4vor(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-
-        f = 1e6
-        fs = v_a
-
-        x_init = f * np.array([0., 0.])
-        x_target = f * np.array([1., 0.])
-
-        bl = f * np.array([-0.2, -1.])
-        tr = f * np.array([1.2, 1.])
-
-        omega = f * np.array(((0.5, 0.5),
-                              (0.5, 0.2),
-                              (0.5, -0.2),
-                              (0.5, -0.5)))
-        strength = f * fs * np.array([1., -1., 1.5, -1.5])
-        radius = f * np.array([1e-1, 1e-1, 1e-1, 1e-1])
-        vortices = [RankineVortexFF(omega[i], strength[i], radius[i]) for i in range(len(omega))]
-        const_wind = UniformFF(np.array([0., 0.]))
-
-        ff = sum(vortices, const_wind)
-
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
-
-
-class NPMovor(NavigationProblem):
-    def __init__(self):
-        v_a = 1.  # 23.
-
-        f = 1.  # 1e6
-        fs = v_a
-
-        x_init = f * np.array([0., 0.])
-        x_target = f * np.array([1., 0.])
-        nt = 10
-        xs = np.linspace(0.5, 0.5, nt)
-        ys = np.linspace(-0.4, 0.4, nt)
-
-        omega = f * np.stack((xs, ys), axis=1)
-        gamma = f * fs * -1. * np.ones(nt)
-        radius = f * 1e-1 * np.ones(nt)
-
-        ff = RankineVortexFF(omega, gamma, radius, t_end=1. * f / v_a)
-
-        super().__init__(ff, x_init, x_target, v_a)
-
-
-class NPTVLinear(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-
-        f = 1e6
-        x_init = f * np.array([0., 0.])
-        x_target = f * np.array([1., 0.])
-
-        nt = 20
-
-        gradient = np.array([[np.zeros(nt), np.linspace(3 * v_a / f, 0 * v_a / f, nt)],
-                             [np.zeros(nt), np.zeros(nt)]]).transpose((2, 0, 1))
-
-        origin = np.array([0., 0.])
-        value_origin = np.array([0., 0.])
-
-        bl = f * np.array([-0.2, -1.])
-        tr = f * np.array([1.2, 1.])
-
-        ff = LinearFFT(gradient, origin, value_origin, t_end=0.5 * f / v_a)
-
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
-
-
-class NPMovors(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-
-        f = 1e6
-        fs = v_a
-
-        x_init = f * np.array([0., 0.])
-        x_target = f * np.array([1., 0.])
-        nt = 10
-        g = f * fs * -1.
-        r = f * 1e-3
-        vortices = []
-        xvors = np.array((0.2, 0.4, 0.6, 0.8))
-        for k, xvor in enumerate(xvors):
-            xs = np.linspace(xvor, xvor, nt)
-            if k == 0:
-                ys = np.linspace(-0.3, 0.1, nt)
-            elif k == 1:
-                ys = np.linspace(-0.1, 0.5, nt)
-            elif k == 2:
-                ys = np.linspace(-0.2, 0.4, nt)[::-1]
-            else:
-                ys = np.linspace(-0.4, 0.2, nt)[::-1]
+            bl = f * np.array([-0.2, -1.])
+            tr = f * np.array([1.2, 1.])
+
+            omega = f * np.array(((0.5, 0.5),
+                                  (0.5, 0.2),
+                                  (0.5, -0.2),
+                                  (0.5, -0.5)))
+            strength = f * fs * np.array([1., -1., 1.5, -1.5])
+            radius = f * np.array([1e-1, 1e-1, 1e-1, 1e-1])
+            vortices = [RankineVortexFF(omega[i], strength[i], radius[i]) for i in range(len(omega))]
+            const_wind = UniformFF(np.array([0., 0.]))
+
+            ff = sum(vortices, const_wind)
+
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
+
+        if b_name == "moving_vortex":
+            srf = 1.
+
+            f = 1.
+            fs = srf
+
+            x_init = f * np.array([0., 0.])
+            x_target = f * np.array([1., 0.])
+            nt = 10
+            xs = np.linspace(0.5, 0.5, nt)
+            ys = np.linspace(-0.4, 0.4, nt)
 
             omega = f * np.stack((xs, ys), axis=1)
-            gamma = g * np.ones(nt)
-            radius = r * np.ones(nt)
+            gamma = f * fs * -1. * np.ones(nt)
+            radius = f * 1e-1 * np.ones(nt)
 
-            vortices.append(RankineVortexFF(omega, gamma, radius, t_end=1. * f / v_a))
+            ff = RankineVortexFF(omega, gamma, radius, t_end=1. * f / srf)
 
-        obstacles = []
-        # obstacles.append(RadialGaussFF(f * 0.5, f * 0.15, f * 0.1, 1 / 2 * 0.2, 10*v_a))
-        winds: list[FlowField] = [UniformFF(np.array((-5., 0.)))] + vortices + obstacles
-        # const_wind = UniformFF(np.array([0., 5.]))
-        N = len(winds) - len(obstacles)
-        M = len(obstacles)
+            return cls(ff, x_init, x_target, srf)
 
-        ff = LCFF(np.array(tuple(1 / N for _ in range(N)) + tuple(1. for _ in range(M))), tuple(winds))
+        if b_name == "linear_time_varying":
+            srf = 1.
 
-        super().__init__(ff, x_init, x_target, v_a)
+            f = 1.
+            x_init = f * np.array([0., 0.])
+            x_target = f * np.array([1., 0.])
 
+            nt = 20
 
-class NPGyreRhoads(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-        sf = 3e6
-        x_init = sf * np.array((0, 0.25))
-        x_target = sf * np.array((0.03, -0.25))
-        bl = sf * np.array((-1, -0.5))
-        tr = sf * np.array((1., 0.5))
+            gradient = np.array([[np.zeros(nt), np.linspace(3 * srf / f, 0 * srf / f, nt)],
+                                 [np.zeros(nt), np.zeros(nt)]]).transpose((2, 0, 1))
 
-        ff = DoubleGyreFF(sf * 0, sf * -0.5, sf * 2, sf * 2, 30.)
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr, time_scale=3. * self.geod_l / v_a)
+            origin = np.array([0., 0.])
+            value_origin = np.array([0., 0.])
+
+            bl = f * np.array([-0.2, -1.])
+            tr = f * np.array([1.2, 1.])
+
+            ff = LinearFFT(gradient, origin, value_origin, t_end=0.5 * f / srf)
+
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
+
+        if b_name == "moving_vortices":
+            srf = 1.
+
+            f = 1.
+            fs = srf
+
+            x_init = f * np.array([0., 0.])
+            x_target = f * np.array([1., 0.])
+            nt = 10
+            g = f * fs * -1.
+            r = f * 1e-3
+            vortices = []
+            xvors = np.array((0.2, 0.4, 0.6, 0.8))
+            for k, xvor in enumerate(xvors):
+                xs = np.linspace(xvor, xvor, nt)
+                if k == 0:
+                    ys = np.linspace(-0.3, 0.1, nt)
+                elif k == 1:
+                    ys = np.linspace(-0.1, 0.5, nt)
+                elif k == 2:
+                    ys = np.linspace(-0.2, 0.4, nt)[::-1]
+                else:
+                    ys = np.linspace(-0.4, 0.2, nt)[::-1]
+
+                omega = f * np.stack((xs, ys), axis=1)
+                gamma = g * np.ones(nt)
+                radius = r * np.ones(nt)
+
+                vortices.append(RankineVortexFF(omega, gamma, radius, t_end=1. * f / srf))
+
+            obstacles = []
+            # obstacles.append(RadialGaussFF(f * 0.5, f * 0.15, f * 0.1, 1 / 2 * 0.2, 10*v_a))
+            winds: list[FlowField] = [UniformFF(np.array((-5., 0.)))] + vortices + obstacles
+            # const_wind = UniformFF(np.array([0., 5.]))
+            N = len(winds) - len(obstacles)
+            M = len(obstacles)
+
+            ff = LCFF(np.array(tuple(1 / N for _ in range(N)) + tuple(1. for _ in range(M))), tuple(winds))
+
+            return cls(ff, x_init, x_target, srf)
+
+        if b_name == 'gyre_rhoads2010':
+            v_a = 1.
+            sf = 1.
+            x_init = sf * np.array((0, 0.25))
+            x_target = sf * np.array((0.03, -0.25))
+            bl = sf * np.array((-1, -0.5))
+            tr = sf * np.array((1., 0.5))
+
+            ff = GyreFF(sf * 0, sf * -0.5, sf * 2, sf * 2, 30.)
+            return cls(ff, x_init, x_target, v_a, bl=bl, tr=tr)
+
+        if b_name == 'sanjuan_dublin_ortho':
+            v_a = 23.
+            ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
+                                                 'data_demo/ncdc/san-juan-dublin-flattened-ortho.mz/wind.h5'))
+
+            # point = np.array([-66.116666, 18.465299])
+            # x_init = np.array(proj(*point)) + 500e3 * np.ones(2)
+            x_init = np.array((-5531296, 2020645))
+
+            # point = np.array([-6.2602732, 53.3497645])
+            # x_target = np.array(proj(*point)) - 500e3 * np.ones(2)
+            x_target = np.array((-415146, 511759))
+
+            super().__init__(ff, x_init, x_target, v_a)
 
 
 class NPBandFF(NavigationProblem):

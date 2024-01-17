@@ -231,7 +231,7 @@ class DiscreteFF(FlowField):
         return cls(values, bounds, coords, **kwargs)
 
     @classmethod
-    def from_ff(cls, ff: FlowField, grid_bounds: Union[tuple[ndarray], ndarray],
+    def from_ff(cls, ff: FlowField, grid_bounds: Union[tuple[ndarray, ndarray], ndarray],
                 nx=100, ny=100, nt=50, **kwargs):
         """
         Create discrete flow field by sampling another flow field
@@ -739,10 +739,7 @@ class PointSymFF(FlowField):
         return self.mat
 
 
-class DoubleGyreFF(FlowField):
-    """
-    From Li 2020 (DOI 10.1109/JOE.2019.2926822)
-    """
+class GyreFF(FlowField):
 
     def __init__(self, x_center: float, y_center: float, x_wl: float, y_wl: float, ampl: float):
         """
@@ -784,7 +781,7 @@ class DoubleGyreDampedFF(FlowField):
                  lambda_x_damp: float,
                  lambda_y_damp: float):
         super().__init__()
-        self.double_gyre = DoubleGyreFF(x_center, y_center, x_wl, y_wl, ampl)
+        self.double_gyre = GyreFF(x_center, y_center, x_wl, y_wl, ampl)
         self.center_damp = np.array((x_center_damp, y_center_damp))
         self.lambda_x_damp = lambda_x_damp
         self.lambda_y_damp = lambda_y_damp
