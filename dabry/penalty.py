@@ -44,6 +44,34 @@ class Penalty:
         return np.hstack((a1, a2))
 
 
+class WrapperPen(Penalty):
+    """
+    Wrap a penalty to work with appropriate units
+    """
+
+    def __init__(self, penalty: Penalty, scale_length: float, bl: ndarray,
+                 scale_time: float, time_origin: float):
+        super().__init__()
+        self.penalty: Penalty = penalty
+        self.scale_length = scale_length
+        self.bl: ndarray = bl.copy()
+        self.scale_time = scale_time
+        self.time_origin = time_origin
+        self.scale_speed = scale_length / scale_time
+        # Multiplication will be quicker than division
+        self._scaler_length = 1 / self.scale_length
+        self._scaler_time = 1 / self.scale_time
+        self._scaler_speed = 1 / self.scale_speed
+
+    def value(self, t, x):
+        return self._scaler_speed * self.penalty.value((t - self.time_origin) * self._scaler_time,
+                                                       (x - self.bl) * self._scaler_length)
+
+    def d_value(self, t, x):
+        return self._scaler_speed * self.penalty.d_value((t - self.time_origin) * self._scaler_time,
+                                                         (x - self.bl) * self._scaler_length)
+
+
 class NullPenalty(Penalty):
 
     def __init__(self):

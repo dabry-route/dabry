@@ -1,25 +1,16 @@
-import csv
-import os
 import warnings
 from abc import ABC
 from typing import Optional, Dict
 
-import h5py
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate as scitg
-from alphashape import alphashape
-from numpy import arcsin as asin, ndarray
-from numpy import arctan2 as atan2
-from numpy import sin, cos, pi
-from shapely.geometry import Point
+from numpy import ndarray
 from tqdm import tqdm
 
-from dabry.feedback import MapFB
-from dabry.misc import Utils, Chrono, Debug, directional_timeopt_control
+from dabry.misc import directional_timeopt_control
+from dabry.misc import terminal
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
-from dabry.misc import terminal
 
 """
 solver_ef.py
@@ -43,6 +34,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+
 
 class Site:
     def __init__(self, t_init: float, index_t: int,
@@ -268,8 +260,8 @@ class SolverEFResampling(SolverEF):
                                                          -state_aug_cross[2:] / np.linalg.norm(state_aug_cross[2:])))
                 self.obs_active_trigo = cross >= 0.
                 res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, self.t_upper_bound), state_aug_cross[:2],
-                                      t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],)
-                                      #max_step=1e-1,)
+                                      t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs], )
+                # max_step=1e-1,)
                 if len(res.t) > 0:
                     controls = np.array([self.dyn_constr(t, x) - self.mp.model.ff.value(t, x)
                                          for t, x in zip(res.t, res.y.transpose())])

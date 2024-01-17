@@ -63,6 +63,26 @@ class Obstacle(ABC):
         return grad
 
 
+class WrapperObs(Obstacle):
+    """
+    Wrap an obstacle to work with appropriate units
+    """
+
+    def __init__(self, obs: Obstacle, scale_length: float, bl: ndarray):
+        super().__init__()
+        self.obs: Obstacle = obs
+        self.scale_length = scale_length
+        self.bl: ndarray = bl.copy()
+        # Multiplication will be quicker than division
+        self._scaler_length = 1 / self.scale_length
+
+    def value(self, x):
+        return self.obs.value((x - self.bl) * self._scaler_length)
+
+    def d_value(self, x):
+        return self.obs.d_value((x - self.bl) * self._scaler_length)
+
+
 class CircleObs(Obstacle):
     """
     Circle obstacle defined by center and radius

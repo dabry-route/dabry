@@ -37,7 +37,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 class FlowField(ABC):
 
-    def __init__(self, _lch=None, _rch=None, _op=None, t_start=0., t_end=None, nt_int=None):
+    def __init__(self, _lch=None, _rch=None, _op=None, t_start=0., t_end=None, nt_int=None,
+                 coords=Utils.COORD_CARTESIAN):
         self._lch = _lch
         self._rch = _rch
         self._op = _op
@@ -55,7 +56,7 @@ class FlowField(ABC):
         # False if dualization operation leaves flow field unchanged
         self.dualizable = True
 
-        self.coords = Utils.COORD_CARTESIAN
+        self.coords = coords
 
     def value(self, t, x):
         if self._lch is None:
@@ -485,6 +486,34 @@ class DiscreteFF(FlowField):
         return ff
 
 
+class WrapperFF(FlowField):
+    """
+    Wrap a flow field to work with appropriate units
+    """
+
+    def __init__(self, ff: FlowField, scale_length: float, bl: ndarray,
+                 scale_time: float, time_origin: float):
+        super().__init__()
+        self.ff: FlowField = ff
+        self.scale_length = scale_length
+        self.bl: ndarray = bl.copy()
+        self.scale_time = scale_time
+        self.time_origin = time_origin
+        self.scale_speed = scale_length / scale_time
+        # Multiplication will be quicker than division
+        self._scaler_length = 1 / self.scale_length
+        self._scaler_time = 1 / self.scale_time
+        self._scaler_speed = 1 / self.scale_speed
+
+    def value(self, t, x):
+        return self._scaler_speed * self.ff.value((t - self.time_origin) * self._scaler_time,
+                                                  (x - self.bl) * self._scaler_length)
+
+    def d_value(self, t, x):
+        return self._scaler_speed * self.ff.d_value((t - self.time_origin) * self._scaler_time,
+                                                    (x - self.bl) * self._scaler_length)
+
+
 class TwoSectorsFF(FlowField):
 
     def __init__(self,
@@ -554,7 +583,7 @@ class VortexFF(FlowField):
         :param circulation: Circulation of the vortex. Positive is ccw vortex.
         """
         super().__init__()
-        self.center = center
+        self.center = center.copy()
         self.circulation = circulation
 
     def value(self, t, x):
@@ -650,66 +679,57 @@ class RankineVortexFF(FlowField):
                              [(x[1] - y_omega) ** 2 - (x[0] - x_omega) ** 2, -2 * (x[0] - x_omega) * (x[1] - y_omega)]])
 
 
-class LinearFF(FlowField):
+class StateLinearFF(FlowField):
     """
-    Constant gradient flow field
+    Linear variation with state variable
     """
 
     def __init__(self, gradient: ndarray, origin: ndarray, value_origin: ndarray):
         """
+        Flow field value = gradient @ (state - origin) + value_origin
         :param gradient: The flow field gradient
         :param origin: The origin point for the origin value
         :param value_origin: The origin value
         """
         super().__init__()
 
-        self.gradient = np.zeros(gradient.shape)
-        self.origin = np.zeros(origin.shape)
-        self.value_origin = np.zeros(value_origin.shape)
+        self.gradient: ndarray = gradient.copy()
+        self.origin: ndarray = origin.copy()
+        self.value_origin: ndarray = value_origin.copy()
 
-        self.gradient[:] = gradient
-        self.origin[:] = origin
-        self.value_origin[:] = value_origin
-
-    def value(self, t, x):
+    def value(self, _, x):
         return self.gradient.dot(x - self.origin) + self.value_origin
 
-    def d_value(self, t, x):
+    def d_value(self, _, x):
         return self.gradient
 
 
-# TODO: Unite with steady linear
 class LinearFFT(FlowField):
     """
-    Gradient does not vary with space but does vary with time
+    Linear variation with state variable and linear evolution of spatial gradient
     """
 
-    def __init__(self, gradient, origin, value_origin, t_end):
+    def __init__(self, gradient_diff_time: ndarray, gradient_init: ndarray,
+                 origin: ndarray, value_origin: ndarray):
         """
-        :param gradient: The flow field gradient, shape (nt, 2, 2)
+        Flow field value = (gradient_diff_time * t + gradient_init) @ (state - origin) + value_origin
+        :param gradient_diff_time: Derivative of spatial gradient wrt time, shape (2, 2)
+        :param gradient_init: Initial spatial gradient, shape (2, 2)
         :param origin: The origin point for the origin value, shape (2,)
         :param value_origin: The origin value, shape (2,)
         """
-        super().__init__(t_end=t_end)
+        super().__init__()
 
-        self.gradient = np.zeros(gradient.shape)
-        self.origin = np.zeros(origin.shape)
-        self.value_origin = np.zeros(value_origin.shape)
-
-        self.gradient[:] = gradient
-        self.origin[:] = origin
-        self.value_origin[:] = value_origin
+        self.gradient_diff_time = gradient_diff_time.copy()
+        self.gradient_init = gradient_init.copy()
+        self.origin = origin.copy()
+        self.value_origin = value_origin.copy()
 
     def value(self, t, x):
-        i, alpha = self._index(t)
-        return ((1 - alpha) * self.gradient[i] + alpha * self.gradient[i + 1]) @ (x - self.origin) + self.value_origin
+        (self.gradient_diff_time * t + self.gradient_init) @ (x - self.origin) + self.value_origin
 
     def d_value(self, t, x):
-        i, alpha = self._index(t)
-        return (1 - alpha) * self.gradient[i] + alpha * self.gradient[i + 1]
-
-    def dualize(self):
-        return -1. * LinearFFT(self.gradient[::-1, :, :], self.origin, self.value_origin, self.t_end)
+        return self.gradient_diff_time * t + self.gradient_init
 
 
 class PointSymFF(FlowField):
@@ -717,19 +737,16 @@ class PointSymFF(FlowField):
     From Techy 2011 (DOI 10.1007/s11370-011-0092-9)
     """
 
-    def __init__(self, x_center: float, y_center: float, gamma: float, omega: float):
+    def __init__(self, center: Union[ndarray | tuple[float, float]], gamma: float, omega: float):
         """
-        :param x_center: Center x-coordinate
-        :param y_center: Center y-coordinate
+        :param center: Center coordinates
         :param gamma: Divergence
         :param omega: Curl
         """
         super().__init__()
 
-        self.center = np.array((x_center, y_center))
+        self.center = center.copy() if isinstance(center, ndarray) else np.array(center)
 
-        self.gamma = gamma
-        self.omega = omega
         self.mat = np.array([[gamma, -omega], [omega, gamma]])
 
     def value(self, t, x):
@@ -958,68 +975,6 @@ class BandFF(FlowField):
     def d_value(self, t, x):
         print('Undefined', file=sys.stderr)
         exit(1)
-
-
-class LCFF(FlowField):
-    """
-    Linear combination of flow fields.
-    """
-
-    def __init__(self, coeffs: ndarray, ffs: list[FlowField]):
-        if coeffs.shape[0] != len(ffs):
-            raise ValueError('Length mismatch between coeffs and ffs')
-        self.coeffs = coeffs.copy()
-        self.ffs = ffs
-
-        self.lcff = sum((c * self.ffs[i] for i, c in enumerate(self.coeffs)), ZeroFF())
-        nt_int = None
-        t_start = None
-        t_end = None
-        for ff in self.ffs:
-            if ff.nt_int is not None and ff.nt_int > 1:
-                if nt_int is None:
-                    nt_int = ff.nt_int
-                    t_start = ff.t_start
-                    t_end = ff.t_end
-                else:
-                    if ff.nt != nt_int or ff.t_start != t_start or ff.t_end != t_end:
-                        print('Cannot handle combination of multiple time-varying flow fields with '
-                              'different parameters for the moment', file=sys.stderr)
-                        exit(1)
-        super().__init__(t_start, t_end, nt_int)
-
-    def value(self, t, x):
-        return self.lcff.value(t, x)
-
-    def d_value(self, t, x):
-        return self.lcff.d_value(t, x)
-
-    def dualize(self):
-        new_coeffs = np.zeros(self.coeffs.shape[0])
-        for i, c in enumerate(self.coeffs):
-            if self.ffs[i].dualizable:
-                new_coeffs[i] = -1. * c
-            else:
-                new_coeffs[i] = c
-        return LCFF(new_coeffs, self.ffs)
-
-
-class LVFF(FlowField):
-    """
-    Flow field varying linearly with time, spatially uniform at each timestep.
-    """
-
-    def __init__(self, ff_val, gradient, time_scale):
-        super().__init__()
-        self.ff_val = np.array(ff_val)
-        self.gradient = np.array(gradient)
-        self.t_end = time_scale
-
-    def value(self, t, x):
-        return self.ff_val + t * self.gradient
-
-    def d_value(self, t, x):
-        return np.zeros(2)
 
 
 class TrapFF(FlowField):
