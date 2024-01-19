@@ -7,7 +7,7 @@ import scipy.integrate as scitg
 from numpy import ndarray
 from tqdm import tqdm
 
-from dabry.misc import directional_timeopt_control
+from dabry.misc import directional_timeopt_control, Utils
 from dabry.misc import terminal
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
@@ -72,19 +72,21 @@ class SolverEF(ABC):
 
     def __init__(self, mp: NavigationProblem,
                  total_duration: float,
-                 t_init: Optional[float] = None,
                  mode: str = 'time',
-                 target_radius: Optional[float] = None,
+                 max_depth: int = 10,
                  n_time: int = 100,
-                 costate_norm_bounds: tuple[float] = (0., 1.),
                  n_costate_angle: int = 30,
+                 t_init: Optional[float] = None,
                  n_costate_norm: int = 10,
-                 max_depth: int = 10):
+                 costate_norm_bounds: tuple[float] = (0., 1.),
+                 target_radius: Optional[float] = None):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
         if mode == 'energy':
             raise ValueError('Mode "energy" is not implemented yet')
+        # Problem is assumed to be well conditioned ! (non-dimensionalized)
         self.mp = mp
+        # Same for time
         self.total_duration = total_duration
         self.t_init = t_init if t_init is not None else self.mp.model.ff.t_start
         self.target_radius = target_radius if target_radius is not None else \
@@ -117,6 +119,8 @@ class SolverEF(ABC):
         self.obs_active = None
         self.obs_active_trigo = True
 
+        self.dyn_augsys = self.dyn_augsys_cartesian if self.mp.coords == Utils.COORD_CARTESIAN else self.dyn_augsys_gcs
+
     def setup(self):
         self.trajs = []
         self.traj_groups = []
@@ -126,10 +130,13 @@ class SolverEF(ABC):
         return self.t_init + self.total_duration
 
     def dyn_augsys(self, t: float, y: ndarray):
-        state, adjoint = y[:2], y[2:4]
-        return np.hstack((-self.mp.srf_max * adjoint / np.linalg.norm(adjoint) + self.mp.model.ff.value(t, state),
-                          -self.mp.model.ff.d_value(t, state).transpose() @ adjoint - self.mp.penalty.d_value(t,
-                                                                                                              state)))
+        pass
+
+    def dyn_augsys_cartesian(self, t: float, y: ndarray):
+        return self.mp.augsys_dyn_timeopt_cartesian(t, y[:2], y[2:])
+
+    def dyn_augsys_gcs(self, t: float, y: ndarray):
+        return self.mp.augsys_dyn_timeopt_gcs(t, y[:2], y[2:])
 
     def dyn_constr(self, t: float, x: ndarray):
         sign = (2. * self.obs_active_trigo - 1.)
@@ -238,7 +245,9 @@ class SolverEFResampling(SolverEF):
             res = scitg.solve_ivp(self.dyn_augsys, (site.t_init, self.t_upper_bound),
                                   np.array(tuple(site.state_origin) + tuple(site.costate_origin)),
                                   t_eval=t_eval,
-                                  events=self._events, dense_output=True, max_step=1e-1)
+                                  events=self._events, dense_output=True, max_step=0.5e-2 * self.total_duration)
+            if len(res.t) == 0:
+                continue
             traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
                                         events=self.t_events_to_dict(res.t_events))
             if traj.events['target'].shape[0] > 0:
@@ -260,8 +269,8 @@ class SolverEFResampling(SolverEF):
                                                          -state_aug_cross[2:] / np.linalg.norm(state_aug_cross[2:])))
                 self.obs_active_trigo = cross >= 0.
                 res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, self.t_upper_bound), state_aug_cross[:2],
-                                      t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs], )
-                # max_step=1e-1,)
+                                      t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],
+                                      max_step=0.5e-2 * self.total_duration)
                 if len(res.t) > 0:
                     controls = np.array([self.dyn_constr(t, x) - self.mp.model.ff.value(t, x)
                                          for t, x in zip(res.t, res.y.transpose())])

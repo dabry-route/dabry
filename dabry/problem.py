@@ -1,11 +1,11 @@
 import json
 import math
 import os
+import warnings
 from datetime import datetime
 from typing import Optional, List
 
 import numpy as np
-import yaml
 from numpy import ndarray, pi
 
 from dabry.aero import MermozAero, Aero
@@ -16,8 +16,7 @@ from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearF
     FlowField, VortexFF, ZeroFF, WrapperFF
 from dabry.misc import Utils, csv_to_dict
 from dabry.model import Model
-from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, Obstacle, MeanObs, LSEMaxiObs, \
-    EightFrameObs, WrapperObs
+from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, Obstacle, WrapperObs
 from dabry.penalty import Penalty, CirclePenalty, NullPenalty, WrapperPen
 
 """
@@ -60,8 +59,8 @@ class NavigationProblem:
         self.bl: ndarray = bl.copy() if bl is not None else np.array(())
         self.tr: ndarray = tr.copy() if tr is not None else np.array(())
 
-        self.scale_length = Utils.distance(self.x_init, self.x_target, coords=self.coords)
-        self.scale_time = self.scale_length / self.srf_max
+        self.length_reference = np.min(bl - tr) if bl is not None and tr is not None else \
+            np.linalg.norm(x_target - x_init)
 
         self.name = 'Unnamed problem' if name is None else name
 
@@ -71,13 +70,20 @@ class NavigationProblem:
         self.io = DDFmanager()
 
         # Bound computation domain on wind grid limits
-        if bl.size == 0 or tr.size == 0:
+        if self.bl.size == 0 or self.tr.size == 0:
             ff = self.model.ff
             if type(ff) == DiscreteFF:
-                self.bl = np.array((ff.bounds[0, 0], ff.bounds[1, 0]))
-                self.tr = np.array((ff.bounds[0, 1], ff.bounds[1, 1]))
+                self.bl = np.array((ff.bounds[-2, 0], ff.bounds[-1, 0]))
+                self.tr = np.array((ff.bounds[-2, 1], ff.bounds[-1, 1]))
+                x_init_out_of_bounds = np.any(self.x_init < self.bl) or np.any(self.x_init > self.tr)
+                x_target_out_of_bounds = np.any(self.x_target < self.bl) or np.any(self.x_target > self.tr)
+
+                if x_init_out_of_bounds or x_target_out_of_bounds:
+                    warnings.warn('When setting problem bounds to ff bounds, the following were out of bounds: '
+                                  f'{"x_init " if x_init_out_of_bounds else ""}'
+                                  f'{"x_target" if x_target_out_of_bounds else ""}', category=UserWarning)
             else:
-                w = 1.15 * self.scale_length
+                w = 1.15 * self.length_reference
                 self.bl = (self.x_init + self.x_target) / 2. - np.array((w / 2., w / 2.))
                 self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
 
@@ -108,10 +114,6 @@ class NavigationProblem:
             json.dump(pb_info, f, indent=4)
 
     @property
-    def scale_speed(self):
-        return self.scale_length / self.scale_time
-
-    @property
     def coords(self):
         return self.model.coords
 
@@ -139,6 +141,24 @@ class NavigationProblem:
 
     def middle(self, x1, x2):
         return Utils.middle(x1, x2, self.coords)
+
+    def timeopt_control_cartesian(self, costate: ndarray):
+        return -self.srf_max * costate / np.linalg.norm(costate)
+
+    def timeopt_control_gcs(self, state: ndarray, costate: ndarray):
+        costate_mod = costate.dot(np.array(((1 / np.cos(state[..., 1]), 0.), (0., 1.))))
+        return -self.srf_max * costate_mod / np.linalg.norm(costate_mod)
+
+    def augsys_dyn_timeopt(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
+        return np.hstack((self.model.dyn.value(t, state, control),
+                          -self.model.dyn.d_value__d_state(t, state, control).transpose() @ costate
+                          - self.penalty.d_value(t, state)))
+
+    def augsys_dyn_timeopt_cartesian(self, t: float, state: ndarray, costate: ndarray):
+        return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_cartesian(costate))
+
+    def augsys_dyn_timeopt_gcs(self, t: float, state: ndarray, costate: ndarray):
+        return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_gcs(state, costate))
 
     def control_angle(self, adjoint, state=None):
         if self.coords == Utils.COORD_CARTESIAN:
@@ -172,22 +192,41 @@ class NavigationProblem:
         return -1
 
     def non_dimensionalize(self):
-        # TODO: continue
-        x_init = self.x_init / self.scale_length
-        x_target = self.x_target / self.scale_length
-        bl = self.bl / self.scale_length
-        tr = self.tr / self.scale_length
-        srf_max = self.srf_max / self.scale_speed
+        if self.coords == Utils.COORD_CARTESIAN:
+            scale_length = self.length_reference
+            x_init = (self.x_init - self.bl) / scale_length
+            x_target = (self.x_target - self.bl) / scale_length
+            bl_pb_adim = np.zeros(2)
+            bl_wrappers = self.bl.copy()
+            tr_pb_adim = (self.tr - self.bl) / scale_length
+            srf_max = self.srf_max
+        else:
+            # Means self.coords == Utils.COORD_GCS:
+            # Do not rescale lon/lat because computation will be false
+            scale_length = 1.
+            x_init = self.x_init
+            x_target = self.x_target
+            bl_pb_adim = self.bl
+            bl_wrappers = np.zeros(2)
+            tr_pb_adim = self.tr
+            # In GCS convention, srf is specified in meters per seconds and
+            # has to be cast to radians per seconds before regular scaling
+            srf_max = self.srf_max / (Utils.EARTH_RADIUS if self.coords == Utils.COORD_GCS else 1.)
+            # srf is now either m/s or rad/s and length_reference is either m or rad
+            # so build time scale over it
 
-        wrapper_ff = WrapperFF(self.model.ff, self.scale_length, self.bl, self.scale_time, self.model.ff.t_start)
+        scale_time = scale_length / srf_max
+        # In the new system, srf_max is unit
+        srf_max = 1.
+
+        wrapper_ff = WrapperFF(self.model.ff, scale_length, bl_wrappers, scale_time, self.model.ff.t_start)
 
         obstacles = self.obstacles.copy()
         obstacles.remove(self.obs_frame)
-        obstacles = [WrapperObs(obs, self.scale_length, self.bl) for obs in obstacles]
-        penalty = WrapperPen(self.penalty, self.scale_length, self.bl, self.scale_time, self.model.ff.t_start)
-        return NavigationProblem(wrapper_ff, x_init, x_target, srf_max, obstacles=obstacles, bl=bl, tr=tr,
-                                 penalty=penalty)
-
+        obstacles = [WrapperObs(obs, self.length_reference, self.bl) for obs in obstacles]
+        penalty = WrapperPen(self.penalty, self.length_reference, self.bl, scale_time, self.model.ff.t_start)
+        return NavigationProblem(wrapper_ff, x_init, x_target, srf_max,
+                                 bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty)
 
     # TODO: reimplement this
     def htarget(self):
@@ -266,13 +305,12 @@ class NavigationProblem:
 
     @classmethod
     def base_name(cls, name: str):
-        for group, prbs in cls.ALL.items():
-            for b_name, attrs in prbs:
-                if b_name == name:
-                    return name
-                if attrs['s_name'] == name:
-                    return b_name
-        raise ValueError('Cannot resolve problem name "%s"' % name)
+        for b_name, attrs in cls.ALL.items():
+            if b_name == name:
+                return name
+            if attrs['s_name'] == name:
+                return b_name
+        raise ValueError('Cannot find problem "%s". Check problems.csv' % name)
 
     @classmethod
     def from_name(cls, name: str):
@@ -525,54 +563,89 @@ class NavigationProblem:
             ff = GyreFF(sf * 0, sf * -0.5, sf * 2, sf * 2, 30.)
             return cls(ff, x_init, x_target, v_a, bl=bl, tr=tr)
 
-        if b_name == 'sanjuan_dublin_ortho':
+        if b_name == "atlantic":
+            # TODO: get a well traced gcs wind test case
+            ff = DiscreteFF.from_npz(os.path.join(os.path.dirname(__file__), '..', 'data_demo',
+                                                  'atlantic', 'flow.npz'))
+            x_init = np.array((-0.7, 0.6))  # radians
+            x_target = np.array((-0.15, 1.1))  # radians
+
+            srf = 15.  # meters per second
+            return cls(ff, x_init, x_target, srf)
+
+        if b_name == "spherical_geodesic":
+            x_init = np.array((0, np.pi / 6))
+            x_target = np.array((np.pi / 4, np.pi / 6))
+            # Only DiscreteFF can be GCS so discretize a null flow field
+            ff = DiscreteFF.from_ff(ZeroFF(), (x_init - np.array((0.15, 0.15)), x_target + np.array((0.15, 0.15))),
+                                    coords='gcs')
+            srf = 1  # meters per second
+            return cls(ff, x_init, x_target, srf)
+
+        if b_name == "chertovskih":
+            srf = 1.
+            x_init = np.array((0.5, 0.))
+            x_target = np.array((-0.7, -6))
+            bl = np.array((-1.5, -6.2))
+            tr = np.array((1.5, 0.2))
+            ff = ChertovskihFF()
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
+
+        if b_name == "dakar_natal_constr":
             v_a = 23.
-            ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
-                                                 'data_demo/ncdc/san-juan-dublin-flattened-ortho.mz/wind.h5'))
+            x_init = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
+            x_target = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
+            ff = DiscreteFF.from_h5(os.path.join(os.path.dirname(__file__), '..',
+                                                 'data_demo/ncdc/44W_16S_9W_25N_20210929_00/wind.h5'))
+            # obstacles = [LSEMaxiObs([
+            #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-17, 10)),
+            #                    Utils.DEG_TO_RAD * np.array((-30, 15))),
+            #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-20, 5)),
+            #                    Utils.DEG_TO_RAD * np.array((-17, 10))),
+            #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-30, 7)),
+            #                    Utils.DEG_TO_RAD * np.array((-20, 5)))
+            # ])]
+            return cls(ff, x_init, x_target, v_a, )  # obstacles=obstacles)
 
-            # point = np.array([-66.116666, 18.465299])
-            # x_init = np.array(proj(*point)) + 500e3 * np.ones(2)
-            x_init = np.array((-5531296, 2020645))
+        if b_name == "obstacle":
+            srf = 1.
+            x_init = np.array((0., 0.))
+            x_target = np.array((1., 0.))
+            ff = ZeroFF()
+            obstacles = [CircleObs((0.5, 0.1), 0.2)]
+            return cls(ff, x_init, x_target, srf, obstacles=obstacles)
 
-            # point = np.array([-6.2602732, 53.3497645])
-            # x_target = np.array(proj(*point)) - 500e3 * np.ones(2)
-            x_target = np.array((-415146, 511759))
+        if b_name == "trap":
+            # TODO: adjust coefficients
+            srf = 1.
+            x_init = np.array((0., 0.))
+            x_target = np.array((1., 0.))
+            bl = np.array((-0.2, -0.6))
+            tr = np.array((1.2, 0.6))
 
-            super().__init__(ff, x_init, x_target, v_a)
+            nt = 40
+            wind_value = 4 * np.ones(nt)
+            center = np.zeros((nt, 2))
+            for k in range(30):
+                center[10 + k] = np.array((0.05 * k, 0.))
+            radius = 0.2 * np.ones(nt)
 
+            ff = TrapFF(wind_value, center, radius, t_end=4)
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
 
-class NPBandFF(NavigationProblem):
-    def __init__(self):
-        v_a = 20.7
-        sf = 1.
-        x_init = sf * np.array((20., 20.))
-        x_target = sf * np.array((80., 80.))
-        bl = sf * np.array((15, 15))
-        tr = sf * np.array((85, 85))
+        if b_name == "stream":
+            # TODO: fix case
+            srf = 1.
+            sf = 1.
+            x_init = sf * np.array((1, 1))
+            x_target = sf * np.array((4, 4))
+            bl = sf * np.array((0.75, 0.75))
+            tr = sf * np.array((4.25, 4.25))
 
-        band_wind = BandFF(np.array((0., 50.)), np.array((1., 0.)), np.array((-20., 0.)), 20)
-        ff = DiscreteFF.from_ff(band_wind, np.array((bl, tr)))
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
-
-
-class NPTrapFF(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-        sf = 3e6
-        x_init = sf * np.array((0., 0.))
-        x_target = sf * np.array((1., 0.))
-        bl = sf * np.array((-0.2, -0.6))
-        tr = sf * np.array((1.2, 0.6))
-
-        nt = 40
-        wind_value = 80 * np.ones(nt)
-        center = np.zeros((nt, 2))
-        for k in range(30):
-            center[10 + k] = sf * np.array((0.05 * k, 0.))
-        radius = sf * 0.2 * np.ones(nt)
-
-        ff = TrapFF(wind_value, center, radius, t_end=400000)
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
+            band_wind = BandFF(np.array((0., 2.5)), np.array((1., 0.)), np.array((-1., 0.)), 1)
+            ff = DiscreteFF.from_ff(band_wind, np.array((bl, tr)), force_no_diff=True)
+            ff.compute_derivatives()
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
 
 
 class NPSanjuanDublinOrthoTV(NavigationProblem):
@@ -586,68 +659,3 @@ class NPSanjuanDublinOrthoTV(NavigationProblem):
                                              'data_demo/ncdc/san-juan-dublin-flattened-ortho-tv.mz/wind.h5'))
 
         super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr, autoframe=True)
-
-
-class NPObs(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-        sf = 3e6
-        x_init = sf * np.array((0.1, 0.))
-        x_target = sf * np.array((0.9, 0.))
-        ff = UniformFF(np.array((5., 5.)))
-
-        obstacles = []
-        # obstacles.append(CircleObs(sf * np.array((0.4, 0.1)), sf * 0.1))
-        # obstacles.append(CircleObs(sf * np.array((0.5, 0.)), sf * 0.1))
-        obstacles.append(MeanObs([CircleObs(sf * np.array((0.4, 0.1)), sf * 0.1),
-                                  CircleObs(sf * np.array((0.5, 0.)), sf * 0.1)]))
-        obstacles.append(FrameObs(sf * np.array((0.05, -0.45)), sf * np.array((0.95, 0.45))))
-
-        super().__init__(ff, x_init, x_target, v_a, obstacles=obstacles, autoframe=False)
-
-
-class NPChertovskih(NavigationProblem):
-    def __init__(self):
-        v_a = 1.
-        x_init = np.array((0.5, 0.))
-        x_target = np.array((-0.7, -6))
-        bl = np.array((-1.5, -6.2))
-        tr = np.array((1.5, 0.2))
-        ff = ChertovskihFF()
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr)
-
-
-class NPDakarNatalConstr(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-        x_init = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
-        x_target = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
-        ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
-                                             'data_demo/ncdc/44W_16S_9W_25N_20210929_00/wind.h5'))
-        obstacles = [LSEMaxiObs([
-            GreatCircleObs(Utils.DEG_TO_RAD * np.array((-17, 10)),
-                           Utils.DEG_TO_RAD * np.array((-30, 15))),
-            GreatCircleObs(Utils.DEG_TO_RAD * np.array((-20, 5)),
-                           Utils.DEG_TO_RAD * np.array((-17, 10))),
-            GreatCircleObs(Utils.DEG_TO_RAD * np.array((-30, 7)),
-                           Utils.DEG_TO_RAD * np.array((-20, 5)))
-        ])]
-        super().__init__(ff, x_init, x_target, v_a, obstacles=obstacles)
-
-
-class NPPenalty(NavigationProblem):
-    def __init__(self):
-        ff = ZeroFF()
-        x_init = np.zeros(2)
-        x_target = np.array((1., 0.))
-        srf = 1.
-        penalty = CirclePenalty(np.array((0.5, 0.)), 0.2, 100.)
-        super().__init__(ff, x_init, x_target, srf, penalty=penalty)
-
-
-all_problems = {'band': (NPBandFF, 'Band of flow field'),
-                'trap': (NPTrapFF, 'Trap of flow field'),
-                'sanjuan-dublin-ortho-tv': (NPSanjuanDublinOrthoTV, 'San-Juan Dublin Ortho proj Unsteady'),
-                'obs': (NPObs, 'Obstacle'),
-                'chertovskih2020': (NPChertovskih, 'Chertovskih 2020'),
-                'dakar-natal-constr': (NPDakarNatalConstr, 'Dakar Natal Constrained')}

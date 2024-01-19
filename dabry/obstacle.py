@@ -88,8 +88,7 @@ class CircleObs(Obstacle):
     Circle obstacle defined by center and radius
     """
 
-    def __init__(self, center: Union[ndarray, tuple[float]], radius: float):
-        self.center = np.zeros(center.shape)
+    def __init__(self, center: Union[ndarray, tuple[float, float]], radius: float):
         self.center = center.copy() if isinstance(center, ndarray) else np.array(center)
         self.radius = radius
         self._sqradius = radius ** 2

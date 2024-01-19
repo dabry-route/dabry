@@ -10,4 +10,11 @@ four_vortices,4vor,others,False,False,False,Four vortices almost symmetrical wit
 moving_vortex,movor,standard,True,False,False,Moving vortex as an example of simple analytical unsteady flow field
 linear_time_varying,tv_linear,others,True,False,False,Gradient of flow field where the intensity of the gradient evolves in time
 moving_vortices,movors,experimental,True,False,False,Multiple analytical vortices moving in the frame
-gyre_rhoads2010,gyre_rhoads2010,standard,False,False,False,
+gyre_rhoads2010,gyre_rhoads2010,standard,False,False,False,Special gyre setting showing a sharp discontinuity in the value function (time-to-go) at the origin
+spherical_geodesic,spherical_geodesic,experimental,False,True,False,No flow field. Verification case for the computation of the geodesic path in plate carree coordinates.
+atlantic,atlantic,standard,True,True,False,
+chertovskih,chertovskih,standard,False,False,True,Problem setting in which the optimal trajectory to destination follows a border (state constraint).
+dakar_natal_constr,dakar_natal_constr,others,True,True,True,"Problem with unsteady flow field, spherical coordinates and featuring obstacles. Appearing in [Schnitzler et al., https://doi.org/10.1109/LCSYS.2023.3284339]"
+obstacle,obs,experimental,False,False,True,No flow field. Verification case featuring a single obstacle.
+trap,trap,experimental,True,False,False,Special case with flow field acting as a trap for the vehicle.
+stream,stream,experimental,False,False,False,"Stream of flow field. Appearing in [Subramani et al., https://doi.org/10.1016/j.ocemod.2016.01.006]"

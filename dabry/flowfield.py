@@ -198,6 +198,13 @@ class DiscreteFF(FlowField):
         else:
             self.value = self._value_unsteady
             self.d_value = self._d_value_unsteady
+            self.t_start = bounds[0, 0]
+            self.t_end = bounds[0, 1]
+
+    @classmethod
+    def from_npz(cls, filepath):
+        ff = np.load(filepath)
+        return cls(ff['values'], ff['bounds'], str(ff['coords']))
 
     @classmethod
     def from_h5(cls, filepath, **kwargs):
@@ -212,7 +219,7 @@ class DiscreteFF(FlowField):
             # Checking consistency before loading
             Utils.ensure_coords(coords)
 
-            values = np.array(ff_data['data'])
+            values = np.array(ff_data['data']).squeeze()
 
             # Time bounds
             t_start = ff_data['ts'][0]
@@ -233,7 +240,7 @@ class DiscreteFF(FlowField):
 
     @classmethod
     def from_ff(cls, ff: FlowField, grid_bounds: Union[tuple[ndarray, ndarray], ndarray],
-                nx=100, ny=100, nt=50, **kwargs):
+                nx=100, ny=100, nt=50, coords: Optional[str] = None, **kwargs):
         """
         Create discrete flow field by sampling another flow field
         :param ff: Flow field
@@ -278,8 +285,10 @@ class DiscreteFF(FlowField):
                             grad_values[i, j, ...] = ff.d_value(t, state)
                         else:
                             grad_values[k, i, j, ...] = ff.d_value(t, state)
-        coords = Utils.COORD_GCS if isinstance(ff, DiscreteFF) and ff.coords == Utils.COORD_GCS \
-            else Utils.COORD_CARTESIAN
+
+        coords = coords if coords is not None else \
+            Utils.COORD_GCS if hasattr(ff, 'coords') and ff.coords == Utils.COORD_GCS \
+                else Utils.COORD_CARTESIAN
         return cls(values, bounds, coords, grad_values=grad_values, **kwargs)
 
     @classmethod
@@ -449,30 +458,32 @@ class DiscreteFF(FlowField):
         Computes the derivatives of the flow field with a central difference scheme
         on the flow field native grid
         """
-        self.grad_values = np.zeros(self.values.shape + (2,))
+        grad_shape = self.values.shape + (2,)
+        self.grad_values = np.zeros(grad_shape)
+        inside_shape = np.array(grad_shape, dtype=int)
+        inside_shape[-4] -= 2  # x-axis
+        inside_shape[-3] -= 2  # y-axis
+        inside_shape = tuple(inside_shape)
 
-        nt, nx, ny, _ = self.values.shape
         # Use order 2 precision derivative
-        factor = 1 / Utils.EARTH_RADIUS if self.coords == 'gcs' else 1.
-        self.grad_values[:, 1:-1, 1:-1, ...] = factor * (
-            np.stack(((self.values[:, 2:, 1:-1, 0] - self.values[:, :-2, 1:-1, 0]) / (2 * self.spacings[1]),
-                      (self.values[:, 1:-1, 2:, 0] - self.values[:, 1:-1, :-2, 0]) / (2 * self.spacings[2]),
-                      (self.values[:, 2:, 1:-1, 1] - self.values[:, :-2, 1:-1, 1]) / (2 * self.spacings[1]),
-                      (self.values[:, 1:-1, 2:, 1] - self.values[:, 1:-1, :-2, 1]) / (2 * self.spacings[2])),
+        self.grad_values[..., 1:-1, 1:-1, :, :] = \
+            np.stack(((self.values[..., 2:, 1:-1, 0] - self.values[..., :-2, 1:-1, 0]) / (2 * self.spacings[-2]),
+                      (self.values[..., 1:-1, 2:, 0] - self.values[..., 1:-1, :-2, 0]) / (2 * self.spacings[-1]),
+                      (self.values[..., 2:, 1:-1, 1] - self.values[..., :-2, 1:-1, 1]) / (2 * self.spacings[-2]),
+                      (self.values[..., 1:-1, 2:, 1] - self.values[..., 1:-1, :-2, 1]) / (2 * self.spacings[-1])),
                      axis=-1
-                     ).reshape((nt, nx - 2, ny - 2, 2, 2))
-        )
+                     ).reshape(inside_shape)
         # Padding to full grid
         # Borders
-        self.grad_values[:, 0, 1:-1, ...] = self.grad_values[:, 1, 1:-1, ...]
-        self.grad_values[:, -1, 1:-1, ...] = self.grad_values[:, -2, 1:-1, ...]
-        self.grad_values[:, 1:-1, 0, ...] = self.grad_values[:, 1:-1, 1, ...]
-        self.grad_values[:, 1:-1, -1, ...] = self.grad_values[:, 1:-1, -2, ...]
+        self.grad_values[..., 0, 1:-1, :, :] = self.grad_values[..., 1, 1:-1, :, :]
+        self.grad_values[..., -1, 1:-1, :, :] = self.grad_values[..., -2, 1:-1, :, :]
+        self.grad_values[..., 1:-1, 0, :, :] = self.grad_values[..., 1:-1, 1, :, :]
+        self.grad_values[..., 1:-1, -1, :, :] = self.grad_values[..., 1:-1, -2, :, :]
         # Corners
-        self.grad_values[:, 0, 0, ...] = self.grad_values[:, 1, 1, ...]
-        self.grad_values[:, 0, -1, ...] = self.grad_values[:, 1, -2, ...]
-        self.grad_values[:, -1, 0, ...] = self.grad_values[:, -2, 1, ...]
-        self.grad_values[:, -1, -1, ...] = self.grad_values[:, -2, -2, ...]
+        self.grad_values[..., 0, 0, :, :] = self.grad_values[..., 1, 1, :, :]
+        self.grad_values[..., 0, -1, :, :] = self.grad_values[..., 1, -2, :, :]
+        self.grad_values[..., -1, 0, :, :] = self.grad_values[..., -2, 1, :, :]
+        self.grad_values[..., -1, -1, :, :] = self.grad_values[..., -2, -2, :, :]
 
     def dualize(self):
         # Override method so that the dual of a DiscreteFF stays a DiscreteFF and
@@ -493,25 +504,29 @@ class WrapperFF(FlowField):
 
     def __init__(self, ff: FlowField, scale_length: float, bl: ndarray,
                  scale_time: float, time_origin: float):
-        super().__init__()
         self.ff: FlowField = ff
         self.scale_length = scale_length
         self.bl: ndarray = bl.copy()
         self.scale_time = scale_time
         self.time_origin = time_origin
-        self.scale_speed = scale_length / scale_time
+        # In GCS convention, flow field magnitude is in meters per seconds
+        # and should be cast to radians per seconds before regular scaling
+        self.scale_speed = scale_length / scale_time * (Utils.EARTH_RADIUS if ff.coords == Utils.COORD_GCS else 1.)
         # Multiplication will be quicker than division
-        self._scaler_length = 1 / self.scale_length
-        self._scaler_time = 1 / self.scale_time
         self._scaler_speed = 1 / self.scale_speed
+        super().__init__(coords=ff.coords, t_start=(ff.t_start - self.time_origin)/self.scale_time,
+                         t_end=None if ff.t_end is None else (ff.t_end - self.time_origin)/self.scale_time)
 
     def value(self, t, x):
-        return self._scaler_speed * self.ff.value((t - self.time_origin) * self._scaler_time,
-                                                  (x - self.bl) * self._scaler_length)
+        return self._scaler_speed * self.ff.value(self.time_origin + t * self.scale_time,
+                                                  self.bl + x * self.scale_length)
 
     def d_value(self, t, x):
-        return self._scaler_speed * self.ff.d_value((t - self.time_origin) * self._scaler_time,
-                                                    (x - self.bl) * self._scaler_length)
+        return self._scaler_speed * self.ff.d_value(self.time_origin + t * self.scale_time,
+                                                    self.bl + x * self.scale_length)
+
+    def __getattr__(self, item):
+        return self.ff.__getattribute__(item)
 
 
 class TwoSectorsFF(FlowField):
@@ -973,8 +988,7 @@ class BandFF(FlowField):
             return self.w_value
 
     def d_value(self, t, x):
-        print('Undefined', file=sys.stderr)
-        exit(1)
+        raise NotImplementedError('Please discretize FF before using derivatives')
 
 
 class TrapFF(FlowField):

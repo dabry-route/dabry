@@ -90,18 +90,11 @@ class ZermeloS2Dyn(Dynamics):
 
     def __init__(self, ff: FlowField):
         super().__init__(ff)
-        self._factor = 1 / Utils.EARTH_RADIUS
 
     def value(self, t, x, u):
-        return self._factor * (
-                np.diag([1 / cos(x[1]), 1.]) @ (u + self.ff.value(t, x)))
+        return np.diag([1 / cos(x[1]), 1.]) @ (u + self.ff.value(t, x))
 
     def d_value__d_state(self, t, x, u):
-        # TODO : rewrite this
-        wind_gradient = np.zeros((x.size, x.size))
-        wind_gradient[:] = self.ff.d_value(t, x)
-        res = self._factor * np.column_stack((np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 0],
-                                              -np.diag([sin(x[1]) / (cos(x[1]) ** 2), 0.]) @
-                                              (u + self.ff.value(t, x)) +
-                                              np.diag([1 / cos(x[1]), 1.]) @ wind_gradient[:, 1]))
-        return res
+        return np.diag((1 / cos(x[1]), 1)) @ self.ff.d_value(t, x) + \
+               np.column_stack((np.zeros(2), np.diag((sin(x[1]) / (cos(x[1]) ** 2), 0.)) @ u + self.ff.value(t, x)))
+

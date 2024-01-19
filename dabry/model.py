@@ -42,7 +42,7 @@ class Model:
 
     @classmethod
     def which_coords(cls, ff: FlowField):
-        return Utils.COORD_GCS if isinstance(ff, DiscreteFF) and ff.coords == Utils.COORD_GCS else\
+        return Utils.COORD_GCS if hasattr(ff, 'coords') and ff.coords == Utils.COORD_GCS else\
             Utils.COORD_CARTESIAN
 
     @property

@@ -16,11 +16,19 @@ Optional fields are:
     - (nx/nlon, ny/nlat, 2) float if steady
     - (nt, nx/nlon, ny/nlat, 2) float if unsteady
 
-Units are SI.
+## Units
 
- - For the flow field magnitude, meters per second
- - For time bounds, seconds
- - For the space bounds, 
-    - meters in cartesian mode
-    - radians in gcs mode. Values are expected to be in ]-pi, pi].
+### Cartesian
+The length units are named u_length (m, ft, ...) and the time units are named u_time (s, h, ...).
+ - Magnitude: must be in u_length / u_time
+ - Bounds:
+    - Time bounds in u_time
+    - Space bounds in u_length
+
+### GCS data
+When data comes from extraction of longitude/latitude data, units are of different nature as regards magnitude of the flow field vectors and the time and space coordinates.
+ - Magnitude: meters per seconds
+ - Bounds:
+    - Time: seconds
+    - Space: radians. Values are expected to be in ]-pi, pi].
 
