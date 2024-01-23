@@ -7,7 +7,7 @@ import scipy.integrate as scitg
 from numpy import ndarray
 from tqdm import tqdm
 
-from dabry.misc import directional_timeopt_control, Utils
+from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost
 from dabry.misc import terminal
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
@@ -38,7 +38,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 class Site:
     def __init__(self, t_init: float, index_t: int,
-                 state_origin: ndarray, costate_origin: ndarray,
+                 state_origin: ndarray, costate_origin: ndarray, n_time: int,
                  obstacle_name="", index_t_obs: int = 0):
         self.t_init = t_init
         self.index_t = index_t
@@ -49,6 +49,7 @@ class Site:
         self.obstacle_name = obstacle_name
         self.index_t_obs = index_t_obs
         self.closed = False
+        self.right_nb: list[Optional[Site]] = [None] * n_time
 
     def in_obs_at(self, index: int):
         if len(self.obstacle_name) == 0:
@@ -60,11 +61,17 @@ class Site:
     def assign_traj(self, traj: Trajectory):
         self.traj = traj
 
+    def init_right_nb(self, site):
+        self.right_nb[0] = site
+
     def traj_at_index(self, index: int):
         return np.concatenate((self.traj.states[index - self.index_t], self.traj.costates[index - self.index_t]))
 
     def control_at_index(self, index: int):
         return self.traj.controls[index - self.index_t]
+
+    def cost_at_index(self, index: int):
+        return self.traj.cost[index - self.index_t]
 
 
 class SolverEF(ABC):
@@ -172,10 +179,10 @@ class SolverEF(ABC):
 
     def cost_map(self, nx: int = 100, ny: int = 100) -> ndarray:
         res = np.nan * np.ones((nx, ny))
-        spacings = (self.mp.tr - self.mp.bl) / (np.array((nx, ny)) - np.ones(2).astype(np.int32))
+        bl, spacings = self.mp.get_grid_params(nx, ny)
         for traj in self.trajs:
-            for k, state_aug in enumerate(traj.states):
-                position = (state_aug - self.mp.bl) / spacings
+            for k, state in enumerate(traj.states):
+                position = (state - bl) / spacings
                 index = tuple(
                     np.clip(np.floor(position).astype(np.int32), np.array((0, 0)), np.array((nx - 1, ny - 1))))
                 if np.isnan(res[index]) or res[index] > traj.times[k]:
@@ -207,8 +214,8 @@ class SolverEFBisection(SolverEF):
             res = scitg.solve_ivp(self.dyn_augsys, (self.t_init, self.t_upper_bound),
                                   np.array(tuple(self.mp.x_init) + tuple(costate)), t_eval=t_eval,
                                   events=self._events)
-            traj = Trajectory.cartesian(t_eval, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
-                                        events=self.t_events_to_dict(res.t_events))
+            traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
+                                        events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
             if traj.events['target'].shape[0] > 0:
                 self.success = True
             traj_group.append(traj)
@@ -231,8 +238,11 @@ class SolverEFResampling(SolverEF):
 
     def setup(self):
         super().setup()
-        self._to_shoot_sites = [Site(self.t_init, 0, self.mp.x_init, np.array((np.cos(theta), np.sin(theta))))
+        self._to_shoot_sites = [Site(self.t_init, 0, self.mp.x_init, np.array((np.cos(theta), np.sin(theta))),
+                                     self.n_time)
                                 for theta in np.linspace(0, 2 * np.pi, self.n_costate_angle, endpoint=False)]
+        for i_site, site in enumerate(self._to_shoot_sites):
+            site.init_right_nb(self._to_shoot_sites[(i_site + 1) % len(self._to_shoot_sites)])
         self._sites = [site for site in self._to_shoot_sites]
         self._site_groups = [tuple(self._sites)]
 
@@ -249,7 +259,7 @@ class SolverEFResampling(SolverEF):
             if len(res.t) == 0:
                 continue
             traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
-                                        events=self.t_events_to_dict(res.t_events))
+                                        events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
             if traj.events['target'].shape[0] > 0:
                 self.success = True
                 self.solution_sites.append(site)
@@ -274,7 +284,8 @@ class SolverEFResampling(SolverEF):
                 if len(res.t) > 0:
                     controls = np.array([self.dyn_constr(t, x) - self.mp.model.ff.value(t, x)
                                          for t, x in zip(res.t, res.y.transpose())])
-                    traj_obs = Trajectory.cartesian(res.t, res.y.transpose(), controls=controls)
+                    traj_obs = Trajectory.cartesian(res.t, res.y.transpose(), controls=controls,
+                                                    cost=res.t - self.t_init)
                     traj = traj + traj_obs
             trajs.append(traj)
             self.trajs.append(traj)
@@ -286,7 +297,8 @@ class SolverEFResampling(SolverEF):
     def get_traj_and_id(self, depth: int) -> list[tuple[int, Trajectory]]:
         res = []
         for site in self._site_groups[depth]:
-            res.append((self._sites.index(site), site.traj))
+            if site.traj is not None:
+                res.append((self._sites.index(site), site.traj))
         return res
 
     def add_new_sites(self):
@@ -295,7 +307,7 @@ class SolverEFResampling(SolverEF):
         for i_s, site in enumerate(prev_sites):
             if site.closed:
                 continue
-            site_nb = prev_sites[(i_s + 1) % len(prev_sites)]
+            site_nb = site.right_nb[site.id_check_right]
             new_id_check_right = site.id_check_right
             new_site: Optional[Site] = None
             for i in range(site.id_check_right, self.n_time - 1):
@@ -312,15 +324,55 @@ class SolverEFResampling(SolverEF):
                         state_aug_nb[2:] = -site_nb.control_at_index(i) * np.linalg.norm(state_aug[2:])
                     if np.sum(np.square((state_aug - state_aug_nb)[:2])) > self._max_dist_sq:
                         new_site = Site(self.times[i], i, 0.5 * (state_aug[:2] + state_aug_nb[:2]),
-                                        0.5 * (state_aug[2:] + state_aug_nb[2:]))
+                                        0.5 * (state_aug[2:] + state_aug_nb[2:]), self.n_time)
                         break
                 except IndexError:
                     continue
+            # Update the neighbouring property
+            site.right_nb[site.id_check_right: new_id_check_right + 1] = \
+                [site_nb] * (new_id_check_right - site.id_check_right + 1)
             site.id_check_right = new_id_check_right
             i_site = self._sites.index(site)
             if new_site is not None:
                 self._sites = self._sites[:i_site + 1] + [new_site] + self._sites[i_site + 1:]
                 self._to_shoot_sites.append(new_site)
                 new_sites.append(new_site)
+                site.right_nb[new_id_check_right] = new_site
+                new_site.right_nb[new_site.id_check_right] = site_nb
 
         self._site_groups.append(tuple(new_sites))
+
+    def cost_map_triangle(self, nx: int = 100, ny: int = 100) -> ndarray:
+        res = np.inf * np.ones((nx, ny))
+        grid_vectors = np.stack(np.meshgrid(np.linspace(self.mp.bl[0], self.mp.tr[0], nx),
+                                            np.linspace(self.mp.bl[1], self.mp.tr[1], ny),
+                                            indexing='ij'), -1)
+        for i_site, site in enumerate(self._sites):
+            for index_t in range(site.index_t, self.n_time - 1):
+                site_nb = site.right_nb[index_t]
+
+                # site, index_t    1 o --------- o 3 site, index + 1
+                #                    | \   tri1  |
+                #                    |    \      |
+                #                    | tri2  \   |
+                #                    |          \|
+                # site_nb, index_t 2 o-----------o 4 site_nb, index_t + 1
+                try:
+                    point1 = site.traj_at_index(index_t)[:2]
+                    point3 = site.traj_at_index(index_t + 1)[:2]
+                    point2 = site_nb.traj_at_index(index_t)[:2]
+                    point4 = site_nb.traj_at_index(index_t + 1)[:2]
+                    cost1 = site.cost_at_index(index_t)
+                    cost3 = site.cost_at_index(index_t + 1)
+                    cost2 = site_nb.cost_at_index(index_t)
+                    cost4 = site_nb.cost_at_index(index_t + 1)
+                    tri1_cost = triangle_mask_and_cost(grid_vectors, point1, point3, point4, cost1, cost3, cost4)
+                    np.minimum(res, tri1_cost, out=res)
+                    if index_t > 0:
+                        tri2_cost = triangle_mask_and_cost(grid_vectors, point1, point4, point2, cost1, cost4, cost2)
+                        np.minimum(res, tri2_cost, out=res)
+                except (TypeError, AttributeError, IndexError):
+                    pass
+
+        return res
+

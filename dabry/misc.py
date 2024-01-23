@@ -64,6 +64,33 @@ def csv_to_dict(csv_file_path):
     return data_dict
 
 
+def triangle_mask_and_cost(x: ndarray, p1: ndarray, p2: ndarray, p3: ndarray,
+                c1: float, c2: float, c3: float) -> ndarray:
+    """
+    Builds a cost map as a linear interpolation of values (c1, c2, c3)
+    over the triangle (p1, p2, p3) and masked to be zero out of the triangle
+    :param x: Regular grid of space (nx, ny, 2)
+    :param p1: First vertex coordinates (2,)
+    :param p2: Second vertex coordinates (2,)
+    :param p3: Third vertex coordinates (2,)
+    :param c1: First vertex cost (2,)
+    :param c2: Second vertex cost (2,)
+    :param c3: Third vertex cost (2,)
+    :return: (nx, ny) cost map
+    """
+    # Formulas from https://mathworld.wolfram.com/TriangleInterior.html
+    v0 = p1
+    v1 = p2 - p1
+    v2 = p3 - p1
+    infs = np.inf * np.ones(x.shape[:-1])
+    if np.isclose(np.cross(v1, v2), 0.):
+        return infs
+    a = (np.cross(x, v2) - np.cross(v0, v2)) / np.cross(v1, v2)
+    b = -(np.cross(x, v1) - np.cross(v0, v1)) / np.cross(v1, v2)
+    return np.where(a > 0, np.where(b > 0, np.where(a + b < 1, ((1 - (a + b)) * c1 + a * c2 + b * c3),
+                                                    infs), infs), infs)
+
+
 class Utils:
     COORD_CARTESIAN = 'cartesian'
     COORD_GCS = 'gcs'

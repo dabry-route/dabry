@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, List
 
 import numpy as np
-from numpy import ndarray, pi
+from numpy import ndarray
 
 from dabry.aero import MermozAero, Aero
 from dabry.ddf_manager import DDFmanager
@@ -94,6 +94,16 @@ class NavigationProblem:
             self.obs_frame = FrameObs(bl_frame, tr_frame)
             self.obstacles.append(self.obs_frame)
         # self.obstacles.extend(NavigationProblem.spherical_frame(bl, tr, offset_rel=0))
+
+    def get_grid_params(self, nx: int, ny: int) -> tuple[ndarray, ndarray]:
+        """
+        Get the (bottom-left corner, spacings) representation of the underlying grid
+        for the required discretization
+        :param nx: Discretization number on first axis
+        :param ny: Discretization number on second axis
+        :return: (bottom-left corner, spacings)
+        """
+        return self.bl, (self.tr - self.bl) / (np.array((nx, ny)) - np.ones(2).astype(np.int32))
 
     def update_ff(self, ff: FlowField):
         self.model = Model.zermelo(ff)
@@ -349,24 +359,24 @@ class NavigationProblem:
             tr = np.array([2, 2])
 
             ff = sum([VortexFF(np.array((0.5, 0.8)), -1.),
-                      VortexFF(np.array((0.8, 0.2)), -0.8),
-                      VortexFF(np.array((0.6, -0.5)), 0.8)], ZeroFF())
+                      VortexFF(np.array((0.8, 0.2)), 0.8),
+                      VortexFF(np.array((0.6, -0.5)), -0.8)], ZeroFF())
 
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "gyre":
-            srf = 0.05
+            srf = 1.
 
             sf = 1.
 
             x_init = sf * np.array((0.6, 0.6))
             x_target = sf * np.array((2.4, 2.4))
-            bl = sf * np.array((0.5, 0.5))
-            tr = sf * np.array((2.5, 2.5))
+            # bl = sf * np.array((0.5, 0.5))
+            # tr = sf * np.array((2.5, 2.5))
 
-            ff = GyreFF(0.5, 0.5, 2., 2., pi * 0.02)
+            ff = GyreFF(0.5, 0.5, 2., 2., 2 * np.pi)
 
-            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
+            return cls(ff, x_init, x_target, srf, name=b_name)
 
         if b_name == "gyre_li2020":
             v_a = 0.6

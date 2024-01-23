@@ -20,13 +20,15 @@ Optional fields are:
 
 ### Cartesian
 The length units are named u_length (m, ft, ...) and the time units are named u_time (s, h, ...).
+
  - Magnitude: must be in u_length / u_time
  - Bounds:
     - Time bounds in u_time
     - Space bounds in u_length
 
 ### GCS data
-When data comes from extraction of longitude/latitude data, units are of different nature as regards magnitude of the flow field vectors and the time and space coordinates.
+When data comes from extraction of longitude/latitude data, units are of different nature as regards magnitude of the flow field vectors and the time and space coordinates. In this case, exact units are required, which are the following ones
+
  - Magnitude: meters per seconds
  - Bounds:
     - Time: seconds
