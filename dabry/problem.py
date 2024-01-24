@@ -365,7 +365,7 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "gyre":
-            srf = 1.
+            srf = 1
 
             sf = 1.
 
@@ -374,7 +374,7 @@ class NavigationProblem:
             # bl = sf * np.array((0.5, 0.5))
             # tr = sf * np.array((2.5, 2.5))
 
-            ff = GyreFF(0.5, 0.5, 2., 2., 2 * np.pi)
+            ff = GyreFF(0.5, 0.5, 2., 2., 1)
 
             return cls(ff, x_init, x_target, srf, name=b_name)
 
@@ -431,21 +431,18 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "big_rankine":
-            srf = 1.
+            srf = 0.1
 
-            f = 1.
-            fs = srf
+            x_init = np.array([0., 0.])
+            x_target = np.array([1.5, 0.])
 
-            x_init = f * np.array([0., 0.])
-            x_target = f * np.array([1., 0.])
-
-            bl = f * np.array([-0.2, -1.])
-            tr = f * np.array([1.2, 1.])
-            omega = f * np.array(((0.2, -0.2), (0.8, 0.2)))
+            bl = np.array((-0.5, -1.))
+            tr = np.array((2., 1.))
+            omega = np.array(((0.2, -0.2), (0.8, 0.2)))
 
             vortex = [
-                RankineVortexFF(omega[0], f * fs * -7., f * 1.),
-                RankineVortexFF(omega[1], f * fs * -7., f * 1.)
+                RankineVortexFF(omega[0], -7., 1.),
+                RankineVortexFF(omega[1], -7., 1.)
             ]
 
             ff = vortex[0] + vortex[1]

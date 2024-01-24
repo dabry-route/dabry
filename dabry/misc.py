@@ -30,6 +30,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
+def non_terminal(func):
+    func.terminal = False
+    func.direction = -1.
+    return func
+
+
 def terminal(func):
     func.terminal = True
     func.direction = -1.
@@ -48,7 +54,7 @@ def directional_timeopt_control(ff_val: ndarray, d: ndarray, srf_max: float):
     ff_ortho = ff_val @ n
     angle = np.arctan2(np.sqrt(np.max((srf_max ** 2 - ff_ortho ** 2, 0.))), ff_ortho)
     u = srf_max * np.array(((np.cos(angle), -np.sin(angle)), (np.sin(angle), np.cos(angle)))) @ (-n)
-    return ff_val + u
+    return u
 
 
 def csv_to_dict(csv_file_path):
@@ -65,7 +71,7 @@ def csv_to_dict(csv_file_path):
 
 
 def triangle_mask_and_cost(x: ndarray, p1: ndarray, p2: ndarray, p3: ndarray,
-                c1: float, c2: float, c3: float) -> ndarray:
+                           c1: float, c2: float, c3: float) -> ndarray:
     """
     Builds a cost map as a linear interpolation of values (c1, c2, c3)
     over the triangle (p1, p2, p3) and masked to be zero out of the triangle
