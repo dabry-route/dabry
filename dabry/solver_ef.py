@@ -7,7 +7,7 @@ import scipy.integrate as scitg
 from numpy import ndarray
 from tqdm import tqdm
 
-from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal
+from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha
 from dabry.misc import terminal
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
@@ -46,6 +46,7 @@ class Site:
         self.state_origin = state_origin.copy()
         self.costate_origin = costate_origin.copy()
         self.traj: Optional[Trajectory] = None
+        self.traj_full: Optional[Trajectory] = None
         self.id_check_next = index_t
         self.obstacle_name = obstacle_name
         self.index_t_obs = index_t_obs
@@ -73,9 +74,13 @@ class Site:
                     site_prev.n_time,
                     name=Site.name_from_parents_name(site_prev.name, site_next.name))
 
+    @property
+    def name_display(self):
+        return self.name[:3] + ('' if len(self.name) == 3 else ('-' + to_alpha(int(self.name[3:][::-1], 2))))
+
     @classmethod
     def build_prefix(cls, i: int):
-        return chr(65 + i // 676) + chr(65 + (i - 676 * (i // 676)) // 26) + chr(65 + i % 26)
+        return to_alpha(i).rjust(3, 'A')
 
     @classmethod
     def index_from_prefix(cls, prefix: str):
@@ -167,14 +172,52 @@ class Site:
         self.next_nb[index_t] = site_next
 
     def fill_traj(self, sites_dict, n_total_prefix):
-        # TODO: continue
-        index = self.index_t
         name_prev, name_next = Site.parents_name_from_name(self.name, n_total_prefix)
-        site_prev, site_next = sites_dict[name_prev], sites_dict[name_next]
-        index_u = self.index_t - 1
-        index_lo = max(site_prev.index_t, site_next.index_t)
-        while index > 0:
-            pass
+        coeff_prev, coeff_next = 0.5, 0.5
+        index_hi = self.index_t - 1
+        times = self.traj.times.copy()
+        states = self.traj.states.copy()
+        n = times.shape[0]
+        costates = self.traj.costates.copy() if self.traj.costates is not None else np.nan * np.ones((n, 2))
+        controls = self.traj.controls.copy() if self.traj.controls is not None else np.nan * np.ones((n, 2))
+        costs = self.traj.cost.copy()
+        while name_prev is not None and name_next is not None:
+            site_prev, site_next = sites_dict[name_prev], sites_dict[name_next]
+            index_lo = max(site_prev.index_t, site_next.index_t)
+            rec_prev = site_prev.index_t > site_next.index_t
+            s_prev = slice(index_lo - site_prev.index_t, index_hi - site_prev.index_t + 1)
+            s_next = slice(index_lo - site_next.index_t, index_hi - site_next.index_t + 1)
+            times = np.concatenate((site_prev.traj.times[s_prev], times))
+            states = np.concatenate((
+                coeff_prev * site_prev.traj.states[s_prev] + coeff_next * site_next.traj.states[s_next], states))
+            n = s_prev.stop - s_prev.start
+            costates_prev = np.nan * np.ones((n, 2)) if site_prev.traj.costates is None else site_prev.traj.costates[
+                s_prev]
+            costates_next = np.nan * np.ones((n, 2)) if site_next.traj.costates is None else site_next.traj.costates[
+                s_next]
+            costates = np.concatenate((coeff_prev * costates_prev + coeff_next * costates_next,
+                                       costates))
+            controls_prev = np.nan * np.ones((n, 2)) if site_prev.traj.controls is None else site_prev.traj.controls[
+                s_prev]
+            controls_next = np.nan * np.ones((n, 2)) if site_next.traj.controls is None else site_next.traj.controls[
+                s_next]
+            controls = np.concatenate((coeff_prev * controls_prev + coeff_next * controls_next,
+                                       controls))
+            costs = np.concatenate((coeff_prev * site_prev.traj.cost[s_prev] + coeff_next * site_next.traj.cost[s_next],
+                                    costs))
+            if index_lo == 0:
+                break
+            index_hi = index_lo - 1
+            if rec_prev:
+                name_prev = Site.parents_name_from_name(name_prev, n_total_prefix)[0]
+                coeff_prev = coeff_prev / 2
+                coeff_next = 1 - coeff_prev
+            else:
+                name_next = Site.parents_name_from_name(name_next, n_total_prefix)[1]
+                coeff_next = coeff_next / 2
+                coeff_prev = 1 - coeff_next
+        self.traj_full = Trajectory(times, states, self.traj.coords, controls=controls, costates=costates,
+                                    cost=costs, info_dict=self.traj.info_dict.copy())
 
     def __str__(self):
         return f"<Site {self.name}>"
@@ -195,7 +238,9 @@ class SolverEF(ABC):
                  t_init: Optional[float] = None,
                  n_costate_norm: int = 10,
                  costate_norm_bounds: tuple[float] = (0., 1.),
-                 target_radius: Optional[float] = None):
+                 target_radius: Optional[float] = None,
+                 abs_max_step: Optional[float] = None,
+                 rel_max_step: Optional[float] = None):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
         if mode == 'energy':
@@ -225,7 +270,7 @@ class SolverEF(ABC):
             name = obs.__class__.__name__
             n = classes.get(name)
             if n is None:
-                classes[name] = 0
+                classes[name] = 1
             else:
                 classes[name] += 1
             full_name = name + '_' + str(n if n is not None else 0)
@@ -234,6 +279,9 @@ class SolverEF(ABC):
         self._events = list(self.events.values())
         self.obs_active = None
         self.obs_active_trigo = True
+        abs_max_step = self.total_duration if abs_max_step is None else abs_max_step
+        rel_max_step = 5e-3 if rel_max_step is None else rel_max_step
+        self.max_int_step: Optional[float] = min(abs_max_step, rel_max_step * self.total_duration)
 
         self.dyn_augsys = self.dyn_augsys_cartesian if self.mp.coords == Utils.COORD_CARTESIAN else self.dyn_augsys_gcs
 
@@ -366,7 +414,7 @@ class SolverEFResampling(SolverEF):
             res = scitg.solve_ivp(self.dyn_augsys, (site.t_init, self.t_upper_bound),
                                   np.array(tuple(site.state_origin) + tuple(site.costate_origin)),
                                   t_eval=t_eval,
-                                  events=self._events, dense_output=True, max_step=0.5e-2 * self.total_duration)
+                                  events=self._events, dense_output=True, max_step=self.max_int_step)
             if len(res.t) == 0:
                 continue
             traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
@@ -391,7 +439,7 @@ class SolverEFResampling(SolverEF):
                 self.obs_active_trigo = cross >= 0.
                 res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, self.t_upper_bound), state_aug_cross[:2],
                                       t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],
-                                      max_step=0.5e-2 * self.total_duration)
+                                      max_step=self.max_int_step)
                 if len(res.t) > 0:
                     controls = np.array([self.dyn_constr(t, x) - self.mp.model.ff.value(t, x)
                                          for t, x in zip(res.t, res.y.transpose())])
@@ -407,11 +455,11 @@ class SolverEFResampling(SolverEF):
         self.add_new_sites()
         self.depth += 1
 
-    def get_traj_and_id(self, depth: int) -> list[tuple[str, Trajectory]]:
-        res = []
+    def get_trajs_by_depth(self, depth: int) -> Dict[str, Trajectory]:
+        res = {}
         for site in self._site_groups[depth]:
             if site.traj is not None:
-                res.append((site.name, site.traj))
+                res[site.name_display] = site.traj
         return res
 
     def site_front(self, index_t):
@@ -444,6 +492,10 @@ class SolverEFResampling(SolverEF):
                         break
                     if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
                         new_site = Site.from_parents(site, site_nb, i)
+                        if len(self.mp._in_obs(new_site.state_origin)) > 0:
+                            # Choose not to resample points lying within obstacles
+                            site.closed = True
+                            new_site = None
                         break
                     new_id_check_next = i
                 except IndexError:
@@ -454,8 +506,8 @@ class SolverEFResampling(SolverEF):
             site.id_check_next = new_id_check_next
             if new_site is not None:
                 self.sites[new_site.name] = new_site
-                self._to_shoot_sites.append(new_site)
                 new_sites.append(new_site)
+                self._to_shoot_sites.append(new_site)
 
         self._site_groups.append(tuple(new_sites))
 

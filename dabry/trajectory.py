@@ -114,3 +114,8 @@ class Trajectory:
         info_dict = self.info_dict.copy().update(other.info_dict)
         return Trajectory(times, states, self.coords,
                           controls=controls, costates=costates, cost=cost, events=events, info_dict=info_dict)
+
+    def copy(self):
+        return Trajectory(self.times.copy(), self.states.copy(), self.coords, controls=self.controls.copy(),
+                          costates=self.costates.copy(), cost=self.cost.copy(), events=self.events.copy(),
+                          info_dict=self.info_dict.copy())

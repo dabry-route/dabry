@@ -18,3 +18,4 @@ dakar_natal_constr,dakar_natal_constr,others,True,True,True,"Problem with unstea
 obstacle,obs,experimental,False,False,True,No flow field. Verification case featuring a single obstacle.
 trap,trap,experimental,True,False,False,Special case with flow field acting as a trap for the vehicle.
 stream,stream,experimental,False,False,False,"Stream of flow field. Appearing in [Subramani et al., https://doi.org/10.1016/j.ocemod.2016.01.006]"
+three_vortices_obs,3vorobs,experimental,False,False,True,

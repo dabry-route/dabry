@@ -42,6 +42,20 @@ def terminal(func):
     return func
 
 
+def _to_alpha(i: int):
+    if i == 0:
+        return 'A'
+    else:
+        return _to_alpha(i // 26) + chr(65 + (i % 26))
+
+
+def to_alpha(i: int):
+    if i == 0:
+        return 'A'
+    else:
+        return _to_alpha(i)
+
+
 def directional_timeopt_control(ff_val: ndarray, d: ndarray, srf_max: float):
     """
     :param ff_val: Flow field vector

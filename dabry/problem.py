@@ -17,7 +17,7 @@ from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearF
 from dabry.misc import Utils, csv_to_dict
 from dabry.model import Model
 from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, Obstacle, WrapperObs
-from dabry.penalty import Penalty, CirclePenalty, NullPenalty, WrapperPen
+from dabry.penalty import Penalty, NullPenalty, WrapperPen
 
 """
 problem.py
@@ -181,6 +181,7 @@ class NavigationProblem:
             return np.pi / 2. - np.arctan2(*-pl[::-1])
 
     def in_obs(self, x):
+        # TODO: remove redundant function
         obs_list = []
         res = False
         for i, obs in enumerate(self.obstacles):
@@ -192,6 +193,9 @@ class NavigationProblem:
             return [-1]
         else:
             return obs_list
+
+    def _in_obs(self, state):
+        return [obs for obs in self.obstacles if obs.value(state) < 0.]
 
     def orthodromic(self):
         fb = GSTargetFB(self.model.ff, self.srf_max, self.x_target)
@@ -363,6 +367,24 @@ class NavigationProblem:
                       VortexFF(np.array((0.6, -0.5)), -0.8)], ZeroFF())
 
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
+
+        if b_name == "three_vortices_obs":
+            srf = 1.
+
+            x_init = np.array([0., 0.])
+            x_target = np.array([1.5, 0.])
+
+            bl = np.array([-1, -1])
+            tr = np.array([2, 1.5])
+
+            ff = sum([VortexFF(np.array((0.5, 0.8)), 1.),
+                      VortexFF(np.array((0.8, 0.2)), -0.8),
+                      VortexFF(np.array((0.6, -0.5)), 0.8)], ZeroFF())
+            obs = [CircleObs(np.array((0.5, 0.8)), 0.2),
+                   CircleObs(np.array((0.8, 0.2)), 0.2),
+                   CircleObs(np.array((0.6, -0.5)), 0.2)]
+
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, obstacles=obs, name=b_name)
 
         if b_name == "gyre":
             srf = 1
@@ -599,10 +621,10 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
 
         if b_name == "dakar_natal_constr":
-            v_a = 23.
+            v_a = 1.  # 23.
             x_init = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
             x_target = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
-            ff = DiscreteFF.from_h5(os.path.join(os.path.dirname(__file__), '..',
+            ff = 1/23 * DiscreteFF.from_h5(os.path.join(os.path.dirname(__file__), '..',
                                                  'data_demo/ncdc/44W_16S_9W_25N_20210929_00/wind.h5'))
             # obstacles = [LSEMaxiObs([
             #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-17, 10)),
@@ -612,7 +634,7 @@ class NavigationProblem:
             #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-30, 7)),
             #                    Utils.DEG_TO_RAD * np.array((-20, 5)))
             # ])]
-            return cls(ff, x_init, x_target, v_a, )  # obstacles=obstacles)
+            return cls(ff, x_init, x_target, v_a, name=b_name)  # obstacles=obstacles)
 
         if b_name == "obstacle":
             srf = 1.
