@@ -33,5 +33,6 @@ setuptools.setup(
     license="GPL-3",
     packages=setuptools.find_packages(),
     install_requires=_parse_requirements("requirements.txt"),
-    include_package_data=True
+    include_package_data=True,
+    package_data={'': ['dabry/problems.csv', 'data/*']}
 )
