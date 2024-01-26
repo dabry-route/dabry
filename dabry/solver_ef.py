@@ -394,6 +394,7 @@ class SolverEFResampling(SolverEF):
         self._site_groups: list[tuple[Site]] = []
         self._to_shoot_sites: list[Site] = []
         self.solution_sites: list[Site] = []
+        self.setup()
 
     def setup(self):
         super().setup()
@@ -408,7 +409,7 @@ class SolverEFResampling(SolverEF):
 
     def step(self):
         trajs: list[Trajectory] = []
-        for site in tqdm(self._to_shoot_sites):
+        for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth):
             t_eval = np.linspace(site.t_init, self.t_upper_bound, self.n_time - site.index_t)
             if t_eval.shape[0] <= 1:
                 continue
@@ -462,8 +463,10 @@ class SolverEFResampling(SolverEF):
 
     def solve(self, max_depth=None):
         self.max_depth = max_depth if max_depth is not None else self.max_depth
-        while self.depth < self.max_depth and len(self._to_shoot_sites) > 0:
+        for _ in range(self.max_depth):
             self.step()
+        for site in self.solution_sites:
+            site.fill_traj(self.sites, self.n_costate_angle)
 
     def get_trajs_by_depth(self, depth: int) -> Dict[str, Trajectory]:
         res = {}
