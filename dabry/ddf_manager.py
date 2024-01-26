@@ -6,11 +6,8 @@ from datetime import datetime, timedelta
 from time import strftime
 from typing import Optional, List
 
-import cdsapi
 import h5py
 import numpy as np
-import pygrib
-import pyproj
 from numpy import ndarray
 
 from dabry.misc import Utils
@@ -238,6 +235,10 @@ class DDFmanager:
             dset[:] = penalty.grid
 
     def dump_ff_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Utils.COORD_GCS):
+        try:
+            import pygrib
+        except ImportError:
+            raise ImportError('"pygrib" module required to handle grib2 files')
         if coords == Utils.COORD_CARTESIAN:
             print('Cartesian conversion not handled yet', file=sys.stderr)
             exit(1)
@@ -316,6 +317,10 @@ class DDFmanager:
         :param x_init: Initial point (lon, lat) in degrees
         :param x_target: Target point (lon, lat) in degrees
         """
+        try:
+            import pyproj
+        except ImportError:
+            raise ImportError('"pyproj" module required for geometrical grib2 file selection')
         # data_dir = '/home/bastien/Documents/data/wind/ncdc/20210929'
         # output_path = '/home/bastien/Documents/data/wind/ncdc/'
         x_init = np.array(x_init)
@@ -367,6 +372,10 @@ class DDFmanager:
     @staticmethod
     def query_era5(start_date: datetime, stop_date: datetime,
                    output_dir: str, pressure_level='1000', resolution='0.5'):
+        try:
+            import cdsapi
+        except ImportError:
+            raise ImportError('"cdsapi" module required to query ERA5')
         in_cache = []
         days_required = DDFmanager.days_between(start_date, stop_date)
         db_path = os.path.join(output_dir, resolution, pressure_level)
