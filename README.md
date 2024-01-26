@@ -1,4 +1,4 @@
-# Optimal trajectory planning in flow fields
+# Trajectory optimization in flow fields
 
 ![](docs/movor.gif)
 

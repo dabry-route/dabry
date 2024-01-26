@@ -99,24 +99,6 @@ class CircleObs(Obstacle):
         return x - self.center
 
 
-class EightFrameObs(Obstacle):
-    """
-    Smooth rectangle frame based on the eightth norm ||x||_8
-    """
-    def __init__(self, bl: ndarray, tr: ndarray):
-        self.bl = bl.copy()
-        self.tr = tr.copy()
-        self.center = 0.5 * (self.bl + self.tr)
-        self.scaler = np.diag(1 / (0.5 * (self.tr - self.bl)))
-        super().__init__()
-
-    def value(self, x: ndarray):
-        return (1 / 8) * (1. - np.sum(np.power(np.dot(x[..., :2] - self.center, self.scaler), 8), -1))
-
-    def d_value(self, x: ndarray) -> ndarray:
-        return np.power(np.dot(x[..., :2] - self.center, self.scaler), 7)
-
-
 class FrameObs(Obstacle):
     """
     Rectangle obstacle acting as a frame
@@ -148,8 +130,9 @@ class FrameObs(Obstacle):
 
 class GreatCircleObs(Obstacle):
 
+    # TODO: validate this class
     def __init__(self, p1, p2, z1=None, z2=None, autobox=False):
-        # TODO: validate this class
+
         # Cross product of p1 and p2 points TOWARDS obstacle
         # z1 and z2 are zone limiters
         X1 = np.array((np.cos(p1[0]) * np.cos(p1[1]),

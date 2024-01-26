@@ -95,6 +95,7 @@ class CirclePenalty(Penalty):
 
 class DiscretePenalty(Penalty):
 
+    # TODO: validate this class
     def __init__(self, *args):
         super().__init__()
         self.data = None
