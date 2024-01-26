@@ -360,17 +360,17 @@ class NavigationProblem:
             srf = 1.
 
             x_init = np.array([0., 0.])
-            x_target = np.array([1.5, 0.])
+            x_target = np.array([1., 0.])
 
-            bl = np.array([-1, -1])
-            tr = np.array([2, 1.5])
+            bl = np.array([-0.1, -1])
+            tr = np.array([1.1, 1])
 
-            ff = sum([VortexFF(np.array((0.5, 0.8)), 1.),
-                      VortexFF(np.array((0.8, 0.2)), -0.8),
-                      VortexFF(np.array((0.6, -0.5)), 0.8)], ZeroFF())
-            obs = [CircleObs(np.array((0.5, 0.8)), 0.2),
-                   CircleObs(np.array((0.8, 0.2)), 0.2),
-                   CircleObs(np.array((0.6, -0.5)), 0.2)]
+            ff = sum([VortexFF(np.array((0.5, 0.5)), 1.),
+                      VortexFF(np.array((0.5, 0.)), -1),
+                      VortexFF(np.array((0.5, -0.5)), 1)], ZeroFF())
+            obs = [CircleObs(np.array((0.5, 0.5)), 0.1),
+                   CircleObs(np.array((0.5, 0.)), 0.1),
+                   CircleObs(np.array((0.5, -0.5)), 0.1)]
 
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, obstacles=obs, name=b_name)
 
