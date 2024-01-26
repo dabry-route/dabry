@@ -35,8 +35,8 @@ class Obstacle(ABC):
         pass
 
     @terminal
-    def event(self, _: float, x: ndarray):
-        return self.value(x)
+    def event(self, time: float, state_aug: ndarray):
+        return self.value(state_aug[:2])
 
     @abstractmethod
     def value(self, x: ndarray):
@@ -95,7 +95,7 @@ class CircleObs(Obstacle):
         super().__init__()
 
     def value(self, x: ndarray):
-        return 0.5 * (np.sum(np.square(x[:2] - self.center)) - self._sqradius)
+        return 0.5 * (np.sum(np.square(x - self.center)) - self._sqradius)
 
     def d_value(self, x: ndarray) -> ndarray:
         return x - self.center

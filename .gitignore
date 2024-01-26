@@ -179,3 +179,5 @@ env-display
 /DVISUPATH
 /dev/energy.ipynb
 /dev/see_wind.ipynb
+
+.~lock*
