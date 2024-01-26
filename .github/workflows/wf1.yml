@@ -21,4 +21,4 @@ jobs:
           pip install .
       - name: Test computation
         run: |
-          python tests/test_solverefresampling.py linear
+          python tests/test_solverefr_batch.py

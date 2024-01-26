@@ -608,7 +608,7 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
 
         if b_name == "dakar_natal_constr":
-            v_a = 23.
+            v_a = 23.  # meters per seconds
             x_init = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
             x_target = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
             ff = DiscreteFF.from_h5(

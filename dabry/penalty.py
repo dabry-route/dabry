@@ -58,18 +58,15 @@ class WrapperPen(Penalty):
         self.scale_time = scale_time
         self.time_origin = time_origin
         self.scale_speed = scale_length / scale_time
-        # Multiplication will be quicker than division
-        self._scaler_length = 1 / self.scale_length
-        self._scaler_time = 1 / self.scale_time
         self._scaler_speed = 1 / self.scale_speed
 
     def value(self, t, x):
-        return self._scaler_speed * self.penalty.value((t - self.time_origin) * self._scaler_time,
-                                                       (x - self.bl) * self._scaler_length)
+        return self._scaler_speed * self.penalty.value(
+            self.time_origin + t * self.scale_time, self.bl + x * self.scale_length)
 
     def d_value(self, t, x):
-        return self._scaler_speed * self.penalty.d_value((t - self.time_origin) * self._scaler_time,
-                                                         (x - self.bl) * self._scaler_length)
+        return self._scaler_speed * self.penalty.d_value(
+            self.time_origin + t * self.scale_time, self.bl + x * self.scale_length)
 
 
 class NullPenalty(Penalty):

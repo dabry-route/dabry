@@ -7,6 +7,7 @@ from time import strftime
 from typing import Optional, List
 
 import h5py
+import pygrib
 import numpy as np
 from numpy import ndarray
 
@@ -235,10 +236,6 @@ class DDFmanager:
             dset[:] = penalty.grid
 
     def dump_ff_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Utils.COORD_GCS):
-        try:
-            import pygrib
-        except ImportError:
-            raise ImportError('"pygrib" module required to handle grib2 files')
         if coords == Utils.COORD_CARTESIAN:
             print('Cartesian conversion not handled yet', file=sys.stderr)
             exit(1)

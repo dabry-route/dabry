@@ -73,14 +73,12 @@ class WrapperObs(Obstacle):
         self.obs: Obstacle = obs
         self.scale_length = scale_length
         self.bl: ndarray = bl.copy()
-        # Multiplication will be quicker than division
-        self._scaler_length = 1 / self.scale_length
 
     def value(self, x):
-        return self.obs.value((x - self.bl) * self._scaler_length)
+        return self.obs.value(self.bl + x * self.scale_length)
 
     def d_value(self, x):
-        return self.obs.d_value((x - self.bl) * self._scaler_length)
+        return self.obs.d_value(self.bl + x * self.scale_length)
 
 
 class CircleObs(Obstacle):
