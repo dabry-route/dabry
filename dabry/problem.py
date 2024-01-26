@@ -59,7 +59,7 @@ class NavigationProblem:
         self.bl: ndarray = bl.copy() if bl is not None else np.array(())
         self.tr: ndarray = tr.copy() if tr is not None else np.array(())
 
-        self.length_reference = np.min(bl - tr) if bl is not None and tr is not None else \
+        self.length_reference = np.min(tr - bl) if bl is not None and tr is not None else \
             np.linalg.norm(x_target - x_init)
 
         self.name = 'Unnamed problem' if name is None else name
@@ -205,7 +205,12 @@ class NavigationProblem:
         # TODO continue implementation
         return -1
 
-    def non_dimensionalize(self):
+    def rescale(self):
+        """
+        Builds a new problem where space and time variables are of unit magnitude
+        and srf_max is 1
+        :return: A rescaled NavigationProblem
+        """
         if self.coords == Utils.COORD_CARTESIAN:
             scale_length = self.length_reference
             x_init = (self.x_init - self.bl) / scale_length
@@ -215,7 +220,7 @@ class NavigationProblem:
             tr_pb_adim = (self.tr - self.bl) / scale_length
             srf_max = self.srf_max
         else:
-            # Means self.coords == Utils.COORD_GCS:
+            # Case self.coords == Utils.COORD_GCS
             # Do not rescale lon/lat because computation will be false
             scale_length = 1.
             x_init = self.x_init
@@ -235,8 +240,8 @@ class NavigationProblem:
 
         obstacles = self.obstacles.copy()
         obstacles.remove(self.obs_frame)
-        obstacles = [WrapperObs(obs, self.length_reference, self.bl) for obs in obstacles]
-        penalty = WrapperPen(self.penalty, self.length_reference, self.bl, scale_time, self.model.ff.t_start)
+        obstacles = [WrapperObs(obs, scale_length, bl_wrapper) for obs in obstacles]
+        penalty = WrapperPen(self.penalty, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
         return NavigationProblem(wrapper_ff, x_init, x_target, srf_max,
                                  bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty)
 
@@ -352,21 +357,6 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "three_vortices":
-            srf = 1.
-
-            x_init = np.array([0., 0.])
-            x_target = np.array([1., 0.])
-
-            bl = np.array([-1, -1])
-            tr = np.array([2, 2])
-
-            ff = sum([VortexFF(np.array((0.5, 0.8)), -1.),
-                      VortexFF(np.array((0.8, 0.2)), 0.8),
-                      VortexFF(np.array((0.6, -0.5)), -0.8)], ZeroFF())
-
-            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
-
-        if b_name == "three_vortices_obs":
             srf = 1.
 
             x_init = np.array([0., 0.])
@@ -580,15 +570,14 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf)
 
         if b_name == 'gyre_rhoads2010':
-            v_a = 1.
-            sf = 1.
-            x_init = sf * np.array((0, 0.25))
-            x_target = sf * np.array((0.03, -0.25))
-            bl = sf * np.array((-1, -0.5))
-            tr = sf * np.array((1., 0.5))
+            srf = 1.
+            x_init = np.array((0, 0.25))
+            x_target = np.array((0.03, -0.25))
+            bl = np.array((-1, -0.5))
+            tr = np.array((1., 0.5))
 
-            ff = GyreFF(sf * 0, sf * -0.5, sf * 2, sf * 2, 30.)
-            return cls(ff, x_init, x_target, v_a, bl=bl, tr=tr)
+            ff = GyreFF(0, -0.5, 2, 2, 2)
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
 
         if b_name == "atlantic":
             # TODO: get a well traced gcs wind test case

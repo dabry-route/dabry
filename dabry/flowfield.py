@@ -508,7 +508,6 @@ class WrapperFF(FlowField):
     """
     Wrap a flow field to work with appropriate units
     """
-
     def __init__(self, ff: FlowField, scale_length: float, bl: ndarray,
                  scale_time: float, time_origin: float):
         self.ff: FlowField = ff

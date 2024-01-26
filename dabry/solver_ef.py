@@ -230,7 +230,7 @@ class Site:
 class SolverEF(ABC):
     _ALL_MODES = ['time', 'energy']
 
-    def __init__(self, mp: NavigationProblem,
+    def __init__(self, pb: NavigationProblem,
                  total_duration: float,
                  mode: str = 'time',
                  max_depth: int = 20,
@@ -247,12 +247,12 @@ class SolverEF(ABC):
         if mode == 'energy':
             raise ValueError('Mode "energy" is not implemented yet')
         # Problem is assumed to be well conditioned ! (non-dimensionalized)
-        self.mp = mp
+        self.pb = pb
         # Same for time
         self.total_duration = total_duration
-        self.t_init = t_init if t_init is not None else self.mp.model.ff.t_start
+        self.t_init = t_init if t_init is not None else self.pb.model.ff.t_start
         self.target_radius = target_radius if target_radius is not None else \
-            0.025 * np.linalg.norm(self.mp.tr - self.mp.bl)
+            0.025 * np.linalg.norm(self.pb.tr - self.pb.bl)
         self._target_radius_sq = self.target_radius ** 2
         self.times = np.linspace(self.t_init, self.t_upper_bound, n_time)
         self.costate_norm_bounds = costate_norm_bounds
@@ -267,7 +267,7 @@ class SolverEF(ABC):
         self.events = {'target': self._event_target}
         self.obstacles = {}
         classes = {}
-        for obs in self.mp.obstacles:
+        for obs in self.pb.obstacles:
             name = obs.__class__.__name__
             n = classes.get(name)
             if n is None:
@@ -284,7 +284,7 @@ class SolverEF(ABC):
         rel_max_step = 5e-3 if rel_max_step is None else rel_max_step
         self.max_int_step: Optional[float] = min(abs_max_step, rel_max_step * self.total_duration)
 
-        self.dyn_augsys = self.dyn_augsys_cartesian if self.mp.coords == Utils.COORD_CARTESIAN else self.dyn_augsys_gcs
+        self.dyn_augsys = self.dyn_augsys_cartesian if self.pb.coords == Utils.COORD_CARTESIAN else self.dyn_augsys_gcs
 
     def setup(self):
         self.trajs = []
@@ -298,27 +298,27 @@ class SolverEF(ABC):
         pass
 
     def dyn_augsys_cartesian(self, t: float, y: ndarray):
-        return self.mp.augsys_dyn_timeopt_cartesian(t, y[:2], y[2:])
+        return self.pb.augsys_dyn_timeopt_cartesian(t, y[:2], y[2:])
 
     def dyn_augsys_gcs(self, t: float, y: ndarray):
-        return self.mp.augsys_dyn_timeopt_gcs(t, y[:2], y[2:])
+        return self.pb.augsys_dyn_timeopt_gcs(t, y[:2], y[2:])
 
     def dyn_constr(self, t: float, x: ndarray):
         sign = (2. * self.obs_active_trigo - 1.)
         d = np.array(((0., -sign), (sign, 0.))) @ self.obs_active.d_value(x)
-        ff_val = self.mp.model.ff.value(t, x)
-        return ff_val + directional_timeopt_control(ff_val, d, self.mp.srf_max)
+        ff_val = self.pb.model.ff.value(t, x)
+        return ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max)
 
     @non_terminal
     def _event_target(self, _, x):
-        return np.sum(np.square(x[:2] - self.mp.x_target)) - self._target_radius_sq
+        return np.sum(np.square(x[:2] - self.pb.x_target)) - self._target_radius_sq
 
     @terminal
     def _event_quit_obs(self, t, x):
         n = self.obs_active.d_value(x) / np.linalg.norm(self.obs_active.d_value(x))
-        ff_val = self.mp.model.ff.value(t, x)
+        ff_val = self.pb.model.ff.value(t, x)
         ff_ortho = ff_val @ n
-        return self.mp.srf_max - np.abs(ff_ortho)
+        return self.pb.srf_max - np.abs(ff_ortho)
 
     def t_events_to_dict(self, t_events: list[ndarray]) -> Dict[str, ndarray]:
         d = {}
@@ -338,7 +338,7 @@ class SolverEF(ABC):
 
     def cost_map(self, nx: int = 100, ny: int = 100) -> ndarray:
         res = np.nan * np.ones((nx, ny))
-        bl, spacings = self.mp.get_grid_params(nx, ny)
+        bl, spacings = self.pb.get_grid_params(nx, ny)
         for traj in self.trajs:
             for k, state in enumerate(traj.states):
                 position = (state - bl) / spacings
@@ -371,7 +371,7 @@ class SolverEFBisection(SolverEF):
         for costate in tqdm(costate_init):
             t_eval = self.times
             res = scitg.solve_ivp(self.dyn_augsys, (self.t_init, self.t_upper_bound),
-                                  np.array(tuple(self.mp.x_init) + tuple(costate)), t_eval=t_eval,
+                                  np.array(tuple(self.pb.x_init) + tuple(costate)), t_eval=t_eval,
                                   events=self._events)
             traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
                                         events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
@@ -398,7 +398,7 @@ class SolverEFResampling(SolverEF):
     def setup(self):
         super().setup()
         self._to_shoot_sites = [
-            Site(self.t_init, 0, self.mp.x_init, np.array((np.cos(theta), np.sin(theta))), self.n_time,
+            Site(self.t_init, 0, self.pb.x_init, np.array((np.cos(theta), np.sin(theta))), self.n_time,
                  name=Site.build_prefix(i_theta))
             for i_theta, theta in enumerate(np.linspace(0, 2 * np.pi, self.n_costate_angle, endpoint=False))]
         for i_site, site in enumerate(self._to_shoot_sites):
@@ -435,18 +435,18 @@ class SolverEFResampling(SolverEF):
                 site.index_t_obs = site.index_t + res.t.shape[0]
                 state_aug_cross = res.sol(t_enter_obs)
                 cross = np.cross(self.obs_active.d_value(state_aug_cross[:2]),
-                                 self.mp.model.dyn.value(t_enter_obs, state_aug_cross[:2],
+                                 self.pb.model.dyn.value(t_enter_obs, state_aug_cross[:2],
                                                          -state_aug_cross[2:] / np.linalg.norm(state_aug_cross[2:])))
                 self.obs_active_trigo = cross >= 0.
                 sign = 2 * self.obs_active_trigo - 1
                 direction = np.array(((0, -sign), (sign, 0))) @ self.obs_active.d_value(state_aug_cross[:2])
-                if is_possible_direction(self.mp.model.ff.value(t_enter_obs, state_aug_cross[:2]),
-                                         direction, self.mp.srf_max):
+                if is_possible_direction(self.pb.model.ff.value(t_enter_obs, state_aug_cross[:2]),
+                                         direction, self.pb.srf_max):
                     res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, self.t_upper_bound), state_aug_cross[:2],
                                           t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],
                                           max_step=self.max_int_step)
                     if len(res.t) > 0:
-                        controls = np.array([self.dyn_constr(t, x) - self.mp.model.ff.value(t, x)
+                        controls = np.array([self.dyn_constr(t, x) - self.pb.model.ff.value(t, x)
                                              for t, x in zip(res.t, res.y.transpose())])
                         traj_obs = Trajectory.cartesian(res.t, res.y.transpose(), controls=controls,
                                                         cost=res.t - self.t_init)
@@ -460,7 +460,8 @@ class SolverEFResampling(SolverEF):
         self.add_new_sites()
         self.depth += 1
 
-    def solve(self):
+    def solve(self, max_depth=None):
+        self.max_depth = max_depth if max_depth is not None else self.max_depth
         while self.depth < self.max_depth and len(self._to_shoot_sites) > 0:
             self.step()
 
@@ -501,7 +502,7 @@ class SolverEFResampling(SolverEF):
                         break
                     if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
                         new_site = Site.from_parents(site, site_nb, i)
-                        if len(self.mp._in_obs(new_site.state_origin)) > 0:
+                        if len(self.pb._in_obs(new_site.state_origin)) > 0:
                             # Choose not to resample points lying within obstacles
                             site.closed = True
                             new_site = None
@@ -522,8 +523,8 @@ class SolverEFResampling(SolverEF):
 
     def cost_map_triangle(self, nx: int = 100, ny: int = 100) -> ndarray:
         res = np.inf * np.ones((nx, ny))
-        grid_vectors = np.stack(np.meshgrid(np.linspace(self.mp.bl[0], self.mp.tr[0], nx),
-                                            np.linspace(self.mp.bl[1], self.mp.tr[1], ny),
+        grid_vectors = np.stack(np.meshgrid(np.linspace(self.pb.bl[0], self.pb.tr[0], nx),
+                                            np.linspace(self.pb.bl[1], self.pb.tr[1], ny),
                                             indexing='ij'), -1)
         for i_site, site in enumerate(self.sites.values()):
             for index_t in range(site.index_t, self.n_time - 1):

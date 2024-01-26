@@ -97,6 +97,8 @@ def csv_to_dict(csv_file_path):
         header = next(csv_reader)  # skip header
         for row in csv_reader:
             key = row[0]
+            if len(key) == 0:
+                continue
             values = row[1:]
             data_dict[key] = dict(zip(header[1:], values))
     return data_dict
