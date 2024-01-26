@@ -16,7 +16,7 @@ from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearF
     FlowField, VortexFF, ZeroFF, WrapperFF
 from dabry.misc import Utils, csv_to_dict
 from dabry.model import Model
-from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, ParallelObs, MeridianObs, Obstacle, WrapperObs
+from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, Obstacle, WrapperObs
 from dabry.penalty import Penalty, NullPenalty, WrapperPen
 
 """
@@ -222,6 +222,7 @@ class NavigationProblem:
         else:
             # Case self.coords == Utils.COORD_GCS
             # Do not rescale lon/lat because computation will be false
+            # TODO: think about shifting longitude to zero to avoid periodic bounds
             scale_length = 1.
             x_init = self.x_init
             x_target = self.x_target
@@ -580,9 +581,8 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
 
         if b_name == "atlantic":
-            # TODO: get a well traced gcs wind test case
-            ff = DiscreteFF.from_npz(os.path.join(os.path.dirname(__file__), '..', 'data_demo',
-                                                  'atlantic', 'flow.npz'))
+            ff = DiscreteFF.from_npz(
+                os.path.join(os.path.dirname(__file__), '..', 'data', 'demo', 'atlantic', 'flow.npz'))
             x_init = np.array((-0.7, 0.6))  # radians
             x_target = np.array((-0.15, 1.1))  # radians
 
@@ -611,16 +611,8 @@ class NavigationProblem:
             v_a = 23.
             x_init = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
             x_target = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
-            ff = DiscreteFF.from_h5(os.path.join(os.path.dirname(__file__), '..',
-                                                 'data_demo/ncdc/44W_16S_9W_25N_20210929_00/wind.h5'))
-            # obstacles = [LSEMaxiObs([
-            #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-17, 10)),
-            #                    Utils.DEG_TO_RAD * np.array((-30, 15))),
-            #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-20, 5)),
-            #                    Utils.DEG_TO_RAD * np.array((-17, 10))),
-            #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-30, 7)),
-            #                    Utils.DEG_TO_RAD * np.array((-20, 5)))
-            # ])]
+            ff = DiscreteFF.from_h5(
+                os.path.join(os.path.dirname(__file__), '..', 'data', 'demo', 'dakar_natal_constr', 'wind.h5'))
             return cls(ff, x_init, x_target, v_a, name=b_name)  # obstacles=obstacles)
 
         if b_name == "obstacle":
@@ -665,16 +657,3 @@ class NavigationProblem:
 
         else:
             raise ValueError('No corresponding problem for name "%s"' % b_name)
-
-
-class NPSanjuanDublinOrthoTV(NavigationProblem):
-    def __init__(self):
-        v_a = 23.
-        x_init = np.array((1.6e6, 1.6e6))
-        x_target = np.array((-1.8e6, 0.5e6))
-        bl = np.array((-2.3e6, -1.5e6))
-        tr = np.array((2e6, 2e6))
-        ff = DiscreteFF.from_h5(os.path.join(os.environ.get('DABRYPATH'),
-                                             'data_demo/ncdc/san-juan-dublin-flattened-ortho-tv.mz/wind.h5'))
-
-        super().__init__(ff, x_init, x_target, v_a, bl=bl, tr=tr, autoframe=True)

@@ -6,14 +6,7 @@ setup(
     description='Trajectory optimization in flow fields',
     author='Bastien Schnitzler',
     author_email='bastien.schnitzler@live.fr',
-    packages=find_packages('.'),  # same as name
+    packages=find_packages('.'),
     package_dir={'': '.'},
-    install_requires=['alphashape',
-                      'cdsapi',
-                      'h5py',
-                      'numpy',
-                      'pygrib',
-                      'scipy',
-                      'Shapely',
-                      'tqdm'],
+    install_requires=['h5py', 'numpy', 'scipy', 'tqdm']
 )

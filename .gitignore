@@ -181,3 +181,5 @@ env-display
 /dev/see_wind.ipynb
 
 .~lock*
+
+!/data/demo
