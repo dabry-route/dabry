@@ -55,6 +55,10 @@ def to_alpha(i: int):
     else:
         return _to_alpha(i)
 
+def alpha_to_int(s: str):
+    if s == 'A':
+        return 0
+
 
 def directional_timeopt_control(ff_val: ndarray, d: ndarray, srf_max: float):
     """

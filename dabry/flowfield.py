@@ -137,6 +137,13 @@ class FlowField(ABC):
     def __rmul__(self, other):
         return self.__mul__(other)
 
+    def __getattr__(self, item):
+        if type(self._lch) == float:
+            return self._rch.__getattribute__(item)
+        if type(self._rch) == float:
+            return self._lch.__getattribute__(item)
+        raise AttributeError(f'{item}')
+
     def _index(self, t):
         """
         Get nearest lowest index for time discrete grid

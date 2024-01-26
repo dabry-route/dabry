@@ -72,7 +72,7 @@ class NavigationProblem:
         # Bound computation domain on wind grid limits
         if self.bl.size == 0 or self.tr.size == 0:
             ff = self.model.ff
-            if type(ff) == DiscreteFF:
+            if hasattr(ff, 'bounds'):
                 self.bl = np.array((ff.bounds[-2, 0], ff.bounds[-1, 0]))
                 self.tr = np.array((ff.bounds[-2, 1], ff.bounds[-1, 1]))
                 x_init_out_of_bounds = np.any(self.x_init < self.bl) or np.any(self.x_init > self.tr)
@@ -211,7 +211,7 @@ class NavigationProblem:
             x_init = (self.x_init - self.bl) / scale_length
             x_target = (self.x_target - self.bl) / scale_length
             bl_pb_adim = np.zeros(2)
-            bl_wrappers = self.bl.copy()
+            bl_wrapper = self.bl.copy()
             tr_pb_adim = (self.tr - self.bl) / scale_length
             srf_max = self.srf_max
         else:
@@ -221,19 +221,17 @@ class NavigationProblem:
             x_init = self.x_init
             x_target = self.x_target
             bl_pb_adim = self.bl
-            bl_wrappers = np.zeros(2)
+            bl_wrapper = np.zeros(2)
             tr_pb_adim = self.tr
             # In GCS convention, srf is specified in meters per seconds and
             # has to be cast to radians per seconds before regular scaling
-            srf_max = self.srf_max / (Utils.EARTH_RADIUS if self.coords == Utils.COORD_GCS else 1.)
-            # srf is now either m/s or rad/s and length_reference is either m or rad
-            # so build time scale over it
+            srf_max = self.srf_max / Utils.EARTH_RADIUS
 
         scale_time = scale_length / srf_max
         # In the new system, srf_max is unit
         srf_max = 1.
 
-        wrapper_ff = WrapperFF(self.model.ff, scale_length, bl_wrappers, scale_time, self.model.ff.t_start)
+        wrapper_ff = WrapperFF(self.model.ff, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
 
         obstacles = self.obstacles.copy()
         obstacles.remove(self.obs_frame)
@@ -621,10 +619,10 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
 
         if b_name == "dakar_natal_constr":
-            v_a = 1.  # 23.
+            v_a = 23.
             x_init = Utils.DEG_TO_RAD * np.array([-17.447938, 14.693425])
             x_target = Utils.DEG_TO_RAD * np.array([-35.2080905, -5.805398])
-            ff = 1/23 * DiscreteFF.from_h5(os.path.join(os.path.dirname(__file__), '..',
+            ff = DiscreteFF.from_h5(os.path.join(os.path.dirname(__file__), '..',
                                                  'data_demo/ncdc/44W_16S_9W_25N_20210929_00/wind.h5'))
             # obstacles = [LSEMaxiObs([
             #     GreatCircleObs(Utils.DEG_TO_RAD * np.array((-17, 10)),
