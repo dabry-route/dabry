@@ -8,5 +8,5 @@ setup(
     author_email='bastien.schnitzler@live.fr',
     packages=find_packages('.'),
     package_dir={'': '.'},
-    install_requires=['h5py', 'numpy', 'scipy', 'tqdm']
+    install_requires=['h5py', 'numpy', 'pygrib', 'scipy', 'tqdm']
 )
