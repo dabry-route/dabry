@@ -55,6 +55,7 @@ def to_alpha(i: int):
     else:
         return _to_alpha(i)
 
+
 def alpha_to_int(s: str):
     if s == 'A':
         return 0
@@ -73,6 +74,19 @@ def directional_timeopt_control(ff_val: ndarray, d: ndarray, srf_max: float):
     angle = np.arctan2(np.sqrt(np.max((srf_max ** 2 - ff_ortho ** 2, 0.))), ff_ortho)
     u = srf_max * np.array(((np.cos(angle), -np.sin(angle)), (np.sin(angle), np.cos(angle)))) @ (-n)
     return u
+
+
+def is_possible_direction(ff_val: ndarray, d: ndarray, srf_max: float) -> bool:
+    """
+    :param ff_val: Flow field vector
+    :param d: Direction vector (norm has no importance)
+    :param srf_max: Maximum speed relative to ff
+    :return: True if ground speed vector can align with d, False else
+    """
+    _d = d / np.linalg.norm(d)
+    n = np.array(((0., -1.), (1., 0.))) @ _d
+    ff_ortho = ff_val @ n
+    return np.abs(ff_ortho) < srf_max
 
 
 def csv_to_dict(csv_file_path):

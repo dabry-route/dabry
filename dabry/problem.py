@@ -322,7 +322,7 @@ class NavigationProblem:
                 return name
             if attrs['s_name'] == name:
                 return b_name
-        raise ValueError('Cannot find problem "%s". Check problems.csv' % name)
+        raise ValueError('Cannot find problem "%s". Check "problems.csv"' % name)
 
     @classmethod
     def from_name(cls, name: str):
@@ -673,6 +673,9 @@ class NavigationProblem:
             ff = DiscreteFF.from_ff(band_wind, np.array((bl, tr)), force_no_diff=True)
             ff.compute_derivatives()
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
+
+        else:
+            raise ValueError('No corresponding problem for name "%s"' % b_name)
 
 
 class NPSanjuanDublinOrthoTV(NavigationProblem):

@@ -7,7 +7,8 @@ import scipy.integrate as scitg
 from numpy import ndarray
 from tqdm import tqdm
 
-from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha
+from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha, \
+    is_possible_direction
 from dabry.misc import terminal
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
@@ -232,7 +233,7 @@ class SolverEF(ABC):
     def __init__(self, mp: NavigationProblem,
                  total_duration: float,
                  mode: str = 'time',
-                 max_depth: int = 10,
+                 max_depth: int = 20,
                  n_time: int = 100,
                  n_costate_angle: int = 30,
                  t_init: Optional[float] = None,
@@ -437,15 +438,19 @@ class SolverEFResampling(SolverEF):
                                  self.mp.model.dyn.value(t_enter_obs, state_aug_cross[:2],
                                                          -state_aug_cross[2:] / np.linalg.norm(state_aug_cross[2:])))
                 self.obs_active_trigo = cross >= 0.
-                res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, self.t_upper_bound), state_aug_cross[:2],
-                                      t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],
-                                      max_step=self.max_int_step)
-                if len(res.t) > 0:
-                    controls = np.array([self.dyn_constr(t, x) - self.mp.model.ff.value(t, x)
-                                         for t, x in zip(res.t, res.y.transpose())])
-                    traj_obs = Trajectory.cartesian(res.t, res.y.transpose(), controls=controls,
-                                                    cost=res.t - self.t_init)
-                    traj = traj + traj_obs
+                sign = 2 * self.obs_active_trigo - 1
+                direction = np.array(((0, -sign), (sign, 0))) @ self.obs_active.d_value(state_aug_cross[:2])
+                if is_possible_direction(self.mp.model.ff.value(t_enter_obs, state_aug_cross[:2]),
+                                         direction, self.mp.srf_max):
+                    res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, self.t_upper_bound), state_aug_cross[:2],
+                                          t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],
+                                          max_step=self.max_int_step)
+                    if len(res.t) > 0:
+                        controls = np.array([self.dyn_constr(t, x) - self.mp.model.ff.value(t, x)
+                                             for t, x in zip(res.t, res.y.transpose())])
+                        traj_obs = Trajectory.cartesian(res.t, res.y.transpose(), controls=controls,
+                                                        cost=res.t - self.t_init)
+                        traj = traj + traj_obs
             trajs.append(traj)
             self.trajs.append(traj)
             site.assign_traj(traj)
@@ -454,6 +459,10 @@ class SolverEFResampling(SolverEF):
         self._to_shoot_sites = []
         self.add_new_sites()
         self.depth += 1
+
+    def solve(self):
+        while self.depth < self.max_depth and len(self._to_shoot_sites) > 0:
+            self.step()
 
     def get_trajs_by_depth(self, depth: int) -> Dict[str, Trajectory]:
         res = {}
