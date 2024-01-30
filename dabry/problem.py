@@ -9,7 +9,7 @@ import numpy as np
 from numpy import ndarray
 
 from dabry.aero import MermozAero, Aero
-from dabry.ddf_manager import DDFmanager
+from dabry.io_manager import IOManager
 from dabry.feedback import GSTargetFB
 from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearFF, RadialGaussFF, GyreFF, \
     PointSymFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
@@ -46,8 +46,11 @@ class NavigationProblem:
 
     def __init__(self, ff: FlowField, x_init: ndarray, x_target: ndarray, srf_max: float,
                  obstacles: Optional[List[Obstacle]] = None,
-                 bl: Optional[ndarray] = None, tr: Optional[ndarray] = None,
-                 name: Optional[str] = None, aero: Optional[Aero] = None, penalty: Optional[Penalty] = None,
+                 bl: Optional[ndarray] = None,
+                 tr: Optional[ndarray] = None,
+                 name: Optional[str] = None,
+                 aero: Optional[Aero] = None,
+                 penalty: Optional[Penalty] = None,
                  autoframe=True):
         self.model = Model.zermelo(ff)
         self.x_init: ndarray = x_init.copy()
@@ -67,7 +70,7 @@ class NavigationProblem:
         self.obstacles: list[Obstacle] = obstacles if obstacles is not None else []
         self.penalty: Penalty = NullPenalty() if penalty is None else penalty
 
-        self.io = DDFmanager()
+        self.io = IOManager(self.name)
 
         # Bound computation domain on wind grid limits
         if self.bl.size == 0 or self.tr.size == 0:
@@ -244,7 +247,8 @@ class NavigationProblem:
         obstacles = [WrapperObs(obs, scale_length, bl_wrapper) for obs in obstacles]
         penalty = WrapperPen(self.penalty, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
         return NavigationProblem(wrapper_ff, x_init, x_target, srf_max,
-                                 bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty)
+                                 bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty,
+                                 name=self.name + ' (rescaled)')
 
     # TODO: reimplement this
     def htarget(self):
@@ -503,7 +507,7 @@ class NavigationProblem:
 
             ff = RankineVortexFF(omega, gamma, radius, t_end=1. * f / srf)
 
-            return cls(ff, x_init, x_target, srf)
+            return cls(ff, x_init, x_target, srf, name=b_name)
 
         if b_name == "linear_time_varying":
             srf = 1.
@@ -526,7 +530,7 @@ class NavigationProblem:
 
             ff = LinearFFT(gradient_diff_time, gradient_init, origin, value_origin)
 
-            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "moving_vortices":
             srf = 1.
@@ -568,7 +572,7 @@ class NavigationProblem:
             coeffs = np.array(tuple(1 / N for _ in range(N)) + tuple(1. for _ in range(M)))
             ff = sum(list(map(lambda x: x[0] * x[1], zip(coeffs, ffs))), ZeroFF())
 
-            return cls(ff, x_init, x_target, srf)
+            return cls(ff, x_init, x_target, srf, name=b_name)
 
         if b_name == 'gyre_rhoads2010':
             srf = 1.
@@ -587,7 +591,7 @@ class NavigationProblem:
             x_target = np.array((-0.15, 1.1))  # radians
 
             srf = 15.  # meters per second
-            return cls(ff, x_init, x_target, srf)
+            return cls(ff, x_init, x_target, srf, name=b_name)
 
         if b_name == "spherical_geodesic":
             x_init = np.array((0, np.pi / 6))
@@ -596,7 +600,7 @@ class NavigationProblem:
             ff = DiscreteFF.from_ff(ZeroFF(), (x_init - np.array((0.15, 0.15)), x_target + np.array((0.15, 0.15))),
                                     coords='gcs')
             srf = 1  # meters per second
-            return cls(ff, x_init, x_target, srf)
+            return cls(ff, x_init, x_target, srf, name=b_name)
 
         if b_name == "chertovskih":
             srf = 1.
@@ -605,7 +609,7 @@ class NavigationProblem:
             bl = np.array((-1.5, -6.2))
             tr = np.array((1.5, 0.2))
             ff = ChertovskihFF()
-            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "dakar_natal_constr":
             v_a = 23.  # meters per seconds
@@ -621,7 +625,7 @@ class NavigationProblem:
             x_target = np.array((1., 0.))
             ff = ZeroFF()
             obstacles = [CircleObs((0.5, 0.1), 0.2)]
-            return cls(ff, x_init, x_target, srf, obstacles=obstacles)
+            return cls(ff, x_init, x_target, srf, obstacles=obstacles, name=b_name)
 
         if b_name == "trap":
             # TODO: adjust coefficients
@@ -639,7 +643,7 @@ class NavigationProblem:
             radius = 0.2 * np.ones(nt)
 
             ff = TrapFF(wind_value, center, radius, t_end=4)
-            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "stream":
             # TODO: fix case
@@ -653,7 +657,7 @@ class NavigationProblem:
             band_wind = BandFF(np.array((0., 2.5)), np.array((1., 0.)), np.array((-1., 0.)), 1)
             ff = DiscreteFF.from_ff(band_wind, np.array((bl, tr)), force_no_diff=True)
             ff.compute_derivatives()
-            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         else:
             raise ValueError('No corresponding problem for name "%s"' % b_name)

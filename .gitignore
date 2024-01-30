@@ -166,6 +166,7 @@ data/*
 /local/
 /utils/
 env-display
+env-test
 
 /ze_pipeline.sh
 /DABRYPATH

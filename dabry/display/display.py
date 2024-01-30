@@ -11,6 +11,7 @@ from typing import Optional
 import h5py
 import matplotlib
 import matplotlib.cm as mpl_cm
+import numpy as np
 import scipy.ndimage
 import tqdm
 from matplotlib.axes import Axes
@@ -20,6 +21,9 @@ from mpl_toolkits.basemap import Basemap
 from numpy import ndarray
 from pyproj import Proj, Geod
 from scipy.interpolate import griddata
+
+from dabry.flowfield import DiscreteFF
+from dabry.io_manager import IOManager
 
 from misc import *
 
@@ -32,11 +36,12 @@ class Display:
     Defines all the visualization functions for navigation problems
     """
 
-    def __init__(self, coords='cartesian', title='Title', mode_3d=False):
+    def __init__(self, name: str, title='Title', mode_3d=False):
         """
         :param coords: Either 'cartesian' for planar problems or 'gcs' for Earth-based problems
         """
-        self.coords = coords
+        self.io = IOManager(name)
+        self.coords = self.io.coords
 
         self.x_min: Optional[float] = None
         self.x_max: Optional[float] = None
@@ -68,7 +73,7 @@ class Display:
         self.title = title
         self.axes_equal = True
         self.projection = 'ortho'
-        self.sm_wind = None
+        self.sm_ff = None
         self.sm_engy = None
         self.leg = None
         self.leg_handles = []
@@ -94,13 +99,13 @@ class Display:
         self.params_fname = 'pb_info.json'
         self.params_fname_formatted = 'params.html'
 
-        self.wind_fname = 'wind.h5'
+        self.ff_fname = 'ff.h5'
         self.trajs_fname = 'trajectories.h5'
         self.rff_fname = 'rff.h5'
         self.obs_fname = 'obs.h5'
         self.pen_fname = 'penalty.h5'
         self.filter_fname = '.trajfilter'
-        self.wind_fpath = None
+        self.ff_fpath = None
         self.trajs_fpath = None
         self.rff_fpath = None
         self.obs_fpath = None
@@ -110,24 +115,24 @@ class Display:
         self.traj_filter = []
         # 0 for no aggregation (fronts), 1 for aggregation and time cursor, 2 for aggrgation and no time cursor
         self.mode_aggregated = 0
-        self.mode_controls = False  # Whether to print wind in tiles (False) or by interpolation (True)
-        self.mode_wind = False  # Whether to display extremal field or not
-        self.mode_ef = True  # Whether to display zones where windfield is equal to airspeed
+        self.mode_controls = False  # Whether to print ff in tiles (False) or by interpolation (True)
+        self.mode_ff = False  # Whether to display extremal field or not
+        self.mode_ef = True  # Whether to display zones where ff is equal to airspeed
         self.mode_speed = True  # Whether to display trajectories annotation
-        self.mode_annot = False  # Whether to display wind colors
-        self.mode_wind_color = True  # Whether to display energy as colors
+        self.mode_annot = False  # Whether to display ff colors
+        self.mode_ff_color = True  # Whether to display energy as colors
         self.mode_energy = True  # Whether to draw extremal fields or not
-        self.mode_ef_display = True  # Whether to rescale wind
-        self.rescale_wind = True
+        self.mode_ef_display = True  # Whether to rescale ff
+        self.rescale_ff = True
 
-        # True if wind norm colobar is displayed, False if energy colorbar is displayed
-        self.active_windcb = True
+        # True if ff norm colobar is displayed, False if energy colorbar is displayed
+        self.active_ffcb = True
 
         self.has_display_rff = True
 
-        self.wind = None
-        self.wind_norm_min = None
-        self.wind_norm_max = None
+        self.ff = None
+        self.ff_norm_min = None
+        self.ff_norm_max = None
         self.trajs = []
         self.rff = None
         self.rff_cntr_kwargs = {
@@ -145,8 +150,6 @@ class Display:
         self.obs_grid = None
 
         self.penalty = None
-
-        self.tv_wind = False
 
         self.traj_artists = []
         self.traj_lines = []
@@ -178,25 +181,25 @@ class Display:
         self.engy_min = self.engy_max = None
         self.engy_norm = None
 
-        self.wind_colormesh = None
-        self.wind_colorcontour = None
-        self.wind_ceil = None
-        self.wind_quiver = None
+        self.ff_colormesh = None
+        self.ff_colorcontour = None
+        self.ff_ceil = None
+        self.ff_quiver = None
         self.ax_timeslider = None
         self.time_slider = None
-        self.wind_colorbar = None
+        self.ff_colorbar = None
         self.ax_timedisplay = None
         self.ax_timedisp_minor = None
         # Time window lower bound
-        # Defined as wind time lower bound if wind is time-varying
+        # Defined as ff time lower bound if ff is time-varying
         # Else minimum timestamps among trajectories and fronts
         self.tl = None
         # Time window upper bound
-        # Maximum among all upper bounds (wind, trajs, rffs)
+        # Maximum among all upper bounds (ff, trajs, rffs)
         self.tu = None
 
-        self.tl_wind = None
-        self.tu_wind = None
+        self.tl_ff = None
+        self.tu_ff = None
 
         self.tl_traj = None
         self.tu_traj = None
@@ -233,12 +236,12 @@ class Display:
     def _index(self, mode):
         """
         Get nearest lowest index for time discrete grid
-        :param mode: 'wind', 'rff' or 'pen'
+        :param mode: 'ff', 'rff' or 'pen'
         :return: Nearest lowest index for time, coefficient for the linear interpolation
         """
         ts = None
-        if mode == 'wind':
-            ts = self.wind['ts']
+        if mode == 'ff':
+            ts = self.ff['ts']
         elif mode == 'rff':
             ts = self.rff['ts']
         elif mode == 'pen':
@@ -249,7 +252,7 @@ class Display:
         if self.tcur <= ts[0]:
             return 0, 0.
         if self.tcur > ts[-1]:
-            # Freeze wind to last frame
+            # Freeze ff to last frame
             return nt - 2, 1.
         tau = (self.tcur - ts[0]) / (ts[-1] - ts[0])
         i, alpha = int(tau * (nt - 1)), tau * (nt - 1) - int(tau * (nt - 1))
@@ -275,7 +278,7 @@ class Display:
                 self.x_max = self.tr_man[0]
                 self.y_max = self.tr_man[1]
         else:
-            self.set_wind_bounds()
+            self.set_ff_bounds()
 
         if bl_off is not None:
             self.x_offset = bl_off
@@ -402,8 +405,8 @@ class Display:
                 # tuple(RAD_TO_DEG * np.array(middle(np.array((self.x_min, self.y_min)),
                 #                                    np.array((self.x_max, self.y_max)))))
                 proj = Proj(proj='ortho', lon_0=kwargs['lon_0'], lat_0=kwargs['lat_0'])
-                # pgrid = np.array(proj(RAD_TO_DEG * self.wind['grid'][:, :, 0],
-                # RAD_TO_DEG * self.wind['grid'][:, :, 1]))
+                # pgrid = np.array(proj(RAD_TO_DEG * self.ff['grid'][:, :, 0],
+                # RAD_TO_DEG * self.ff['grid'][:, :, 1]))
                 # px_min = np.min(pgrid[0])
                 # px_max = np.max(pgrid[0])
                 # py_min = np.min(pgrid[1])
@@ -513,11 +516,11 @@ class Display:
         if gcs:
             self.ax = self.map
 
-    def set_wind_bounds(self):
-        self.x_min = np.min(self.wind['grid'][:, :, 0])
-        self.x_max = np.max(self.wind['grid'][:, :, 0])
-        self.y_min = np.min(self.wind['grid'][:, :, 1])
-        self.y_max = np.max(self.wind['grid'][:, :, 1])
+    def set_ff_bounds(self):
+        self.x_min = np.min(self.ff['grid'][:, :, 0])
+        self.x_max = np.max(self.ff['grid'][:, :, 0])
+        self.y_min = np.min(self.ff['grid'][:, :, 1])
+        self.y_max = np.max(self.ff['grid'][:, :, 1])
 
     def draw_point_by_name(self, name):
         raise Exception('Name translation unsupported')
@@ -543,27 +546,27 @@ class Display:
         if label is not None:
             self.ax.annotate(label, pos_annot, (10, 10), textcoords='offset pixels', ha='center')
 
-    def clear_wind(self):
-        if self.wind_colormesh is not None:
-            self.wind_colormesh.remove()
-            self.wind_colormesh = None
-        if self.wind_colorcontour is not None:
+    def clear_ff(self):
+        if self.ff_colormesh is not None:
+            self.ff_colormesh.remove()
+            self.ff_colormesh = None
+        if self.ff_colorcontour is not None:
             try:
-                self.wind_colorcontour.remove()
+                self.ff_colorcontour.remove()
             except AttributeError:
-                for coll in self.wind_colorcontour.collections:
+                for coll in self.ff_colorcontour.collections:
                     coll.remove()
-            self.wind_colorcontour = None
-        if self.wind_ceil is not None:
-            for coll in self.wind_ceil.collections:
+            self.ff_colorcontour = None
+        if self.ff_ceil is not None:
+            for coll in self.ff_ceil.collections:
                 coll.remove()
-            self.wind_ceil = None
-        if self.wind_quiver is not None:
-            self.wind_quiver.remove()
-            self.wind_quiver = None
-        # if self.wind_colorbar is not None:
-        #     self.wind_colorbar.remove()
-        #     self.wind_colorbar = None
+            self.ff_ceil = None
+        if self.ff_quiver is not None:
+            self.ff_quiver.remove()
+            self.ff_quiver = None
+        # if self.ff_colorbar is not None:
+        #     self.ff_colorbar.remove()
+        #     self.ff_colorbar = None
 
     def clear_trajs(self):
         # if len(self.traj_lp) + len(self.traj_lines) + len(self.traj_ticks) + len(self.traj_controls) > 0:
@@ -622,28 +625,13 @@ class Display:
         with open(self.filter_fpath, 'r') as f:
             self.traj_filter = list(map(str.strip, f.readlines()))
 
-    def load_wind(self, filename=None):
-        self.wind = None
-        if self.wind_fpath is None:
-            filename = self.wind_fname if filename is None else filename
-            self.wind_fpath = os.path.join(self.output_dir, filename)
-        with h5py.File(self.wind_fpath, 'r') as f:
-            self.wind = {}
-            self.wind['data'] = np.zeros(f['data'].shape)
-            self.wind['data'][:] = f['data']
-            norms = np.linalg.norm(f['data'], axis=3)
-            self.wind_norm_min, self.wind_norm_max = np.min(norms), np.max(norms)
-            self.wind['attrs'] = {}
-            for k, v in f.attrs.items():
-                self.wind['attrs'][k] = v
-            self.wind['grid'] = np.zeros(f['grid'].shape)
-            self.wind['grid'][:] = f['grid']
-            self.wind['ts'] = np.zeros(f['ts'].shape)
-            self.wind['ts'][:] = f['ts']
-            if self.wind['ts'].shape[0] > 1:
-                self.tv_wind = True
-                self.tl_wind = self.wind['ts'][0]
-                self.tu_wind = self.wind['ts'][-1]
+    def load_ff(self):
+        self.ff = DiscreteFF.from_npz(self.io.ff_fpath)
+        norms = np.linalg.norm(self.ff.values, axis=-1)
+        self.ff_norm_min, self.ff_norm_max = np.min(norms), np.max(norms)
+        if self.ff.is_unsteady:
+            self.tl_ff = self.ff.t_start
+            self.tu_ff = self.ff.t_end
 
     def load_trajs(self, filename=None):
         self.trajs = []
@@ -659,7 +647,7 @@ class Display:
                 for k, traj in enumerate(f.values()):
                     if 'info' in traj.attrs.keys() and traj.attrs['info'] in self.traj_filter:
                         continue
-                    if traj['ts'].shape[0] <= 1:
+                    if traj['times'].shape[0] <= 1:
                         continue
                     if traj.attrs['coords'] != self.coords:
                         print(
@@ -670,13 +658,13 @@ class Display:
                         kwargs['nt_tick'] = self.nt_tick
                     """
                     _traj = {}
-                    _traj['data'] = np.zeros(traj['data'].shape)
-                    _traj['data'][:] = traj['data']
+                    _traj['states'] = np.zeros(traj['states'].shape)
+                    _traj['states'][:] = traj['states']
                     #_traj['controls'] = np.zeros(traj['controls'].shape)
                     #_traj['controls'][:] = traj['controls']
-                    _traj['ts'] = np.zeros(traj['ts'].shape)
-                    _traj['ts'][:] = traj['ts']
-                    if _traj['ts'].shape[0] == 0:
+                    _traj['times'] = np.zeros(traj['times'].shape)
+                    _traj['times'][:] = traj['times']
+                    if _traj['times'].shape[0] == 0:
                         continue
 
                     # if 'airspeed' in traj.keys():
@@ -693,18 +681,9 @@ class Display:
                         if self.engy_max is None or cmax > self.engy_max:
                             self.engy_max = cmax
 
-                    # Backward compatibility
-                    if 'info' in traj.attrs.keys():
-                        _traj['info'] = traj.attrs['info']
-                    else:
-                        _traj['info'] = ''
-
-                    if 'info_dict' in traj.attrs.keys():
-                        _traj['info_dict'] = traj['info_dict']
-
                     # Label trajectories belonging to extremal fields
-                    if _traj['info'].startswith('ef'):
-                        ef_id = int(_traj['info'].strip().split('_')[1])
+                    if 'ef' in traj.attrs.keys():
+                        ef_id = traj.attrs['ef']
                         if ef_id not in self.ef_ids:
                             self.ef_ids.append(ef_id)
                             self.ef_trajgroups[ef_id] = []
@@ -712,10 +691,10 @@ class Display:
 
                     # Adapt time window to trajectories' timestamps
 
-                    tl = np.min(_traj['ts'])
+                    tl = np.min(_traj['times'])
                     if self.tl_traj is None or tl < self.tl_traj:
                         self.tl_traj = tl
-                    tu = np.max(_traj['ts'])
+                    tu = np.max(_traj['times'])
                     if self.tu_traj is None or tu > self.tu_traj:
                         self.tu_traj = tu
 
@@ -815,7 +794,7 @@ class Display:
 
     def load_all(self):
         self.load_filter()
-        self.load_wind()
+        self.load_ff()
         self.load_trajs()
         self.load_rff()
         self.load_obs()
@@ -848,8 +827,8 @@ class Display:
             return min(values) if minimize else max(values)
 
         if self.tl_traj is None and self.tl_rff is None:
-            self.tl = self.tl_wind
-            self.tu = self.tu_wind
+            self.tl = self.tl_ff
+            self.tu = self.tu_ff
         else:
             self.tl = mysat(self.tl_traj, self.tl_rff, minimize=True)
             self.tu = mysat(self.tu_traj, self.tu_rff, minimize=False)
@@ -947,8 +926,8 @@ class Display:
                 floor((self.ef_nt - 1) * (t - self.tl) / (self.tu - self.tl))
 
             for traj in self.ef_trajgroups[ef_id]:
-                nt = len(traj['ts'])
-                for k, t in enumerate(traj['ts']):
+                nt = len(traj['times'])
+                for k, t in enumerate(traj['times']):
                     i = self.ef_index(t)
                     if i is not None:
                         ke = k if k < nt - 1 else k-1
@@ -956,7 +935,7 @@ class Display:
                             e = traj['energy'][ke]
                         except KeyError:
                             e = 0.
-                        front[i].append(np.array(tuple(traj['data'][k]) + (e,)))
+                        front[i].append(np.array(tuple(traj['states'][k]) + (e,)))
             for i in range(len(front)):
                 front[i] = np.array(front[i])
             self.ef_fronts[ef_id] = front
@@ -1031,33 +1010,41 @@ class Display:
                 # ([-1000., 1000.],) if not debug else (np.linspace(-100000, 100000, 200),))
                 self.rff_contours.append(self.ax.contourf(*args, **self.rff_cntr_kwargs))
 
-    def draw_wind(self, showanchors=False):
+    def draw_ff(self, showanchors=False):
 
         # Erase previous drawings if existing
-        self.clear_wind()
+        self.clear_ff()
 
-        nt, nx, ny, _ = self.wind['data'].shape
+        if self.ff.is_unsteady:
+            nt, nx, ny, _ = self.ff.values.shape
+        else:
+            nx, ny, _ = self.ff.values.shape
+            nt = 1
         X = np.zeros((nx, ny))
         Y = np.zeros((nx, ny))
-        if self.rescale_wind:
+        if self.rescale_ff:
             ur = max(1, nx // 18)  # nx // 20
         else:
             ur = 1
         factor = RAD_TO_DEG if self.coords == 'gcs' else 1.
-        X[:] = factor * self.wind['grid'][:, :, 0]
-        Y[:] = factor * self.wind['grid'][:, :, 1]
+        grid = np.stack(
+            np.meshgrid(np.linspace(self.ff.bounds[-2, 0], self.ff.bounds[-2, 1], self.ff.values.shape[-3]),
+                        np.linspace(self.ff.bounds[-1, 0], self.ff.bounds[-1, 1], self.ff.values.shape[-2]),
+                        indexing='ij'), -1)
+        X[:] = factor * grid[:, :, 0]
+        Y[:] = factor * grid[:, :, 1]
 
         alpha_bg = 0.7
 
         U_grid = np.zeros((nx, ny))
         V_grid = np.zeros((nx, ny))
-        if not self.tv_wind:
-            U_grid[:] = self.wind['data'][0, :, :, 0]
-            V_grid[:] = self.wind['data'][0, :, :, 1]
+        if not self.ff.is_unsteady:
+            U_grid[:] = self.ff.values[:, :, 0]
+            V_grid[:] = self.ff.values[:, :, 1]
         else:
-            k, p = self._index('wind')
-            U_grid[:] = (1 - p) * self.wind['data'][k, :, :, 0] + p * self.wind['data'][k + 1, :, :, 0]
-            V_grid[:] = (1 - p) * self.wind['data'][k, :, :, 1] + p * self.wind['data'][k + 1, :, :, 1]
+            k, p = self._index('ff')
+            U_grid[:] = (1 - p) * self.ff.values[k, :, :, 0] + p * self.ff.values[k + 1, :, :, 0]
+            V_grid[:] = (1 - p) * self.ff.values[k, :, :, 1] + p * self.ff.values[k + 1, :, :, 1]
         U = U_grid.flatten()
         V = V_grid.flatten()
 
@@ -1068,40 +1055,40 @@ class Display:
 
         norm = mpl_colors.Normalize()
         self.cm = self.selected_cm
-        if self.coords == 'gcs' and self.wind_norm_max < 1.5 * self.cm_norm_max:
+        if self.coords == 'gcs' and self.ff_norm_max < 1.5 * self.cm_norm_max:
             self.cm = windy_cm
             norm.autoscale(np.array([self.cm_norm_min, self.cm_norm_max]))
         else:
             self.cm = jet_desat_cm
-            norm.autoscale(np.array([self.wind_norm_min, self.wind_norm_max]))
+            norm.autoscale(np.array([self.ff_norm_min, self.ff_norm_max]))
 
         needs_engy = self.mode_energy and self.mode_ef and self.mode_aggregated
-        set_engycb = needs_engy and self.active_windcb
-        if self.sm_wind is None:
-            self.sm_wind = mpl_cm.ScalarMappable(cmap=self.cm, norm=norm)
+        set_engycb = needs_engy and self.active_ffcb
+        if self.sm_ff is None:
+            self.sm_ff = mpl_cm.ScalarMappable(cmap=self.cm, norm=norm)
             if self.engy_min and self.engy_max is not None:
                 self.sm_engy = mpl_cm.ScalarMappable(cmap='tab20b',
                                                      norm=mpl_colors.Normalize(
                                                          vmin=self.engy_min / 3.6e6,
                                                          vmax=self.engy_max / 3.6e6))
             if self.coords == 'gcs':
-                self.wind_colorbar = self.ax.colorbar(self.sm_wind, pad=0.1)
+                self.ff_colorbar = self.ax.colorbar(self.sm_ff, pad=0.1)
             elif self.coords == 'cartesian':
-                self.wind_colorbar = self.main_fig.colorbar(self.sm_wind, ax=self.ax, pad=0.03)
-            self.wind_colorbar.set_label('Wind [m/s]', labelpad=10)
-            self.active_windcb = True
+                self.ff_colorbar = self.main_fig.colorbar(self.sm_ff, ax=self.ax, pad=0.03)
+            self.ff_colorbar.set_label('Flow field [m/s]', labelpad=10)
+            self.active_ffcb = True
 
-        set_windcb = not needs_engy and not self.active_windcb
-        if set_windcb:
-            self.wind_colorbar.update_normal(self.sm_wind)
-            self.wind_colorbar.set_label('Wind [m/s]')
-            self.active_windcb = True
+        set_ffcb = not needs_engy and not self.active_ffcb
+        if set_ffcb:
+            self.ff_colorbar.update_normal(self.sm_ff)
+            self.ff_colorbar.set_label('Flow field [m/s]')
+            self.active_ffcb = True
         elif set_engycb and self.sm_engy is not None:
-            self.wind_colorbar.update_normal(self.sm_engy)
-            self.wind_colorbar.set_label('Energy [kWh]')
-            self.active_windcb = False
+            self.ff_colorbar.update_normal(self.sm_engy)
+            self.ff_colorbar.set_label('Energy [kWh]')
+            self.active_ffcb = False
 
-        # Wind norm plot
+        # ff norm plot
         # znorms3d = scipy.ndimage.zoom(norms3d, 3)
         # zX = scipy.ndimage.zoom(X, 3)
         # zY = scipy.ndimage.zoom(Y, 3)
@@ -1117,25 +1104,25 @@ class Display:
         if self.coords == 'gcs':
             kwargs['latlon'] = True
 
-        if not self.mode_wind:
+        if not self.mode_ff:
             if self.mode_3d:
                 colors = self.cm(norm(znorms3d))
-                self.wind_colormesh = self.ax.plot_surface(zX, zY, np.zeros(zX.shape), facecolors=colors, zorder=ZO_WIND_NORM)#, **kwargs)
+                self.ff_colormesh = self.ax.plot_surface(zX, zY, np.zeros(zX.shape), facecolors=colors, zorder=ZO_WIND_NORM)#, **kwargs)
             else:
                 kwargs['shading'] = 'auto'
                 kwargs['antialiased'] = True
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    self.wind_colormesh = self.ax.pcolormesh(zX, zY, znorms3d, **kwargs)
+                    self.ff_colormesh = self.ax.pcolormesh(zX, zY, znorms3d, **kwargs)
         else:
             znorms3d = scipy.ndimage.zoom(norms3d, 3)
             zX = scipy.ndimage.zoom(X, 3)
             zY = scipy.ndimage.zoom(Y, 3)
             kwargs['antialiased'] = True
             kwargs['levels'] = 30
-            self.wind_colorcontour = self.ax.contourf(zX, zY, znorms3d, **kwargs)
+            self.ff_colorcontour = self.ax.contourf(zX, zY, znorms3d, **kwargs)
 
-        # Wind ceil
+        # ff ceil
         if self.airspeed is not None and self.mode_speed:
             if 'shading' in kwargs.keys():
                 del kwargs['shading']
@@ -1145,7 +1132,7 @@ class Display:
             kwargs['antialiased'] = True
             ceil = (self.cm_norm_max - self.cm_norm_min) / 100.
             kwargs['levels'] = (self.airspeed - ceil, self.airspeed + ceil)
-            self.wind_ceil = self.ax.contourf(X, Y, norms3d, **kwargs)
+            self.ff_ceil = self.ax.contourf(X, Y, norms3d, **kwargs)
 
         # Quiver plot
         qX = X[::ur, ::ur]
@@ -1166,14 +1153,14 @@ class Display:
             kwargs['latlon'] = True
         if np.any(qnorms > self.cm_norm_min + 0.01 * (self.cm_norm_max - self.cm_norm_min)):
             if not self.mode_3d:
-                self.wind_quiver = self.ax.quiver(qX, qY, qU, qV, **kwargs)  # color=color)
+                self.ff_quiver = self.ax.quiver(qX, qY, qU, qV, **kwargs)  # color=color)
             else:
                 U, V = U_grid[::ur, ::ur], V_grid[::ur, ::ur]
                 qZ = np.zeros(qX.shape)
                 W = np.zeros(U.shape)
                 del kwargs['units']
                 del kwargs['minshaft']
-                self.wind_quiver = self.ax.quiver(qX, qY, qZ, U, V, W, **kwargs)  # color=color)
+                self.ff_quiver = self.ax.quiver(qX, qY, qZ, U, V, W, **kwargs)  # color=color)
 
 
     # def setup_components(self):
@@ -1198,7 +1185,7 @@ class Display:
     def draw_trajs(self, nolabels=False, opti_only=False):
         self.clear_trajs()
         for k, traj in enumerate(self.trajs):
-            if (not opti_only or traj['type'] in ['optimal', 'integral']) and not traj['info'].startswith('ef'):
+            if (not opti_only or traj['type'] in ['optimal', 'integral']) and traj['ef'] is None:
                 scatter_lp = self.draw_traj(k, nolabels=nolabels)
                 # Gather legends
                 try:
@@ -1575,10 +1562,10 @@ class Display:
 
     def draw_all(self):
         if self.mode_3d:
-            self.draw_wind()
+            self.draw_ff()
             self.draw_trajs()
         else:
-            self.draw_wind()
+            self.draw_ff()
             self.draw_trajs()
             if self.has_display_rff:
                 self.draw_rff()
@@ -1593,14 +1580,14 @@ class Display:
 
     def draw_calibration(self):
         if self.coords == 'gcs':
-            self.map.drawgreatcircle(RAD_TO_DEG * self.wind['grid'][:, 0, 0].min(),
-                                     RAD_TO_DEG * self.wind['grid'][0, :, 1].min(),
-                                     RAD_TO_DEG * self.wind['grid'][:, -1, 0].max(),
-                                     RAD_TO_DEG * self.wind['grid'][-1, :, 1].max())
-            self.map.drawgreatcircle(RAD_TO_DEG * self.wind['grid'][:, 0, 0].min(),
-                                     RAD_TO_DEG * self.wind['grid'][0, :, 1].max(),
-                                     RAD_TO_DEG * self.wind['grid'][:, -1, 0].max(),
-                                     RAD_TO_DEG * self.wind['grid'][-1, :, 1].min())
+            self.map.drawgreatcircle(RAD_TO_DEG * self.ff['grid'][:, 0, 0].min(),
+                                     RAD_TO_DEG * self.ff['grid'][0, :, 1].min(),
+                                     RAD_TO_DEG * self.ff['grid'][:, -1, 0].max(),
+                                     RAD_TO_DEG * self.ff['grid'][-1, :, 1].max())
+            self.map.drawgreatcircle(RAD_TO_DEG * self.ff['grid'][:, 0, 0].min(),
+                                     RAD_TO_DEG * self.ff['grid'][0, :, 1].max(),
+                                     RAD_TO_DEG * self.ff['grid'][:, -1, 0].max(),
+                                     RAD_TO_DEG * self.ff['grid'][-1, :, 1].min())
 
     def show_params(self, fname=None):
         fname = self.params_fname_formatted if fname is None else fname
@@ -1685,8 +1672,8 @@ class Display:
             self.clear_rff()
         self.draw_all()
 
-    def toggle_wind(self):
-        self.mode_wind = not self.mode_wind
+    def toggle_ff(self):
+        self.mode_ff = not self.mode_ff
         self.draw_all()
 
     def toggle_ef(self):
@@ -1701,9 +1688,9 @@ class Display:
         self.mode_annot = not self.mode_annot
         self.draw_all()
 
-    def toggle_wind_colors(self):
-        self.mode_wind_color = not self.mode_wind_color
-        if self.mode_wind_color:
+    def toggle_ff_colors(self):
+        self.mode_ff_color = not self.mode_ff_color
+        if self.mode_ff_color:
             self.selected_cm = custom_cm
         else:
             self.selected_cm = custom_desat_cm
@@ -1745,7 +1732,7 @@ class Display:
         elif event.key == 'c':
             self.toggle_controls()
         elif event.key == 'w':
-            self.toggle_wind()
+            self.toggle_ff()
         elif event.key == 'h':
             self.toggle_ef()
         elif event.key == 'z':
@@ -1757,7 +1744,7 @@ class Display:
         elif event.key == 'a':
             self.toggle_annot()
         elif event.key == 'l':
-            self.toggle_wind_colors()
+            self.toggle_ff_colors()
         elif event.key == 'e':
             self.toggle_energy()
         elif event.key == 'x':
@@ -1781,13 +1768,13 @@ class Display:
         if 'A' in flags:
             self.mode_aggregated = 2
         if 'w' in flags:
-            self.mode_wind = True
+            self.mode_ff = True
         if 't' in flags:
             self.toggle_rff()
         if 'h' in flags:
             self.mode_ef = False
         if 'u' in flags:
-            self.rescale_wind = False
+            self.rescale_ff = False
         if 'e' not in flags:
             self.mode_energy = False
 

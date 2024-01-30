@@ -3,7 +3,7 @@ import os.path
 import sys
 from datetime import datetime
 
-from dabry.ddf_manager import DDFmanager
+from dabry.io_manager import IOManager
 from dabry.misc import Utils, Chrono
 from dabry.problem import all_problems, NavigationProblem
 from dabry.solver_ef import SolverEFBase
@@ -99,11 +99,11 @@ if __name__ == '__main__':
         resolution = '0.5'
 
         cds_dir = os.path.join('data', 'cds')
-        DDFmanager.query_era5(start_date, stop_date, cds_dir, pressure_level=pressure_level, resolution=resolution)
+        IOManager.query_era5(start_date, stop_date, cds_dir, pressure_level=pressure_level, resolution=resolution)
         pb = NavigationProblem.from_database(x_init, x_target, airspeed, start_date.timestamp(), stop_date.timestamp(),
                                              resolution=resolution, pressure_level=pressure_level, data_path=cds_dir)
 
-        case_name = DDFmanager.format_cname(x_init_deg, x_target_deg, start_date.timestamp())
+        case_name = IOManager.format_cname(x_init_deg, x_target_deg, start_date.timestamp())
         pb.io.set_case('main_' + case_name)
         pb.io.clean_output_dir()
 

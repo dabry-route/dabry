@@ -4,7 +4,7 @@ import sys
 import warnings
 from datetime import datetime, timedelta
 from time import strftime
-from typing import Optional, List
+from typing import Optional, List, Union
 
 import h5py
 import pygrib
@@ -14,10 +14,10 @@ from numpy import ndarray
 from dabry.misc import Utils
 from dabry.penalty import DiscretePenalty
 from dabry.trajectory import Trajectory
-from dabry.flowfield import FlowField, DiscreteFF
+from dabry.flowfield import FlowField, DiscreteFF, discretize_ff, save_ff
 
 """
-ddf_manager.py
+io_manager.py
 Handles the writing and reading of special data format for trajectories, 
 flow field, reachability functions and obstacles.
 
@@ -39,41 +39,50 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
-class DDFmanager:
+class IOManager:
     """
-    This class handles the writing and reading of Dabry Data Format (DDF) files
+    This class handles the writing and reading of files from or to disk
     """
 
-    def __init__(self, cache_ff=False, cache_rff=False):
-        self.module_dir: Optional[str] = None
-        self.cds_ff_db_dir: Optional[str] = None
+    def __init__(self, name: str, cache_ff=False, cache_rff=False):
         self.case_dir: Optional[str] = None
-        self.trajs_filename = 'trajectories.h5'
-        self.ff_filename = 'ff'
         self.obs_filename = 'obs.h5'
         self.pen_filename = 'penalty.h5'
-        self.case_name: Optional[str] = None
         self.cache_ff = cache_ff
         self.cache_rff = cache_rff
+        self._dabry_root_dir = os.path.abspath(os.path.join(__file__, '..'))
+        self.set_case(name)
 
-    def setup(self, module_dir: Optional[str] = None):
-        if module_dir is not None:
-            self.module_dir = module_dir
-        else:
-            path = os.environ.get('DABRYPATH')
-            if path is None:
-                path = '..'
-            self.module_dir = path
-        self.cds_ff_db_dir = os.path.join(self.module_dir, 'data', 'cds')
+    @property
+    def case_name(self):
+        return os.path.basename(self.case_dir)
 
-    def set_case(self, case_name, module_dir: Optional[str] = None):
-        self.setup(module_dir=module_dir)
-        self.case_name = case_name.split('/')[-1]
-        if self.module_dir is None:
-            raise Exception('Output directory not specified yet')
-        self.case_dir = os.path.join(self.module_dir, 'output', self.case_name)
+    def set_case(self, case_name):
+        self.case_dir = os.path.join(os.path.dirname(self._dabry_root_dir), 'output', case_name)
         if not os.path.exists(self.case_dir):
             os.mkdir(self.case_dir)
+
+    @property
+    def _cds_ff_db_dir(self):
+        return os.path.join(self._dabry_root_dir, 'data', 'cds')
+
+    @property
+    def trajs_dir(self):
+        return os.path.join(self.case_dir, 'trajs')
+
+    @property
+    def ff_fpath(self):
+        return os.path.join(self.case_dir, 'ff.npz')
+
+    @property
+    def coords(self) -> str:
+        if not os.path.exists(self.ff_fpath):
+            raise FileNotFoundError('Flow field file not found')
+        return str(np.load(self.ff_fpath)['coords'])
+
+    def setup_trajs(self):
+        if not os.path.exists(self.trajs_dir):
+            os.mkdir(self.trajs_dir)
 
     def clean_output_dir(self):
         if not os.path.exists(self.case_dir):
@@ -94,37 +103,18 @@ class DDFmanager:
     def save_script(self, script_path):
         shutil.copy(script_path, self.case_dir)
 
-    def dump_trajs(self, trajs: List[Trajectory], filename=None):
-        filename = self.trajs_filename if filename is None else filename
-        filepath = os.path.join(self.case_dir, filename)
-        with h5py.File(filepath, "a") as f:
-            index = 0
-            if len(f.keys()) != 0:
-                index = int(max(f.keys(), key=int)) + 1
-            for i, traj in enumerate(trajs):
-                trajgroup = f.create_group(str(index + i))
-                if traj.info_dict is not None:
-                    for k, v in traj.info_dict.items():
-                        trajgroup.attrs[k] = v
-                trajgroup.attrs['coords'] = traj.coords
-                n = traj.times.shape[0]
-                dset = trajgroup.create_dataset('data', traj.states.shape, dtype='f8')
-                dset[:] = traj.states
-
-                dset = trajgroup.create_dataset('ts', traj.times.shape, dtype='f8')
-                dset[:] = traj.times
-
-                if traj.controls is not None:
-                    dset = trajgroup.create_dataset('controls', traj.controls.shape, dtype='f8')
-                    dset[:] = traj.controls
-
-                if traj.costates is not None:
-                    dset = trajgroup.create_dataset('adjoints', traj.costates.shape, dtype='f8')
-                    dset[:] = traj.costates
-
-                if traj.cost is not None:
-                    dset = trajgroup.create_dataset('cost', n, dtype='f8')
-                    dset[:] = traj.cost
+    def save_trajs(self, trajs: List[Trajectory], group_name: Optional[str] = None):
+        self.setup_trajs()
+        if group_name is not None:
+            target_dir = os.path.join(self.trajs_dir, group_name)
+            if not os.path.exists(target_dir):
+                os.mkdir(target_dir)
+        else:
+            target_dir = self.trajs_dir
+        for i_traj, traj in enumerate(trajs):
+            name = str(i_traj).rjust(1 + int(np.log10(len(trajs) - 1)), '0')
+            traj_fpath = os.path.join(target_dir, 'traj_%s' % name)
+            traj.save(traj_fpath)
 
     # def dump_obs(self, nx=100, ny=100):
     #     filepath = os.path.join(self.case_dir, self.obs_filename)
@@ -162,66 +152,15 @@ class DDFmanager:
         dt = datetime(year, month, day, hours, minutes)
         return dt.timestamp()
 
-    def print_trajs(self, filepath):
-        with h5py.File(filepath, 'r') as f:
-            for traj in f.values():
-                print(traj)
-                for attr, val in traj.attrs.items():
-                    print(f'{attr} : {val}')
-
-    def dump_ff(self, ff: FlowField, nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
-                  bl: Optional[ndarray] = None, tr: Optional[ndarray] = None):
-        filepath = os.path.join(self.case_dir, self.ff_filename)
-        if os.path.exists(filepath) and self.cache_ff:
+    def save_ff(self, ff: FlowField,
+                nx: Optional[int] = None,
+                ny: Optional[int] = None,
+                nt: Optional[int] = None,
+                bl: Optional[ndarray] = None,
+                tr: Optional[ndarray] = None):
+        if os.path.exists(self.ff_fpath) and self.cache_ff:
             return
-        DDFmanager.dump_ff_to_file(ff, filepath, nx=nx, ny=ny, nt=nt, bl=bl, tr=tr, fmt='h5')
-
-    @staticmethod
-    def _cast_to_discrete_ff(ff: FlowField, nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
-                               bl: Optional[ndarray] = None, tr: Optional[ndarray] = None):
-        if not isinstance(ff, DiscreteFF):
-            nx = 50 if nx is None else nx
-            ny = 50 if ny is None else ny
-            nt = 25 if nt is None else nt
-            if bl is None or tr is None:
-                raise Exception('Missing bounding box (bl, tr) to sample analytical flow field')
-            return DiscreteFF.from_ff(ff, np.array((bl, tr)).transpose(), nx=nx, ny=ny, nt=nt, force_no_diff=True)
-        else:
-            if nx is not None or ny is not None or nt is not None:
-                warnings.warn('Grid shape (nt, nx, ny) provided but resampling of DiscreteFF not implemented yet. '
-                              'Continuing with flow field native grid')
-            return ff
-
-    @classmethod
-    def dump_ff_to_file(cls, ff: FlowField, filepath: str, fmt='npz',
-                          nx: Optional[int] = None, ny: Optional[int] = None, nt: Optional[int] = None,
-                          bl: Optional[ndarray] = None, tr: Optional[ndarray] = None):
-        if fmt not in ['h5', 'npz']:
-            raise Exception(f'Unknown output format "{fmt}"')
-        dff = DDFmanager._cast_to_discrete_ff(ff, nx, ny, nt, bl, tr)
-        if fmt == 'h5':
-            with h5py.File(filepath + '.' + fmt, 'w') as f:
-                f.attrs['coords'] = dff.coords
-                f.attrs['units_grid'] = Utils.U_METERS if dff.coords == Utils.COORD_CARTESIAN else Utils.U_RAD
-                if dff.values.ndim == 4:
-                    dset = f.create_dataset('data', dff.values.shape, dtype='f8')
-                    dset[:] = dff.values
-                else:
-                    dset = f.create_dataset('data', (1,) + dff.values.shape, dtype='f8')
-                    dset[0, :] = dff.values
-                if dff.values.ndim == 4:
-                    dset = f.create_dataset('ts', (dff.values.shape[0],), dtype='f8')
-                    dset[:] = np.linspace(dff.bounds[0, 0], dff.bounds[0, 1], dff.values.shape[0])
-                else:
-                    dset = f.create_dataset('ts', (1,), dtype='f8')
-                    dset[:] = dff.t_start
-                _nx, _ny = dff.values.shape[:2] if dff.values.ndim == 3 else dff.values.shape[1:3]
-                dset = f.create_dataset('grid', (_nx, _ny, 2), dtype='f8')
-                dset[:] = np.stack(np.meshgrid(np.linspace(dff.bounds[-2, 0], dff.bounds[-2, 1], _nx),
-                                               np.linspace(dff.bounds[-1, 0], dff.bounds[-1, 1], _ny), indexing='ij'), -1)
-        else:
-            # fmt == 'npz'
-            np.savez(filepath + '.' + fmt, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords))
+        save_ff(ff, self.ff_fpath, nx=nx, ny=ny, nt=nt, bl=bl, tr=tr)
 
     def dump_penalty(self, penalty: DiscretePenalty):
         filepath = os.path.join(self.case_dir, self.pen_filename)
@@ -282,7 +221,7 @@ class DDFmanager:
         for k, grbfile in enumerate(srcfiles):
             UV = process(grbfile, nx=nx, ny=ny)
             UVs[k, :] = UV
-            dates[k] = DDFmanager.grib_date_to_unix(os.path.basename(grbfile))
+            dates[k] = IOManager.grib_date_to_unix(os.path.basename(grbfile))
 
         with h5py.File(filepath, 'w') as f:
             f.attrs['coords'] = coords
@@ -374,7 +313,7 @@ class DDFmanager:
         except ImportError:
             raise ImportError('"cdsapi" module required to query ERA5')
         in_cache = []
-        days_required = DDFmanager.days_between(start_date, stop_date)
+        days_required = IOManager.days_between(start_date, stop_date)
         db_path = os.path.join(output_dir, resolution, pressure_level)
         if not os.path.exists(db_path):
             os.makedirs(db_path)
@@ -392,54 +331,18 @@ class DDFmanager:
             print(f'Shall retrieve {len(days_required)} : {days_required}')
 
         for day_required in days_required:
-            # server = ECMWFDataServer()
             server = cdsapi.Client()
             kwargs = {
-                "variable": ['u_component_of_wind', 'v_component_of_wind', 'specific_rain_water_content'],
+                "variable": ['u_component_of_wind', 'v_component_of_wind'],
                 "pressure_level": pressure_level,
                 "product_type": "reanalysis",
                 "year": day_required[:4],
                 "month": day_required[4:6],
                 "day": day_required[6:8],
-                'time': [
-                    '00:00',  # '01:00', '02:00',
-                    '03:00',  # '04:00', '05:00',
-                    '06:00',  # '07:00', '08:00',
-                    '09:00',  # '10:00', '11:00',
-                    '12:00',  # '13:00', '14:00',
-                    '15:00',  # '16:00', '17:00',
-                    '18:00',  # '19:00', '20:00',
-                    '21:00',  # '22:00', '23:00',
-                ],
+                'time': ['00:00', '03:00', '06:00', '09:00', '12:00', '15:00', '18:00', '21:00'],
                 "grid": ['0.5', '0.5'],
                 "format": "grib"
             }
-            # kwargs = {
-            #     'dataset': 'era20c',
-            #     'stream': 'oper',
-            #     'levtype': 'pl',
-            #     'levelist': level,
-            #     'param': '131.128/132.128',
-            #     'step': '1',
-            #     'type': 'an',
-            #     'grid': f'{res}/{res}',
-            # }
-            # kwargs['date'] = day_required
-            # kwargs['time'] = f'00/to/21/by/3'
-            # kwargs['target'] = os.path.join(res_path, wind_name)
 
             ff_name = f'{day_required}.grb2'
             server.retrieve("reanalysis-era5-pressure-levels", kwargs, os.path.join(db_path, ff_name))
-            # server.retrieve(kwargs)
-
-
-if __name__ == '__main__':
-    mdfm = DDFmanager()
-    # mdfm.print_trajs('/home/bastien/Documents/work/dabry/output/example_front_tracking2/trajectories.h5')
-    mdfm.setup('/home/bastien/Documents/work/test')
-    data_dir = '/home/bastien/Documents/data/other'
-    # data_filepath = os.path.join(data_dir, 'gfs_3_20090823_0600_000.grb2')
-    data_filepath = os.path.join(data_dir, 'gfs_4_20220324_1200_000.grb2')
-    bl = np.array((-50., -40.))
-    tr = np.array((10., 40.))
-    mdfm.dump_ff_from_grib2(data_filepath, bl, tr)

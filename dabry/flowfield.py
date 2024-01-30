@@ -1,5 +1,6 @@
 import os
 import sys
+import warnings
 from abc import ABC
 from datetime import datetime, timedelta
 from math import exp, log
@@ -57,6 +58,10 @@ class FlowField(ABC):
         self.dualizable = True
 
         self.coords = coords
+
+    @property
+    def is_unsteady(self):
+        return self.t_end is None
 
     def value(self, t, x):
         if self._lch is None:
@@ -1062,3 +1067,39 @@ class ChertovskihFF(FlowField):
     def d_value(self, t, x):
         return np.array((((x[1] + 3) / 4, x[0] / 4),
                          (-2 * x[0], 0)))
+
+
+def discretize_ff(ff: FlowField,
+                  nx: Optional[int] = None,
+                  ny: Optional[int] = None,
+                  nt: Optional[int] = None,
+                  bl: Optional[ndarray] = None,
+                  tr: Optional[ndarray] = None):
+    if not isinstance(ff, DiscreteFF):
+        nx = 50 if nx is None else nx
+        ny = 50 if ny is None else ny
+        nt = 25 if nt is None else nt
+        if bl is None or tr is None:
+            raise Exception(f'Missing bounding box (bl, tr) to sample unbounded {ff}')
+        return DiscreteFF.from_ff(ff, np.array((bl, tr)).transpose(), nx=nx, ny=ny, nt=nt, force_no_diff=True)
+    else:
+        if nx is not None or ny is not None or nt is not None:
+            warnings.warn('Grid shape (nt, nx, ny) provided but resampling of DiscreteFF not implemented yet. '
+                          'Continuing with flow field native grid')
+        return ff
+
+
+def save_ff(ff: FlowField, filepath: str, fmt='npz',
+            nx: Optional[int] = None,
+            ny: Optional[int] = None,
+            nt: Optional[int] = None,
+            bl: Optional[ndarray] = None,
+            tr: Optional[ndarray] = None):
+    if fmt not in ['h5', 'npz']:
+        raise Exception(f'Unknown output format "{fmt}"')
+    dff = discretize_ff(ff, nx, ny, nt, bl, tr)
+    if fmt == 'h5':
+        raise Exception('h5 not supported anymore for flow field save to disk')
+    else:
+        # fmt == 'npz'
+        np.savez(filepath + '.' + fmt, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords))

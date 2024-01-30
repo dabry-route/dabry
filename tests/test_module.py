@@ -5,7 +5,7 @@ import sys
 from dabry.misc import Chrono
 from dabry.problem import all_problems
 from dabry.solver_ef import SolverEFBase
-from dabry.ddf_manager import DDFmanager
+from dabry.io_manager import IOManager
 
 
 class Test:

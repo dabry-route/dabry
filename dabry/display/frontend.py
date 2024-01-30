@@ -22,7 +22,7 @@ class FrontendHandler:
         self.traj_stats = []
 
     def setup(self):
-        base_path = os.environ.get('DABRYPATH')
+        base_path = os.path.join(os.path.dirname(__file__), '..', '..')  # os.environ.get('DABRYPATH')
         if base_path is None:
             raise Exception('No path to Dabry module. Please set environment variable DABRYPATH and retry.')
         self.output_dir = os.path.join(base_path, 'output')
@@ -92,7 +92,7 @@ class FrontendHandler:
             print(f'Unknown mode {self.mode}', file=sys.stderr)
             exit(1)
 
-        self.display = Display(mode_3d=mode_3d)
+        self.display = Display(os.path.basename(self.example_dir), mode_3d=mode_3d)
         self.display.set_output_path(self.example_dir)
         self.configure()
         self.display.set_mode(flags)

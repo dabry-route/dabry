@@ -1,5 +1,7 @@
+import string
 import warnings
 from abc import ABC
+import random
 from typing import Optional, Dict
 
 import numpy as np
@@ -218,7 +220,7 @@ class Site:
                 coeff_next = coeff_next / 2
                 coeff_prev = 1 - coeff_next
         self.traj_full = Trajectory(times, states, self.traj.coords, controls=controls, costates=costates,
-                                    cost=costs, info_dict=self.traj.info_dict.copy())
+                                    cost=costs)
 
     def __str__(self):
         return f"<Site {self.name}>"
@@ -330,10 +332,10 @@ class SolverEF(ABC):
     def n_time(self):
         return self.times.shape[0]
 
-    def get_traj_and_id(self, depth: int) -> list[tuple[int, Trajectory]]:
-        res = []
+    def get_trajs(self, depth: int) -> Dict[str, Trajectory]:
+        res = {}
         for traj in self.traj_groups[depth]:
-            res.append((self.trajs.index(traj), traj))
+            res[str(self.trajs.index(traj))] = traj
         return res
 
     def cost_map(self, nx: int = 100, ny: int = 100) -> ndarray:
@@ -347,6 +349,10 @@ class SolverEF(ABC):
                 if np.isnan(res[index]) or res[index] > traj.times[k]:
                     res[index] = traj.times[k]
         return res
+
+    def save_results(self):
+        self.pb.io.save_trajs(self.trajs, group_name='ef_01')
+        self.pb.io.save_ff(self.pb.model.ff, bl=self.pb.bl, tr=self.pb.tr)
 
 
 class SolverEFBisection(SolverEF):
@@ -473,6 +479,13 @@ class SolverEFResampling(SolverEF):
         for site in self._site_groups[depth]:
             if site.traj is not None:
                 res[site.name_display] = site.traj
+        return res
+
+    def get_trajs(self, depth: int) -> Dict[str, Trajectory]:
+        # TODO: validate
+        res = {}
+        for i in range(self.depth):
+            res = {**res, **self.get_trajs_by_depth(i)}
         return res
 
     def site_front(self, index_t):

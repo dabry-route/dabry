@@ -1,5 +1,7 @@
+import json
 from typing import Optional, Dict
 
+import h5py
 import numpy as np
 from numpy import ndarray
 
@@ -39,8 +41,7 @@ class Trajectory:
                  controls: Optional[ndarray] = None,
                  costates: Optional[ndarray] = None,
                  cost: Optional[ndarray] = None,
-                 events: Optional[Dict[str, ndarray]] = None,
-                 info_dict: Optional[dict] = None):
+                 events: Optional[Dict[str, ndarray]] = None):
         """
         :param times: Time stamps shape (n,)
         :param states: States (n, 2)
@@ -49,7 +50,6 @@ class Trajectory:
         :param costates: Costates (n, 2)
         :param cost: Instantaneous cost (n-1,)
         :param events: Dictionary of event time stamps following scipy's solve_ivp behavior
-        :param info_dict: Additional information for the trajectory
         """
         self.times: ndarray = times.copy()
         self.states = states.copy()
@@ -57,10 +57,9 @@ class Trajectory:
         self.costates = costates.copy() if costates is not None else None
         self.cost = cost.copy() if cost is not None else None
 
-        self.events = events if events is not None else {}
+        self.events: Dict[str, ndarray] = events if events is not None else {}
 
         self.coords = coords
-        self.info_dict = info_dict if info_dict is not None else {}
 
     @classmethod
     def cartesian(cls,
@@ -72,7 +71,7 @@ class Trajectory:
                   events: Optional[Dict[str, ndarray]] = None,
                   info_dict: Optional[dict] = None):
         return cls(times, states, Utils.COORD_CARTESIAN,
-                   controls=controls, costates=costates, cost=cost, events=events, info_dict=info_dict)
+                   controls=controls, costates=costates, cost=cost, events=events)
 
     @classmethod
     def gcs(cls,
@@ -84,7 +83,7 @@ class Trajectory:
             events: Optional[Dict[str, ndarray]] = None,
             info_dict: Optional[dict] = None):
         return cls(times, states, Utils.COORD_GCS,
-                   controls=controls, costates=costates, cost=cost, events=events, info_dict=info_dict)
+                   controls=controls, costates=costates, cost=cost, events=events)
 
     def __add__(self, other):
         if not isinstance(other, Trajectory):
@@ -111,11 +110,20 @@ class Trajectory:
 
         events = self.events.copy().update(other.events)
 
-        info_dict = self.info_dict.copy().update(other.info_dict)
         return Trajectory(times, states, self.coords,
-                          controls=controls, costates=costates, cost=cost, events=events, info_dict=info_dict)
+                          controls=controls, costates=costates, cost=cost, events=events)
 
     def copy(self):
         return Trajectory(self.times.copy(), self.states.copy(), self.coords, controls=self.controls.copy(),
-                          costates=self.costates.copy(), cost=self.cost.copy(), events=self.events.copy(),
-                          info_dict=self.info_dict.copy())
+                          costates=self.costates.copy(), cost=self.cost.copy(), events=self.events.copy())
+
+    def save(self, filepath):
+        np.savez(filepath, times=self.times, states=self.states, costates=self.costates,
+                 controls=self.controls, cost=self.cost)
+        meta_data = {'coords': self.coords, 'events': {}}
+        for e_name, times in self.events.items():
+            meta_data['events'][e_name] = times.tolist()
+        meta_fpath = filepath + '_meta.json'
+        with open(meta_fpath, 'w') as f:
+            json.dump(meta_data, f)
+
