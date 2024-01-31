@@ -139,8 +139,11 @@ class Site:
             return True
         return False
 
-    def assign_traj(self, traj: Trajectory):
-        self.traj = traj
+    def extend_traj(self, traj: Trajectory):
+        if self.traj is None:
+            self.traj = traj
+        else:
+            self.traj = self.traj + traj
 
     def init_next_nb(self, site):
         self.next_nb[0] = site
@@ -174,7 +177,10 @@ class Site:
         site_prev.id_check_next = index_t
         self.next_nb[index_t] = site_next
 
-    def fill_traj(self, sites_dict, n_total_prefix):
+    def integrate(self, t_eval: ndarray):
+        pass
+
+    def extrapolate_back_traj(self, sites_dict, n_total_prefix):
         name_prev, name_next = Site.parents_name_from_name(self.name, n_total_prefix)
         coeff_prev, coeff_next = 0.5, 0.5
         index_hi = self.index_t - 1
@@ -278,7 +284,6 @@ class SolverEF(ABC):
             full_name = name + '_' + str(n if n is not None else 0)
             self.events[full_name] = obs.event
             self.obstacles[full_name] = obs
-        self._events = list(self.events.values())
         self.obs_active = None
         self.obs_active_trigo = True
         abs_max_step = self.total_duration if abs_max_step is None else abs_max_step
@@ -377,7 +382,7 @@ class SolverEFBisection(SolverEF):
             t_eval = self.times
             res = scitg.solve_ivp(self.dyn_augsys, (self.t_init, self.t_upper_bound),
                                   np.array(tuple(self.pb.x_init) + tuple(costate)), t_eval=t_eval,
-                                  events=self._events)
+                                  events=list(self.events.values()))
             traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
                                         events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
             if traj.events['target'].shape[0] > 0:
@@ -412,56 +417,60 @@ class SolverEFResampling(SolverEF):
         self.sites = {site.name: site for site in self._to_shoot_sites}
         self._site_groups = [tuple(self.sites.values())]
 
+    def integrate_site(self, site: Site, t_eval: ndarray):
+        if t_eval.shape[0] <= 1:
+            return
+        res = scitg.solve_ivp(self.dyn_augsys, (t_eval[0], t_eval[-1]),
+                              np.array(tuple(site.state_origin) + tuple(site.costate_origin)),
+                              t_eval=t_eval,
+                              events=list(self.events.values()), dense_output=True, max_step=self.max_int_step)
+        if len(res.t) == 0:
+            return
+        traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
+                                    events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
+        if traj.events['target'].shape[0] > 0:
+            self.success = True
+            self.solution_sites.append(site)
+        active_obstacles = [name for name, t_events in traj.events.items()
+                            if t_events.shape[0] > 0 and name != 'target']
+        if len(active_obstacles) >= 2:
+            warnings.warn("Multiple active obstacles", category=RuntimeWarning)
+        if len(active_obstacles) >= 1:
+            obs_name = active_obstacles[0]
+            t_enter_obs = traj.events[obs_name][0]
+            self.obs_active = self.obstacles[obs_name]
+            site.obstacle_name = obs_name
+            site.index_t_obs = site.index_t + res.t.shape[0]
+            state_aug_cross = res.sol(t_enter_obs)
+            cross = np.cross(self.obs_active.d_value(state_aug_cross[:2]),
+                             self.pb.model.dyn.value(t_enter_obs, state_aug_cross[:2],
+                                                     -state_aug_cross[2:] / np.linalg.norm(state_aug_cross[2:])))
+            self.obs_active_trigo = cross >= 0.
+            sign = 2 * self.obs_active_trigo - 1
+            direction = np.array(((0, -sign), (sign, 0))) @ self.obs_active.d_value(state_aug_cross[:2])
+            if is_possible_direction(self.pb.model.ff.value(t_enter_obs, state_aug_cross[:2]),
+                                     direction, self.pb.srf_max):
+                res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, t_eval[-1]), state_aug_cross[:2],
+                                      t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],
+                                      max_step=self.max_int_step)
+                if len(res.t) > 0:
+                    controls = np.array([self.dyn_constr(t, x) - self.pb.model.ff.value(t, x)
+                                         for t, x in zip(res.t, res.y.transpose())])
+                    traj_obs = Trajectory.cartesian(res.t, res.y.transpose(), controls=controls,
+                                                    cost=res.t - self.t_init)
+                    traj = traj + traj_obs
+        site.extend_traj(traj)
+
     def step(self):
         trajs: list[Trajectory] = []
         for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth):
             t_eval = np.linspace(site.t_init, self.t_upper_bound, self.n_time - site.index_t)
-            if t_eval.shape[0] <= 1:
-                continue
-            res = scitg.solve_ivp(self.dyn_augsys, (site.t_init, self.t_upper_bound),
-                                  np.array(tuple(site.state_origin) + tuple(site.costate_origin)),
-                                  t_eval=t_eval,
-                                  events=self._events, dense_output=True, max_step=self.max_int_step)
-            if len(res.t) == 0:
-                continue
-            traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
-                                        events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
-            if traj.events['target'].shape[0] > 0:
-                self.success = True
-                self.solution_sites.append(site)
-            active_obstacles = [name for name, t_events in traj.events.items()
-                                if t_events.shape[0] > 0 and name != 'target']
-            if len(active_obstacles) >= 2:
-                warnings.warn("Multiple active obstacles", category=RuntimeWarning)
-            if len(active_obstacles) >= 1:
-                obs_name = active_obstacles[0]
-                t_enter_obs = traj.events[obs_name][0]
-                self.obs_active = self.obstacles[obs_name]
-                site.obstacle_name = obs_name
-                site.index_t_obs = site.index_t + res.t.shape[0]
-                state_aug_cross = res.sol(t_enter_obs)
-                cross = np.cross(self.obs_active.d_value(state_aug_cross[:2]),
-                                 self.pb.model.dyn.value(t_enter_obs, state_aug_cross[:2],
-                                                         -state_aug_cross[2:] / np.linalg.norm(state_aug_cross[2:])))
-                self.obs_active_trigo = cross >= 0.
-                sign = 2 * self.obs_active_trigo - 1
-                direction = np.array(((0, -sign), (sign, 0))) @ self.obs_active.d_value(state_aug_cross[:2])
-                if is_possible_direction(self.pb.model.ff.value(t_enter_obs, state_aug_cross[:2]),
-                                         direction, self.pb.srf_max):
-                    res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, self.t_upper_bound), state_aug_cross[:2],
-                                          t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],
-                                          max_step=self.max_int_step)
-                    if len(res.t) > 0:
-                        controls = np.array([self.dyn_constr(t, x) - self.pb.model.ff.value(t, x)
-                                             for t, x in zip(res.t, res.y.transpose())])
-                        traj_obs = Trajectory.cartesian(res.t, res.y.transpose(), controls=controls,
-                                                        cost=res.t - self.t_init)
-                        traj = traj + traj_obs
-            trajs.append(traj)
-            self.trajs.append(traj)
-            site.assign_traj(traj)
-            if not site.is_root():
-                site.connect_to_parents(self.sites, site.index_t, self.n_costate_angle)
+            self.integrate_site(site, t_eval)
+            if site.traj is not None:
+                trajs.append(site.traj)
+                self.trajs.append(site.traj)
+                if not site.is_root():
+                    site.connect_to_parents(self.sites, site.index_t, self.n_costate_angle)
         self._to_shoot_sites = []
         self.add_new_sites()
         self.depth += 1
@@ -471,7 +480,7 @@ class SolverEFResampling(SolverEF):
         for _ in range(self.max_depth):
             self.step()
         for site in self.solution_sites:
-            site.fill_traj(self.sites, self.n_costate_angle)
+            site.extrapolate_back_traj(self.sites, self.n_costate_angle)
 
     def get_trajs_by_depth(self, depth: int) -> Dict[str, Trajectory]:
         res = {}
