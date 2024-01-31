@@ -1,7 +1,5 @@
-import string
 import warnings
 from abc import ABC
-import random
 from typing import Optional, Dict
 
 import numpy as np
@@ -462,12 +460,10 @@ class SolverEFResampling(SolverEF):
         site.extend_traj(traj)
 
     def step(self):
-        trajs: list[Trajectory] = []
         for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth):
             t_eval = np.linspace(site.t_init, self.t_upper_bound, self.n_time - site.index_t)
             self.integrate_site(site, t_eval)
             if site.traj is not None:
-                trajs.append(site.traj)
                 self.trajs.append(site.traj)
                 if not site.is_root():
                     site.connect_to_parents(self.sites, site.index_t, self.n_costate_angle)
@@ -578,3 +574,23 @@ class SolverEFResampling(SolverEF):
                     pass
 
         return res
+
+
+class SolverEFTrimming(SolverEFResampling):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.n_subframe: int = 10
+        self.i_subframe: int = 0
+
+    def step(self):
+        # TODO: continue
+        for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth):
+            t_eval = self.times[self.i_subframe * self.n_subframe: (self.i_subframe + 1) * self.n_subframe]
+            self.integrate_site(site, t_eval)
+            if site.traj is not None:
+                self.trajs.append(site.traj)
+                if not site.is_root():
+                    site.connect_to_parents(self.sites, site.index_t, self.n_costate_angle)
+        self._to_shoot_sites = []
+        self.add_new_sites()
