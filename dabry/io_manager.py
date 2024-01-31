@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sys
@@ -59,6 +60,8 @@ class IOManager:
 
     def set_case(self, case_name):
         self.case_dir = os.path.join(os.path.dirname(self._dabry_root_dir), 'output', case_name)
+
+    def setup_dir(self):
         if not os.path.exists(self.case_dir):
             os.mkdir(self.case_dir)
 
@@ -75,12 +78,30 @@ class IOManager:
         return os.path.join(self.case_dir, 'ff.npz')
 
     @property
+    def pb_data_fpath(self):
+        return os.path.join(self.case_dir, self.case_name + '.json')
+
+    @property
     def coords(self) -> str:
         if not os.path.exists(self.ff_fpath):
-            raise FileNotFoundError('Flow field file not found')
-        return str(np.load(self.ff_fpath)['coords'])
+            raise FileNotFoundError('Flow field file not found "%s"' % self.ff_fpath)
+        return str(np.load(self.ff_fpath, mmap_mode='r')['coords'])
+
+    def border(self, name: str):
+        if not os.path.exists(self.pb_data_fpath):
+            raise FileNotFoundError('Problem data file not found "%s"' % self.pb_data_fpath)
+        return np.array(json.load(open(self.pb_data_fpath))[name])
+
+    @property
+    def bl(self) -> ndarray:
+        return self.border('bl')
+
+    @property
+    def tr(self) -> ndarray:
+        return self.border('tr')
 
     def setup_trajs(self):
+        self.setup_dir()
         if not os.path.exists(self.trajs_dir):
             os.mkdir(self.trajs_dir)
 
@@ -160,6 +181,7 @@ class IOManager:
                 tr: Optional[ndarray] = None):
         if os.path.exists(self.ff_fpath) and self.cache_ff:
             return
+        self.setup_dir()
         save_ff(ff, self.ff_fpath, nx=nx, ny=ny, nt=nt, bl=bl, tr=tr)
 
     def dump_penalty(self, penalty: DiscretePenalty):

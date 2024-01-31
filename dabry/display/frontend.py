@@ -29,7 +29,6 @@ class FrontendHandler:
 
     def configure(self):
         self.display.set_title(os.path.basename(self.example_dir))
-        self.display.import_params()
         self.display.load_all()
         self.display.setup()
         self.display.draw_all()

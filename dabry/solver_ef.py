@@ -253,8 +253,7 @@ class SolverEF(ABC):
         # Same for time
         self.total_duration = total_duration
         self.t_init = t_init if t_init is not None else self.pb.model.ff.t_start
-        self.target_radius = target_radius if target_radius is not None else \
-            0.025 * np.linalg.norm(self.pb.tr - self.pb.bl)
+        self.target_radius = target_radius if target_radius is not None else pb.target_radius
         self._target_radius_sq = self.target_radius ** 2
         self.times = np.linspace(self.t_init, self.t_upper_bound, n_time)
         self.costate_norm_bounds = costate_norm_bounds

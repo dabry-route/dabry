@@ -61,7 +61,7 @@ class FlowField(ABC):
 
     @property
     def is_unsteady(self):
-        return self.t_end is None
+        return self.t_end is not None
 
     def value(self, t, x):
         if self._lch is None:
@@ -1102,4 +1102,4 @@ def save_ff(ff: FlowField, filepath: str, fmt='npz',
         raise Exception('h5 not supported anymore for flow field save to disk')
     else:
         # fmt == 'npz'
-        np.savez(filepath + '.' + fmt, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords))
+        np.savez(filepath, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords))

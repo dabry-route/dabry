@@ -1,4 +1,5 @@
 import json
+import warnings
 from typing import Optional, Dict
 
 import h5py
@@ -118,12 +119,41 @@ class Trajectory:
                           costates=self.costates.copy(), cost=self.cost.copy(), events=self.events.copy())
 
     def save(self, filepath):
-        np.savez(filepath, times=self.times, states=self.states, costates=self.costates,
-                 controls=self.controls, cost=self.cost)
+        np.savez(filepath, times=self.times, states=self.states,
+                 costates=self.costates if self.costates is not None else np.array(()),
+                 controls=self.controls if self.controls is not None else np.array(()),
+                 cost=self.cost if self.cost is not None else np.array(()))
         meta_data = {'coords': self.coords, 'events': {}}
         for e_name, times in self.events.items():
             meta_data['events'][e_name] = times.tolist()
         meta_fpath = filepath + '_meta.json'
         with open(meta_fpath, 'w') as f:
             json.dump(meta_data, f)
+
+    @classmethod
+    def from_npz(cls, filepath):
+        """
+        :param filepath: Should end with ".npz"
+        :return:
+        """
+        if not filepath.endswith('.npz'):
+            raise ValueError('Not a NPZ file %s' % filepath)
+        data = np.load(filepath)
+        try:
+            meta_data = json.load(open(filepath[:-4] + '_meta.json'))
+            coords = meta_data['coords']
+            events = {}
+            for k, v in meta_data['events'].items():
+                events[k] = np.array(v)
+        except FileNotFoundError:
+            warnings.warn('Metadata not found for trajectory', category=UserWarning)
+            coords = Utils.COORD_CARTESIAN
+            events = {}
+
+        controls = data['controls'] if data['controls'].size > 0 else None
+        costates = data['costates'] if data['costates'].size > 0 else None
+        cost = data['cost'] if data['cost'].size > 0 else None
+        return cls(data['times'], data['states'], coords, controls, costates, cost, events)
+
+
 

@@ -9,14 +9,14 @@ import numpy as np
 from numpy import ndarray
 
 from dabry.aero import MermozAero, Aero
-from dabry.io_manager import IOManager
 from dabry.feedback import GSTargetFB
 from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearFF, RadialGaussFF, GyreFF, \
     PointSymFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
     FlowField, VortexFF, ZeroFF, WrapperFF
+from dabry.io_manager import IOManager
 from dabry.misc import Utils, csv_to_dict
 from dabry.model import Model
-from dabry.obstacle import CircleObs, FrameObs, GreatCircleObs, Obstacle, WrapperObs
+from dabry.obstacle import CircleObs, FrameObs, Obstacle, WrapperObs
 from dabry.penalty import Penalty, NullPenalty, WrapperPen
 
 """
@@ -49,6 +49,7 @@ class NavigationProblem:
                  bl: Optional[ndarray] = None,
                  tr: Optional[ndarray] = None,
                  name: Optional[str] = None,
+                 target_radius: Optional[float] = None,
                  aero: Optional[Aero] = None,
                  penalty: Optional[Penalty] = None,
                  autoframe=True):
@@ -90,6 +91,9 @@ class NavigationProblem:
                 self.bl = (self.x_init + self.x_target) / 2. - np.array((w / 2., w / 2.))
                 self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
 
+        self.target_radius: float = target_radius if target_radius is not None else \
+            0.025 * np.linalg.norm(self.tr - self.bl)
+
         frame_offset = 0.
         if autoframe:
             bl_frame = self.bl + (self.tr - self.bl) * frame_offset / 2.
@@ -112,18 +116,18 @@ class NavigationProblem:
         self.model = Model.zermelo(ff)
 
     def save_ff(self):
-        self.io.dump_ff(self.model.ff, bl=self.bl, tr=self.tr)
+        self.io.save_ff(self.model.ff, bl=self.bl, tr=self.tr)
 
     def save_info(self):
         pb_info = {
             'x_init': tuple(self.x_init),
             'x_target': tuple(self.x_target),
-            'airspeed': self.srf_max,
-            'geodesic_time_no_ff': self.geod_l / self.srf_max,
-            'geodesic_distance': self.geod_l,
-            'aero_mode': self.aero.mode
+            'srf_max': self.srf_max,
+            'target_radius': self.target_radius,
+            'bl': self.bl.tolist(),
+            'tr': self.tr.tolist(),
         }
-        with open(os.path.join(self.io.case_dir, 'pb_info.json'), 'w') as f:
+        with open(os.path.join(self.io.case_dir, f'{self.name}.json'), 'w') as f:
             json.dump(pb_info, f, indent=4)
 
     @property
@@ -248,7 +252,7 @@ class NavigationProblem:
         penalty = WrapperPen(self.penalty, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
         return NavigationProblem(wrapper_ff, x_init, x_target, srf_max,
                                  bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty,
-                                 name=self.name + ' (rescaled)')
+                                 name=self.name + ' (scaled)')
 
     # TODO: reimplement this
     def htarget(self):
@@ -265,7 +269,7 @@ class NavigationProblem:
 
     @classmethod
     def from_database(cls, x_init: ndarray, x_target: ndarray, srf: float,
-                      t_start: [float, datetime], t_end: [float, datetime], obstacles: Optional[List[Obstacle]] = None,
+                      t_start: [float, datetime], t_end: [float, datetime],
                       resolution='0.5', pressure_level='1000', data_path: Optional[str] = None):
         """
         :param x_init: Initial position (lon, lat)
@@ -273,7 +277,6 @@ class NavigationProblem:
         :param srf: Speed relative to flow
         :param t_start: Time window lower bound
         :param t_end: Time window upper bound
-        :param obstacles: List of obstacle objects
         :param resolution: The weather model grid resolution in degrees, e.g. '0.5'
         :param pressure_level: The pressure level in hPa, e.g. '1000', '500', '200'
         :param data_path: Force path to data
@@ -293,37 +296,7 @@ class NavigationProblem:
         ff = DiscreteFF.from_cds(grid_bounds, t_start, t_end, resolution=resolution,
                                  pressure_level=pressure_level, data_path=data_path)
 
-        if obstacles is None:
-            obstacles = []
-
-        obstacles = obstacles + NavigationProblem.spherical_frame(bl, tr)
-
-        return cls(ff, x_init, x_target, srf, obstacles=obstacles, bl=bl, tr=tr)
-
-    @staticmethod
-    def spherical_frame(bl, tr, offset_rel=0.02):
-        offset = (tr - bl) * offset_rel
-        bl_obs = bl + offset
-        tr_obs = tr - offset
-
-        obstacles = []
-        obstacles.append(MeridianObs(bl_obs[0], True))
-        obstacles.append(MeridianObs(tr_obs[0], False))
-        obstacles.append(ParallelObs(bl_obs[1], True))
-        obstacles.append(ParallelObs(tr_obs[1], False))
-        eps_lon = Utils.angular_diff(bl_obs[0], tr_obs[0]) / 30
-        eps_lat = Utils.angular_diff(bl_obs[1], tr_obs[1]) / 30
-        obstacles.append(GreatCircleObs(np.array((bl_obs[0], bl_obs[1])) + np.array((eps_lon, 0)),
-                                        np.array((bl_obs[0], bl_obs[1])) + np.array((0, eps_lat)), autobox=True))
-        obstacles.append(GreatCircleObs(np.array((tr_obs[0], bl_obs[1])) + np.array((0, eps_lat)),
-                                        np.array((tr_obs[0], bl_obs[1])) + np.array((-eps_lon, 0)), autobox=True))
-        obstacles.append(GreatCircleObs(np.array((tr_obs[0], tr_obs[1])) + np.array((-eps_lon, 0)),
-                                        np.array((tr_obs[0], tr_obs[1])) + np.array((0, -eps_lat)), autobox=True))
-        obstacles.append(GreatCircleObs(np.array((bl_obs[0], tr_obs[1])) + np.array((0, -eps_lat)),
-                                        np.array((bl_obs[0], tr_obs[1])) + np.array((eps_lon, 0)), autobox=True))
-        obstacles.append(ParallelObs(-80 * Utils.DEG_TO_RAD, True))
-        obstacles.append(ParallelObs(80 * Utils.DEG_TO_RAD, False))
-        return obstacles
+        return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
 
     @classmethod
     def base_name(cls, name: str):
