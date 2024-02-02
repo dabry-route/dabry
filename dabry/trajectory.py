@@ -2,7 +2,6 @@ import json
 import warnings
 from typing import Optional, Dict
 
-import h5py
 import numpy as np
 from numpy import ndarray
 
@@ -114,6 +113,25 @@ class Trajectory:
         return Trajectory(times, states, self.coords,
                           controls=controls, costates=costates, cost=cost, events=events)
 
+    # def fill_with(self, other):
+    #     if not isinstance(other, Trajectory):
+    #         raise ValueError('%s is not a Trajectory' % type(other))
+    #     for values, values_other in zip([self.times, self.states, self.controls, self.costates, self.cost],
+    #         [other.times, other.states, other.controls, other.costates, other.cost]):
+    #         if values is None:
+    #             continue
+    #         if np.any(np.logical_and(np.logical_not(np.isnan(values)), np.logical_not(np.isnan(values_other)))):
+    #             raise ValueError("Trajectories share non-nan values at similar positions")
+    #     slc = np.logical_not(np.isnan(other.times))
+    #     self.times[slc] = other.times[slc]
+    #     self.states[slc] = other.states[slc]
+    #     self.controls[slc] = other.controls[slc]
+    #     self.costates[slc] = other.costates[slc]
+    #     self.cost[slc] = other.cost[slc]
+
+    def __len__(self):
+        return self.times.shape[0]
+
     def copy(self):
         return Trajectory(self.times.copy(), self.states.copy(), self.coords, controls=self.controls.copy(),
                           costates=self.costates.copy(), cost=self.cost.copy(), events=self.events.copy())
@@ -154,6 +172,3 @@ class Trajectory:
         costates = data['costates'] if data['costates'].size > 0 else None
         cost = data['cost'] if data['cost'].size > 0 else None
         return cls(data['times'], data['states'], coords, controls, costates, cost, events)
-
-
-

@@ -160,11 +160,10 @@ class NavigationProblem:
         return Utils.middle(x1, x2, self.coords)
 
     def timeopt_control_cartesian(self, costate: ndarray):
-        return -self.srf_max * costate / np.linalg.norm(costate)
+        return timeopt_control_cartesian(costate, self.srf_max)
 
     def timeopt_control_gcs(self, state: ndarray, costate: ndarray):
-        costate_mod = costate.dot(np.array(((1 / np.cos(state[..., 1]), 0.), (0., 1.))))
-        return -self.srf_max * costate_mod / np.linalg.norm(costate_mod)
+        return timeopt_control_gcs(state, costate, self.srf_max)
 
     def augsys_dyn_timeopt(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
         return np.hstack((self.model.dyn.value(t, state, control),
@@ -177,7 +176,15 @@ class NavigationProblem:
     def augsys_dyn_timeopt_gcs(self, t: float, state: ndarray, costate: ndarray):
         return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_gcs(state, costate))
 
+    def hamiltonian(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
+        return costate @ (control + self.model.ff.value(t, state)) + 1
+
+    def hamiltonian_reduced(self, t: float, state: ndarray, costate: ndarray):
+        # TODO : adapt to gcs
+        return self.hamiltonian(t, state, costate, self.timeopt_control_cartesian(costate))
+
     def control_angle(self, adjoint, state=None):
+        # TODO : remove when support of base solver is over
         if self.coords == Utils.COORD_CARTESIAN:
             # angle to x-axis in trigonometric angle
             return np.arctan2(*(-adjoint)[::-1])
@@ -634,3 +641,12 @@ class NavigationProblem:
 
         else:
             raise ValueError('No corresponding problem for name "%s"' % b_name)
+
+
+def timeopt_control_cartesian(costate: ndarray, srf_max: float):
+    return -srf_max * costate / np.linalg.norm(costate)
+
+
+def timeopt_control_gcs(state: ndarray, costate: ndarray, srf_max: float):
+    costate_mod = costate.dot(np.array(((1 / np.cos(state[..., 1]), 0.), (0., 1.))))
+    return -srf_max * costate_mod / np.linalg.norm(costate_mod)

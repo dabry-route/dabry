@@ -1,11 +1,13 @@
+from typing import Union
+
 import numpy as np
 
 from dabry.flowfield import DiscreteFF
 from dabry.obstacle import CircleObs
-from dabry.solver_ef import SolverEFResampling
+from dabry.solver_ef import SolverEFResampling, SolverEFTrimming, cost_map_triangle
 
 
-def display(solver: SolverEFResampling, isub=4, timeslider=False):
+def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timeslider=False):
     try:
         import plotly.figure_factory as figfac
         import plotly.graph_objects as go
@@ -61,32 +63,37 @@ def display(solver: SolverEFResampling, isub=4, timeslider=False):
                       yaxis_range=[solver.pb.bl[1], solver.pb.tr[1]],
                       width=800, height=800)
 
+    name_traj_depth = sum([list(
+        zip(list(solver.get_trajs_by_depth(depth).keys()),
+            list(solver.get_trajs_by_depth(depth).values()),
+            [depth] * len(solver.get_trajs_by_depth(depth).items())))
+                           for depth in range(solver.depth)], [])
+
     if not timeslider:
         fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
                                    line=dict(color='lightgreen'), name=site.name, mode='lines')
                         for site in solver.solution_sites])
-        for depth in range(solver.depth):
-            fig.add_traces([go.Scatter(x=traj.states[:, 0], y=traj.states[:, 1],
-                                       line=dict(color=colors[depth % len(colors)]), name=traj_name, mode='lines')
-                            for traj_name, traj in solver.get_trajs_by_depth(depth).items()])
+
+        fig.add_traces([go.Scatter(x=traj.states[:, 0], y=traj.states[:, 1],
+                                   line=dict(color=colors[depth % len(colors)]), name=traj_name, mode='lines')
+                        for traj_name, traj, depth in name_traj_depth])
     else:
         # Add traces, one for each slider step
         substep = 10
         fig_tsteps = list(range(solver.n_time))[::substep]
         for i_major in fig_tsteps:
-            for depth in range(solver.depth):
-                l = [
-                    go.Scatter(
-                        x=np.where((traj.times >= solver.times[i_major]) *
-                                   (traj.times <= solver.times[min(i_major + substep, solver.n_time - 1)]),
-                                   traj.states[:, 0], np.ones(traj.times.shape[0]) * np.nan),
-                        y=np.where((traj.times >= solver.times[i_major]) * (
-                                    traj.times <= solver.times[min(i_major + substep, solver.n_time - 1)]),
-                                   traj.states[:, 1], np.ones(traj.times.shape[0]) * np.nan),
-                        line=dict(color=colors[depth % len(colors)]), name=traj_name, mode='lines',
-                        visible=True)
-                    for traj_name, traj in solver.get_trajs_by_depth(depth).items()]
-                fig.add_traces(l)
+            fig.add_traces(
+                [go.Scatter(
+                    x=np.where((traj.times >= solver.times[i_major]) *
+                               (traj.times <= solver.times[min(i_major + substep, solver.n_time - 1)]),
+                               traj.states[:, 0], np.ones(traj.times.shape[0]) * np.nan),
+                    y=np.where((traj.times >= solver.times[i_major]) * (
+                            traj.times <= solver.times[min(i_major + substep, solver.n_time - 1)]),
+                               traj.states[:, 1], np.ones(traj.times.shape[0]) * np.nan),
+                    line=dict(color=colors[depth % len(colors)]), name=traj_name, mode='lines',
+                    visible=True)
+                    for traj_name, traj, depth in name_traj_depth]
+            )
 
         # Create and add slider
         steps = []
@@ -126,13 +133,12 @@ def display(solver: SolverEFResampling, isub=4, timeslider=False):
                                           y=np.linspace(solver.pb.bl[1], solver.pb.tr[1], cost_map.shape[1])[1:-1],
                                           coloraxis='coloraxis')])
     fig_cost.update_coloraxes(showscale=False)
-    for depth in range(solver.depth):
-        fig_cost.add_traces([go.Scatter3d(x=traj.states[:, 0], y=traj.states[:, 1], z=traj.cost,
-                                          line=dict(color=colors[depth % len(colors)]),
-                                          name=traj_name,
-                                          # legendgroup=depth, legendgrouptitle={'text': 'Depth %d' % depth},
-                                          mode='lines')
-                             for traj_name, traj in solver.get_trajs_by_depth(depth).items()])
+    fig_cost.add_traces([go.Scatter3d(x=traj.states[:, 0], y=traj.states[:, 1], z=traj.cost,
+                                      line=dict(color=colors[depth % len(colors)]),
+                                      name=traj_name,
+                                      # legendgroup=depth, legendgrouptitle={'text': 'Depth %d' % depth},
+                                      mode='lines')
+                         for traj_name, traj, depth in name_traj_depth])
     fig_cost.update_layout(title='Value function', autosize=False, width=800, height=800,
                            margin=dict(l=65, r=50, b=65, t=90),
                            scene=dict(aspectmode='data'))
