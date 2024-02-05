@@ -44,10 +44,13 @@ class Site:
                  obstacle_name="", index_t_obs: int = 0, name="", init_next_nb=None):
         self.t_init = t_init
         self.index_t_init = index_t_init
+        if np.any(np.isnan(costate_origin)):
+            raise ValueError('Costate initialization contains NaN')
         self.traj = Trajectory.cartesian(np.array((t_init,)),
                                          state_origin.reshape((1, 2)),
                                          costates=costate_origin.reshape((1, 2)),
                                          cost=np.array((t_init,)))  # TODO: correct that)
+        self.traj_full: Optional[Trajectory] = None
         self.index_t_check_next = index_t_init
         self.obstacle_name = obstacle_name
         self.index_t_obs = index_t_obs
@@ -77,11 +80,12 @@ class Site:
             costate_prev = -site_prev.control_at_index(index_t) * np.linalg.norm(costate_next)
         if site_next.in_obs_at(index_t):
             costate_next = -site_next.control_at_index(index_t) * np.linalg.norm(costate_prev)
+        name = Site.name_from_parents_name(site_prev.name, site_next.name)
         return Site(site_prev.time_at_index(index_t), index_t,
                     0.5 * (site_prev.state_at_index(index_t) + site_next.state_at_index(index_t)),
                     0.5 * (costate_prev + costate_next),
                     site_prev.n_time,
-                    name=Site.name_from_parents_name(site_prev.name, site_next.name))
+                    name=name)
 
     @property
     def name_display(self):
@@ -145,32 +149,42 @@ class Site:
             return True
         return False
 
+    def _update_obstacle_info(self):
+        obs_events = [k for k, v in self.traj.events.items() if k.startswith('obs_') and v.shape[0] > 0]
+        if len(obs_events) > 0:
+            # Assuming at most one obstacle
+            obs_name = obs_events[0]
+            obs_time = self.traj.events[obs_name][0]
+            self.obstacle_name = obs_name
+            self.index_t_obs = self.index_t_init + np.searchsorted(self.traj.times, obs_time)
+
     def extend_traj(self, traj: Trajectory):
         if self.traj is None:
             self.traj = traj
         else:
             self.traj = self.traj + traj
+        self._update_obstacle_info()
 
     def init_next_nb(self, site):
         self.next_nb[0] = site
 
     def time_at_index(self, index: int):
-        return self.traj.times[index - self.index_t]
+        return self.traj.times[index - self.index_t_init]
 
     def state_at_index(self, index: int):
-        return self.traj.states[index - self.index_t]
+        return self.traj.states[index - self.index_t_init]
 
     def costate_at_index(self, index: int):
-        return self.traj.costates[index - self.index_t]
+        return self.traj.costates[index - self.index_t_init]
 
     def state_aug_at_index(self, index: int):
-        return np.concatenate((self.traj.states[index - self.index_t], self.traj.costates[index - self.index_t]))
+        return np.concatenate((self.traj.states[index - self.index_t_init], self.traj.costates[index - self.index_t_init]))
 
     def control_at_index(self, index: int):
-        return self.traj.controls[index - self.index_t]
+        return self.traj.controls[index - self.index_t_init]
 
     def cost_at_index(self, index: int):
-        return self.traj.cost[index - self.index_t]
+        return self.traj.cost[index - self.index_t_init]
 
     def is_root(self):
         return len(self.name) == 3
@@ -178,7 +192,7 @@ class Site:
     def connect_to_parents(self, sites_dict, n_total_prefix):
         name_prev, name_next = Site.parents_name_from_name(self.name, n_total_prefix)
         site_prev, site_next = sites_dict[name_prev], sites_dict[name_next]
-        assert (site_prev.index_t_check_next == self.index_t_init - 1)
+        assert (site_prev.index_t_check_next in [self.index_t_init - 1, self.index_t_init])
         site_prev.next_nb[self.index_t_init] = self
         site_prev.index_t_check_next = self.index_t_init
         self.next_nb[self.index_t_init] = site_next
@@ -232,7 +246,8 @@ class Site:
                 coeff_next = coeff_next / 2
                 coeff_prev = 1 - coeff_next
         # TODO: validate this
-        self.traj = Trajectory(times, states, self.traj.coords, controls=controls, costates=costates, cost=costs)
+        self.traj_full = Trajectory(times, states, self.traj.coords, controls=controls, costates=costates, cost=costs,
+                               events=self.traj.events)
 
     def __str__(self):
         return f"<Site {self.name}>"
@@ -286,7 +301,7 @@ class SolverEF(ABC):
                 classes[name] = 1
             else:
                 classes[name] += 1
-            full_name = name + '_' + str(n if n is not None else 0)
+            full_name = 'obs_' + name + '_' + str(n if n is not None else 0)
             self.events[full_name] = obs.event
             self.obstacles[full_name] = obs
         self.obs_active = None
@@ -434,45 +449,38 @@ class SolverEFResampling(SolverEF):
     def trajs(self):
         return list(map(lambda x: x.traj, [site for site in self.sites.values() if site.traj is not None]))
 
-    def integrate_site_to_target_time(self, site: Site, t_target: float):
-        self.integrate_site_to_target_index(site, self.times.searchsorted(t_target, side='right') - 1)
-
-    def integrate_site_to_target_index(self, site: Site, index_t: int):
-        # Assuming site received integration up to site.index_t included
-        t_start = self.times[site.index_t]
-        t_end = self.times[index_t]
-        state_start = site.state_at_index(site.index_t)
-        costate_start = site.costate_at_index(site.index_t)
-        t_eval = np.linspace(t_start, t_end, index_t - site.index_t_init + 1)
-        # singleton_traj = Trajectory.cartesian(np.array((t_start,)),
-        #                                       state_start.reshape((1, 2)),
-        #                                       costates=costate_start.reshape((1, 2)),
-        #                                       cost=np.array((t_start - self.t_init,)))
+    def solve_ivp_constr(self, y0, t_eval) -> Optional[Trajectory]:
         if t_eval.shape[0] <= 1:
-            return
+            return None
+        res = scitg.solve_ivp(self.dyn_augsys, (t_eval[0], t_eval[-1]), y0,
+                              t_eval=t_eval[1:],  # Remove initial point which is redudant
+                              events=list(self.events.values()), dense_output=True, max_step=self.max_int_step)
+        if len(res.t) == 0:
+            times = np.array(())
+            states = np.array(((), ()))
+            costates = np.array(((), ()))
+            cost = np.array(())
         else:
-            res = scitg.solve_ivp(self.dyn_augsys, (t_eval[0], t_eval[-1]),
-                                  np.hstack((state_start, costate_start)),
-                                  t_eval=t_eval[1:], # Remove initial point which is redudant
-                                  events=list(self.events.values()), dense_output=True, max_step=self.max_int_step)
-            if len(res.t) == 0:
-                return
-            else:
-                traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
-                                            events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
-        if traj.events.get('target') is not None and traj.events.get('target').shape[0] > 0:
-            self.success = True
-            self.solution_sites.append(site)
+            times = res.t
+            states = res.y.transpose()[:, :2]
+            costates = res.y.transpose()[:, 2:]
+            cost = res.t - self.t_init
+        traj = Trajectory.cartesian(times, states, costates=costates, cost=cost,
+                                    events=self.t_events_to_dict(res.t_events))
+
         active_obstacles = [name for name, t_events in traj.events.items()
                             if t_events.shape[0] > 0 and name != 'target']
+        times = np.array(())
+        states = np.array(((), ()))
+        costates = None
+        controls = None
+        cost = np.array(())
         if len(active_obstacles) >= 2:
             warnings.warn("Multiple active obstacles", category=RuntimeWarning)
         if len(active_obstacles) >= 1:
             obs_name = active_obstacles[0]
             t_enter_obs = traj.events[obs_name][0]
             self.obs_active = self.obstacles[obs_name]
-            site.obstacle_name = obs_name
-            site.index_t_obs = site.index_t_init + res.t.shape[0]
             state_aug_cross = res.sol(t_enter_obs)
             cross = np.cross(self.obs_active.d_value(state_aug_cross[:2]),
                              self.pb.model.dyn.value(t_enter_obs, state_aug_cross[:2],
@@ -485,12 +493,41 @@ class SolverEFResampling(SolverEF):
                 res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, t_eval[-1]), state_aug_cross[:2],
                                       t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],
                                       max_step=self.max_int_step)
-                if len(res.t) > 0:
+                if len(res.t) == 0:
+                    times = np.array(())
+                    states = np.array(((), ()))
+                    costates = np.array(((), ()))
+                    controls = None
+                    cost = np.array(())
+                else:
+                    times = res.t
+                    states = res.y.transpose()
+                    costates = None
                     controls = np.array([self.dyn_constr(t, x) - self.pb.model.ff.value(t, x)
                                          for t, x in zip(res.t, res.y.transpose())])
-                    traj_obs = Trajectory.cartesian(res.t, res.y.transpose(), controls=controls,
-                                                    cost=res.t - self.t_init)
-                    traj = traj + traj_obs
+                    cost = res.t - self.t_init
+        traj_obs = Trajectory.cartesian(times, states, costates=costates, controls=controls, cost=cost)
+        return traj + traj_obs
+
+    def integrate_site_to_target_time(self, site: Site, t_target: float):
+        self.integrate_site_to_target_index(site, self.times.searchsorted(t_target, side='right') - 1)
+
+    def integrate_site_to_target_index(self, site: Site, index_t: int):
+        # Assuming site received integration up to site.index_t included
+        t_start = self.times[site.index_t]
+        t_end = self.times[index_t]
+        state_start = site.state_at_index(site.index_t)
+        costate_start = site.costate_at_index(site.index_t)
+        t_eval = np.linspace(t_start, t_end, index_t - site.index_t_init + 1)
+        traj = self.solve_ivp_constr(np.hstack((state_start, costate_start)), t_eval)
+        if len(traj) == 0:
+            site.closed = True
+            return
+
+        if traj.events.get('target') is not None and traj.events.get('target').shape[0] > 0:
+            self.success = True
+            self.solution_sites.append(site)
+
         site.extend_traj(traj)
 
     def step(self):

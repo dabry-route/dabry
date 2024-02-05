@@ -4,7 +4,7 @@ import numpy as np
 
 from dabry.flowfield import DiscreteFF
 from dabry.obstacle import CircleObs
-from dabry.solver_ef import SolverEFResampling, SolverEFTrimming, cost_map_triangle
+from dabry.solver_ef import SolverEFResampling, SolverEFTrimming
 
 
 def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timeslider=False):
@@ -67,7 +67,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timesl
         zip(list(solver.get_trajs_by_depth(depth).keys()),
             list(solver.get_trajs_by_depth(depth).values()),
             [depth] * len(solver.get_trajs_by_depth(depth).items())))
-                           for depth in range(solver.depth)], [])
+        for depth in range(solver.depth)], [])
 
     if not timeslider:
         fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
@@ -128,10 +128,11 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timesl
     #
     # fig_cst.show()
 
-    fig_cost = go.Figure(data=[go.Surface(z=cost_map[1:-1, 1:-1].transpose(),
-                                          x=np.linspace(solver.pb.bl[0], solver.pb.tr[0], cost_map.shape[0])[1:-1],
-                                          y=np.linspace(solver.pb.bl[1], solver.pb.tr[1], cost_map.shape[1])[1:-1],
-                                          coloraxis='coloraxis')])
+    fig_cost = go.Figure()
+    fig_cost.add_traces([go.Surface(z=cost_map[1:-1, 1:-1].transpose(),
+                                    x=np.linspace(solver.pb.bl[0], solver.pb.tr[0], cost_map.shape[0])[1:-1],
+                                    y=np.linspace(solver.pb.bl[1], solver.pb.tr[1], cost_map.shape[1])[1:-1],
+                                    coloraxis='coloraxis')])
     fig_cost.update_coloraxes(showscale=False)
     fig_cost.add_traces([go.Scatter3d(x=traj.states[:, 0], y=traj.states[:, 1], z=traj.cost,
                                       line=dict(color=colors[depth % len(colors)]),

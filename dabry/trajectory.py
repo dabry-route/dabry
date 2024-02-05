@@ -1,3 +1,4 @@
+import copy
 import json
 import warnings
 from typing import Optional, Dict
@@ -59,7 +60,7 @@ class Trajectory:
 
         self.events: Dict[str, ndarray] = events if events is not None else {}
 
-        self.coords = coords
+        self.coords: str = coords
 
     @classmethod
     def cartesian(cls,
@@ -90,25 +91,35 @@ class Trajectory:
             raise ValueError('Trajectory addition with type %s' % type(other))
         if self.coords != other.coords:
             raise ValueError('Incompatible coord types %s and %s' % (self.coords, other.coords))
-        if self.times.shape[0] == 0:
-            return other
-        if other.times.shape[0] == 0:
-            return self
-        times = np.concatenate((self.times, other.times))
-        states = np.concatenate((self.states, other.states))
-        controls = np.concatenate(
-            ((self.controls if self.controls is not None else np.ones((self.times.shape[0], 2)) * np.nan),
-             (other.controls if other.controls is not None else np.ones((other.times.shape[0], 2)) * np.nan))
-        )
-        costates = np.concatenate(
-            ((self.costates if self.costates is not None else np.ones((self.times.shape[0], 2)) * np.nan),
-             (other.costates if other.costates is not None else np.ones((other.times.shape[0], 2)) * np.nan))
-        )
+        if len(self) == 0:
+            times = other.times
+            states = other.states
+            controls = other.controls
+            costates = other.costates
+            cost = other.cost
+        elif len(other) == 0:
+            times = self.times
+            states = self.states
+            controls = self.controls
+            costates = self.costates
+            cost = self.cost
+        else:
+            times = np.concatenate((self.times, other.times))
+            states = np.concatenate((self.states, other.states))
+            controls = np.concatenate(
+                ((self.controls if self.controls is not None else np.ones((self.times.shape[0], 2)) * np.nan),
+                 (other.controls if other.controls is not None else np.ones((other.times.shape[0], 2)) * np.nan))
+            )
+            costates = np.concatenate(
+                ((self.costates if self.costates is not None else np.ones((self.times.shape[0], 2)) * np.nan),
+                 (other.costates if other.costates is not None else np.ones((other.times.shape[0], 2)) * np.nan))
+            )
 
-        cost = np.concatenate((self.cost if self.cost is not None else np.ones(self.times.shape[0]) * np.nan,
-                               other.cost if other.cost is not None else np.ones(other.times.shape[0]) * np.nan))
+            cost = np.concatenate((self.cost if self.cost is not None else np.ones(self.times.shape[0]) * np.nan,
+                                   other.cost if other.cost is not None else np.ones(other.times.shape[0]) * np.nan))
 
-        events = self.events.copy().update(other.events)
+        events = self.events.copy()
+        events.update(other.events)
 
         return Trajectory(times, states, self.coords,
                           controls=controls, costates=costates, cost=cost, events=events)
@@ -138,8 +149,8 @@ class Trajectory:
 
     def save(self, filepath):
         np.savez(filepath, times=self.times, states=self.states,
-                 costates=self.costates if self.costates is not None else np.array(()),
-                 controls=self.controls if self.controls is not None else np.array(()),
+                 costates=self.costates if self.costates is not None else np.array(((), ())),
+                 controls=self.controls if self.controls is not None else np.array(((), ())),
                  cost=self.cost if self.cost is not None else np.array(()))
         meta_data = {'coords': self.coords, 'events': {}}
         for e_name, times in self.events.items():
