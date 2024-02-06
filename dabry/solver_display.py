@@ -70,9 +70,9 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timesl
         for depth in range(solver.depth)], [])
 
     if not timeslider:
-        fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
-                                   line=dict(color='lightgreen'), name=site.name, mode='lines')
-                        for site in solver.solution_sites])
+        # fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
+        #                            line=dict(color='lightgreen'), name=site.name, mode='lines')
+        #                 for site in solver.solution_sites])
 
         fig.add_traces([go.Scatter(x=traj.states[:, 0], y=traj.states[:, 1],
                                    line=dict(color=colors[depth % len(colors)]), name=traj_name, mode='lines')
@@ -129,12 +129,13 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timesl
     # fig_cst.show()
 
     fig_cost = go.Figure()
+    cost_map = solver.partial_cost_map
     fig_cost.add_traces([go.Surface(z=cost_map[1:-1, 1:-1].transpose(),
                                     x=np.linspace(solver.pb.bl[0], solver.pb.tr[0], cost_map.shape[0])[1:-1],
                                     y=np.linspace(solver.pb.bl[1], solver.pb.tr[1], cost_map.shape[1])[1:-1],
                                     coloraxis='coloraxis')])
     fig_cost.update_coloraxes(showscale=False)
-    fig_cost.add_traces([go.Scatter3d(x=traj.states[:, 0], y=traj.states[:, 1], z=traj.cost,
+    fig_cost.add_traces([go.Scatter3d(x=traj.states[-10:, 0], y=traj.states[-10:, 1], z=traj.cost[-10:],
                                       line=dict(color=colors[depth % len(colors)]),
                                       name=traj_name,
                                       # legendgroup=depth, legendgrouptitle={'text': 'Depth %d' % depth},
