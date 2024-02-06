@@ -544,7 +544,7 @@ class SolverEFResampling(SolverEF):
         t_eval = np.linspace(t_start, t_end, index_t - site.index_t + 1)
         traj = self.solve_ivp_constr(np.hstack((state_start, costate_start)), t_eval,
                                      in_obs=site.in_obs_at(site.index_t))
-        if len(traj) == 0:
+        if len(traj) < t_eval.shape[0] - 1:
             site.close("Integration stopped")
             return
 
@@ -611,24 +611,20 @@ class SolverEFResampling(SolverEF):
             site_nb = site.next_nb[site.index_t_check_next]
             new_id_check_next = site.index_t_check_next
             new_site: Optional[Site] = None
-            for i in range(site.index_t_check_next, index_t_hi):
-                try:
-                    state = site.state_at_index(i)
-                    state_nb = site_nb.state_at_index(i)
-                    if site.in_obs_at(i) and site_nb.in_obs_at(i):
-                        site.close("Lies in obstacle and neighbour too")
-                        break
-                    if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
-                        new_site = Site.from_parents(site, site_nb, i)
-                        if len(self.pb._in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
-                            # Choose not to resample points lying within obstacles
-                            site.close("Point lying inside obstacle at its creation")
-                            new_site = None
-                        break
-                    new_id_check_next = i
-                except IndexError:
-                    # TODO: remove this
-                    pass
+            for i in range(site.index_t_check_next, min(site.index_t + 1, site_nb.index_t + 1, index_t_hi)):
+                state = site.state_at_index(i)
+                state_nb = site_nb.state_at_index(i)
+                if site.in_obs_at(i) and site_nb.in_obs_at(i):
+                    site.close("Lies in obstacle and neighbour too")
+                    break
+                if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
+                    new_site = Site.from_parents(site, site_nb, i)
+                    if len(self.pb._in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
+                        # Choose not to resample points lying within obstacles
+                        site.close("Point lying inside obstacle at its creation")
+                        new_site = None
+                    break
+                new_id_check_next = i
             # Update the neighbouring property
             site.next_nb[site.index_t_check_next: new_id_check_next + 1] = \
                 [site_nb] * (new_id_check_next - site.index_t_check_next + 1)
@@ -648,10 +644,10 @@ class SolverEFTrimming(SolverEFResampling):
         super().__init__(*args, **kwargs)
         self.n_subframe: int = 10
         self.i_subframe: int = 0
-        self.sites_valid: list[set[Site]] = [set() for _ in range(self.n_time // self.n_subframe)]
+        self.sites_valid: list[set[Site]] = [set() for _ in range(self.n_time // self.n_subframe + 1)]
         self._sites_created_at_subframe: list[set[Site]] = [set() for _ in range(self.n_time // self.n_subframe)]
         self.depth = 1
-        self.partial_cost_map = None
+        self._partial_cost_map = None
 
     def setup(self):
         super().setup()
@@ -682,6 +678,8 @@ class SolverEFTrimming(SolverEFResampling):
                 if site.traj is not None:
                     if not site.is_root() and not site.has_neighbours:
                         site.connect_to_parents(self.sites, self.n_costate_angle)
+                cond = site.index_t == self.index_t_next_subframe or site.closed
+                assert cond
             new_sites = self.compute_new_sites(index_t_hi=self.index_t_next_subframe - 1)
             self._to_shoot_sites.extend(new_sites)
             self._sites_by_depth[0].extend(new_sites)  # Compatibility with SolverEFResampling
@@ -700,7 +698,7 @@ class SolverEFTrimming(SolverEFResampling):
         cost_map = cost_map_triangle(sites_for_cost_map, self.index_t_subframe(i_subframe_start_cm),
                                      self.index_t_next_subframe - 1,
                                      self.pb.bl, self.pb.tr, nx, ny)
-        self.partial_cost_map = cost_map
+        self._partial_cost_map = cost_map
         bl, spacings = self.pb.get_grid_params(nx, ny)
         new_valid_sites = []
         for site in [site for site in sites_considered if not site.closed]:
@@ -717,8 +715,8 @@ class SolverEFTrimming(SolverEFResampling):
     def solve(self):
         self.setup()
         for _ in range(self.n_subframe):
-            print('Subframe: %d, Act: %d, Cls: %d (Tot: %d)' %
-                  (self.i_subframe, len(self.sites_valid[self.i_subframe]),
+            print('Subframe %d/%d, Act: %d, Cls: %d (Tot: %d)' %
+                  (self.i_subframe, self.n_subframe - 1, len(self.sites_valid[self.i_subframe]),
                    len([site for site in self.sites.values() if site.closed]), len(self.sites)))
             self.step()
         for site in self.solution_sites:
@@ -732,7 +730,7 @@ def cost_map_triangle(sites: Iterable[Site], index_t_lo: int, index_t_hi: int, b
                                         np.linspace(bl[1], tr[1], ny),
                                         indexing='ij'), -1)
     for site in sites:
-        for index_t in range(max(index_t_lo, site.index_t_init), 1 + min(index_t_hi, site.index_t_check_next)):
+        for index_t in range(max(index_t_lo, site.index_t_init), min(index_t_hi + 1, site.index_t_check_next)):
             site_nb = site.next_nb[index_t]
 
             # site, index_t    1 o --------- o 3 site, index + 1
@@ -741,21 +739,17 @@ def cost_map_triangle(sites: Iterable[Site], index_t_lo: int, index_t_hi: int, b
             #                    | tri2  \   |
             #                    |          \|
             # site_nb, index_t 2 o-----------o 4 site_nb, index_t + 1
-            try:
-                point1 = site.state_at_index(index_t)
-                point3 = site.state_at_index(index_t + 1)
-                point2 = site_nb.state_at_index(index_t)
-                point4 = site_nb.state_at_index(index_t + 1)
-                cost1 = site.cost_at_index(index_t)
-                cost3 = site.cost_at_index(index_t + 1)
-                cost2 = site_nb.cost_at_index(index_t)
-                cost4 = site_nb.cost_at_index(index_t + 1)
-                tri1_cost = triangle_mask_and_cost(grid_vectors, point1, point3, point4, cost1, cost3, cost4)
-                np.minimum(res, tri1_cost, out=res)
-                if index_t > 0:
-                    tri2_cost = triangle_mask_and_cost(grid_vectors, point1, point4, point2, cost1, cost4, cost2)
-                    np.minimum(res, tri2_cost, out=res)
-            except (TypeError, AttributeError, IndexError):
-                # TODO: remove this
-                pass
+            point1 = site.state_at_index(index_t)
+            point3 = site.state_at_index(index_t + 1)
+            point2 = site_nb.state_at_index(index_t)
+            point4 = site_nb.state_at_index(index_t + 1)
+            cost1 = site.cost_at_index(index_t)
+            cost3 = site.cost_at_index(index_t + 1)
+            cost2 = site_nb.cost_at_index(index_t)
+            cost4 = site_nb.cost_at_index(index_t + 1)
+            tri1_cost = triangle_mask_and_cost(grid_vectors, point1, point3, point4, cost1, cost3, cost4)
+            np.minimum(res, tri1_cost, out=res)
+            if index_t > 0:
+                tri2_cost = triangle_mask_and_cost(grid_vectors, point1, point4, point2, cost1, cost4, cost2)
+                np.minimum(res, tri2_cost, out=res)
     return res

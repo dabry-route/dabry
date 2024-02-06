@@ -262,7 +262,7 @@ class Display:
         """
         ts = None
         if mode == 'ff':
-            ts = self.ff['ts']
+            ts = self.ff.times
         elif mode == 'rff':
             ts = self.rff['ts']
         elif mode == 'pen':
@@ -654,14 +654,27 @@ class Display:
                         self.trajs_regular.append(traj)
         for ef_name, ef_list in self.extremal_fields.items():
             n_trajs = len(ef_list)
-            nt = None
+            t_start = None
+            t_end = None
+            dt = None
             for traj in ef_list:
-                nt_candidate = traj.times.shape[0]
-                if nt is None or nt_candidate > nt:
-                    nt = nt_candidate
+                t_start_cand = traj.times[0]
+                t_end_cand = traj.times[-1]
+                if len(traj) >= 2:
+                    dt = traj.times[1] - traj.times[0]
+                if t_start is None or t_start_cand < t_start:
+                    t_start = t_start_cand
+                if t_end is None or t_end_cand > t_end:
+                    t_end = t_end_cand
+            nt = int(np.round((t_end - t_start)/dt)) + 1
             bulk = np.nan * np.ones((nt, n_trajs, 2))
+            times = np.linspace(t_start, t_end, nt)
             for i_traj, traj in enumerate(ef_list):
-                bulk[nt - traj.times.shape[0]:, i_traj, :] = traj.states
+                i_start = (np.abs(times - traj.times[0])).argmin()
+                try:
+                    bulk[i_start:i_start + len(traj), i_traj, :] = traj.states[:]
+                except ValueError:
+                    exit(1)
             self.ef_bulks[ef_name] = bulk
 
     def load_rff(self, filename=None):
@@ -1059,11 +1072,11 @@ class Display:
                 # The time cursor corresponds to given index in front list
                 i = self.ef_index(self.tcur)
                 if i is not None:
-
                     for ef_id, bulks in self.ef_bulks.items():
-                        # The front at given index may be empty : find nearest non-empty front by moving forward in time
-
-                        points = bulks[i]
+                        try:
+                            points = bulks[i]
+                        except IndexError:
+                            continue
                         # Last points
                         kwargs = {'s': 5.,
                                   'color': reachability_colors['pmp']['last'],
@@ -1073,7 +1086,7 @@ class Display:
                                   }
                         if self.coords == 'gcs':
                             kwargs['latlon'] = True
-                            points = np.dot((points, np.diag((RAD_TO_DEG, RAD_TO_DEG))))
+                            points = np.dot(points, np.diag((RAD_TO_DEG, RAD_TO_DEG)))
                         if self.mode_3d:
                             kwargs = {
                                 'color': reachability_colors['pmp']['last'],
@@ -1142,7 +1155,7 @@ class Display:
         points = trajs[itr].states[trajs[itr].times < self.tcur]
         if self.coords == 'gcs':
             kwargs['latlon'] = True
-            points = np.dot((points, np.diag((RAD_TO_DEG, RAD_TO_DEG))))
+            points = np.dot(points, np.diag((RAD_TO_DEG, RAD_TO_DEG)))
 
         if ef_id is None or self.mode_ef_display:
             self.traj_lines.append(self.ax.plot(points[..., 0], points[..., 1], **kwargs))

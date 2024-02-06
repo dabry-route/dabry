@@ -62,7 +62,8 @@ class FrontendHandler:
             all_subdirs = list(map(lambda n: os.path.join(self.output_dir, n), nlist))
             all_params = []
             for dd in all_subdirs:
-                params_path = os.path.join(dd, 'params.json')
+                basename = os.path.basename(dd)
+                params_path = os.path.join(dd, '%s.json' % basename)
                 if os.path.exists(params_path):
                     all_params.append(params_path)
 

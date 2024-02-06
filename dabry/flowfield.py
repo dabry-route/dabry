@@ -213,6 +213,12 @@ class DiscreteFF(FlowField):
             self.t_start = bounds[0, 0]
             self.t_end = bounds[0, 1]
 
+    @property
+    def times(self):
+        if self.t_end is None:
+            raise ValueError('Flowfield is steady')
+        return np.linspace(self.t_start, self.t_end, self.values.shape[0])
+
     @classmethod
     def from_npz(cls, filepath):
         ff = np.load(filepath)
