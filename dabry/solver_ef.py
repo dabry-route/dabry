@@ -445,8 +445,8 @@ class SolverEFResampling(SolverEF):
         self.sites: dict[str, Site] = {}
         self._sites_by_depth: list[list[Site]] = [[] for _ in range(self.max_depth)]
         self._to_shoot_sites: list[Site] = []
-        self.solution_sites: list[Site] = []
-        self._trimming_band_width = 4
+        self.solution_sites: set[Site] = set()
+        self.solution_site: Optional[Site] = None
 
     def setup(self):
         super().setup()
@@ -550,7 +550,7 @@ class SolverEFResampling(SolverEF):
 
         if traj.events.get('target') is not None and traj.events.get('target').shape[0] > 0:
             self.success = True
-            self.solution_sites.append(site)
+            self.solution_sites.add(site)
 
         site.extend_traj(traj)
 
@@ -570,6 +570,7 @@ class SolverEFResampling(SolverEF):
         self.setup()
         for _ in range(self.max_depth):
             self.step()
+        self.check_solutions()
         for site in self.solution_sites:
             site.extrapolate_back_traj(self.sites, self.n_costate_angle)
 
@@ -603,6 +604,10 @@ class SolverEFResampling(SolverEF):
     def _closed_sites(self):
         return [site for site in self.sites.values() if site.closed]
 
+    @property
+    def suboptimal_sites(self):
+        return self.solution_sites.difference({self.solution_site})
+
     def compute_new_sites(self, index_t_hi: Optional[int] = None) -> list[Site]:
         index_t_hi = index_t_hi if index_t_hi is not None else self.n_time - 1
         prev_sites = [site for site in self.sites.values() if not site.closed]
@@ -634,18 +639,36 @@ class SolverEFResampling(SolverEF):
                 new_sites.append(new_site)
         return new_sites
 
+    def check_solutions(self):
+        for site in self.sites.values():
+            if np.any(np.sum(np.square(site.traj.states - self.pb.x_target), axis=-1) < self._target_radius_sq):
+                self.success = True
+                self.solution_sites.add(site)
+        min_cost = None
+        for site in self.solution_sites:
+            candidate_cost = np.min(
+                site.traj.cost[np.sum(np.square(site.traj.states - self.pb.x_target), axis=-1) < self._target_radius_sq])
+            if min_cost is None or candidate_cost < min_cost:
+                min_cost = candidate_cost
+                self.solution_site = site
+
     def cost_map_triangle(self, nx: int = 100, ny: int = 100):
         return cost_map_triangle(list(self.sites.values()), 0, self.n_time - 1, self.pb.bl, self.pb.tr, nx, ny)
 
 
 class SolverEFTrimming(SolverEFResampling):
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args,
+                 n_index_per_subframe: int = 10,
+                 trimming_band_width: int = 1,
+                 **kwargs):
         super().__init__(*args, **kwargs)
-        self.n_subframe: int = 10
+        self.n_index_per_subframe: int = n_index_per_subframe
+        self._trimming_band_width = trimming_band_width
         self.i_subframe: int = 0
-        self.sites_valid: list[set[Site]] = [set() for _ in range(self.n_time // self.n_subframe + 1)]
-        self._sites_created_at_subframe: list[set[Site]] = [set() for _ in range(self.n_time // self.n_subframe)]
+        self.sites_valid: list[set[Site]] = [set() for _ in range(self.n_subframes + 1)]
+        self._sites_created_at_subframe: list[set[Site]] = [set()
+                                                            for _ in range(self.n_subframes)]
         self.depth = 1
         self._partial_cost_map = None
 
@@ -656,15 +679,19 @@ class SolverEFTrimming(SolverEFResampling):
         self._to_shoot_sites = []
 
     @property
+    def n_subframes(self):
+        return self.n_time // self.n_index_per_subframe + (1 if self.n_time % self.n_index_per_subframe > 0 else 0)
+
+    @property
     def index_t_cur_subframe(self):
-        return self.i_subframe * self.n_subframe
+        return self.index_t_subframe(self.i_subframe)
 
     @property
     def index_t_next_subframe(self):
-        return (self.i_subframe + 1) * self.n_subframe
+        return min(self.index_t_subframe(self.i_subframe + 1), self.n_time)
 
     def index_t_subframe(self, i: int):
-        return i * self.n_subframe
+        return i * self.n_index_per_subframe
 
     def _sites_closed_at_subframe(self, i: int):
         return [site for site in self.sites_valid[i].union(self._sites_created_at_subframe[i]) if site.closed]
@@ -674,11 +701,11 @@ class SolverEFTrimming(SolverEFResampling):
         while len(self._to_shoot_sites) > 0:
             while len(self._to_shoot_sites) > 0:
                 site = self._to_shoot_sites.pop()
-                self.integrate_site_to_target_index(site, self.index_t_next_subframe)
+                self.integrate_site_to_target_index(site, self.index_t_next_subframe - 1)
                 if site.traj is not None:
                     if not site.is_root() and not site.has_neighbours:
                         site.connect_to_parents(self.sites, self.n_costate_angle)
-                cond = site.index_t == self.index_t_next_subframe or site.closed
+                cond = site.index_t == self.index_t_next_subframe - 1 or site.closed
                 assert cond
             new_sites = self.compute_new_sites(index_t_hi=self.index_t_next_subframe - 1)
             self._to_shoot_sites.extend(new_sites)
@@ -714,9 +741,9 @@ class SolverEFTrimming(SolverEFResampling):
 
     def solve(self):
         self.setup()
-        for _ in range(self.n_subframe):
+        for _ in range(self.n_subframes):
             print('Subframe %d/%d, Act: %d, Cls: %d (Tot: %d)' %
-                  (self.i_subframe, self.n_subframe - 1, len(self.sites_valid[self.i_subframe]),
+                  (self.i_subframe, self.n_subframes - 1, len(self.sites_valid[self.i_subframe]),
                    len([site for site in self.sites.values() if site.closed]), len(self.sites)))
             self.step()
         for site in self.solution_sites:

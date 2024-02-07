@@ -51,14 +51,6 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timesl
                           y1=obs.center[1] + obs.radius,
                           xref="x", yref="y", fillcolor="Grey", opacity=0.5)
 
-    # fig.add_contour(z=z, x=grid[:, 0, 0], y=grid[0, :, 1],
-    #                 contours=dict(
-    #                     type="levels",
-    #                     start=-0.1,
-    #                     end=0.1,
-    #                     size=2
-    #                 ))
-
     fig.update_layout(xaxis_range=[solver.pb.bl[0], solver.pb.tr[0]],
                       yaxis_range=[solver.pb.bl[1], solver.pb.tr[1]],
                       width=800, height=800)
@@ -70,13 +62,15 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timesl
         for depth in range(solver.depth)], [])
 
     if not timeslider:
-        # fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
-        #                            line=dict(color='lightgreen'), name=site.name, mode='lines')
-        #                 for site in solver.solution_sites])
-
         fig.add_traces([go.Scatter(x=traj.states[:, 0], y=traj.states[:, 1],
                                    line=dict(color=colors[depth % len(colors)]), name=traj_name, mode='lines')
                         for traj_name, traj, depth in name_traj_depth])
+        fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
+                                   line=dict(color='lightgreen'), name=site.name, mode='lines')
+                        for site in solver.suboptimal_sites])
+        fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
+                                   line=dict(color='lightgreen', width=3), name=site.name, mode='lines')
+                        for site in [solver.solution_site] if site is not None])
     else:
         # Add traces, one for each slider step
         substep = 10

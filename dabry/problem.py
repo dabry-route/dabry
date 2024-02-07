@@ -544,7 +544,7 @@ class NavigationProblem:
 
             obstacles = []
             # obstacles.append(RadialGaussFF(f * 0.5, f * 0.15, f * 0.1, 1 / 2 * 0.2, 10*v_a))
-            ffs: list[FlowField] = [UniformFF(np.array((-5., 0.)))] + vortices + obstacles
+            ffs: list[FlowField] = [UniformFF(np.array((0., 0.)))] + vortices + obstacles
             # const_wind = UniformFF(np.array([0., 5.]))
             N = len(ffs) - len(obstacles)
             M = len(obstacles)
@@ -619,7 +619,7 @@ class NavigationProblem:
             wind_value = 4 * np.ones(nt)
             center = np.zeros((nt, 2))
             for k in range(30):
-                center[10 + k] = np.array((0.05 * k, 0.))
+                center[5 + k] = np.array((0.05 * k, 0.))
             radius = 0.2 * np.ones(nt)
 
             ff = TrapFF(wind_value, center, radius, t_end=4)
