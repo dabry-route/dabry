@@ -639,6 +639,12 @@ class NavigationProblem:
             ff.compute_derivatives()
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
+        if b_name == "montreal_reykjavik":
+            ff = DiscreteFF.from_npz(os.path.join(os.path.abspath(''), '..', 'data', 'cds_omerc', 'test', 'ff.npz'))
+            x_init = np.array((5e6 - 0.5e6, 3e6 - 0.5e6))
+            x_target = np.array((0.5e6, 0.5e6))
+            return cls(ff, x_init, x_target, 10, name=b_name)
+
         else:
             raise ValueError('No corresponding problem for name "%s"' % b_name)
 

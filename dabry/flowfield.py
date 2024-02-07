@@ -312,7 +312,7 @@ class DiscreteFF(FlowField):
     @classmethod
     def from_cds(cls, grid_bounds: ndarray, t_start: Union[float | datetime], t_end: Union[float | datetime],
                  i_member: Optional[int] = None, resolution='0.5', pressure_level='1000',
-                 data_path: Optional[str] = None):
+                 data_path: Optional[str] = None, **kwargs):
         """
         :param grid_bounds: A (2,2) array where the zeroth element corresponds to the bounds of the zeroth axis
         and the first element to the bounds of the first axis
@@ -325,7 +325,8 @@ class DiscreteFF(FlowField):
         :return: A DiscreteFF corresponding to the query
         """
         if data_path is None:
-            dirpath = os.path.join(os.environ.get('DABRYPATH'), 'data', 'cds', resolution, pressure_level)
+            dabry_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            dirpath = os.path.join(dabry_root_dir, 'data', 'cds', resolution, pressure_level)
         else:
             dirpath = os.path.join(data_path, resolution, pressure_level)
         t_start = t_start.timestamp() if isinstance(t_start, datetime) else t_start
@@ -437,7 +438,7 @@ class DiscreteFF(FlowField):
         values = np.array(uv_frames)
 
         return cls(values, np.column_stack((np.array((ts[0], ts[-1])), grid_bounds.transpose())).transpose(),
-                   Utils.COORD_GCS, grad_values=None)
+                   Utils.COORD_GCS, grad_values=None, **kwargs)
 
     def value(self, t, x):
         """

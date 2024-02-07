@@ -23,3 +23,4 @@ linear_time_varying,tv_linear,others,True,False,False,False,Gradient of flow fie
 moving_vortices,movors,others,True,False,False,False,Multiple analytical vortices moving in the frame
 three_obstacles,3obs,others,False,False,False,False,Experimental flow field where obstacles are outward blowing virtual wind obstacles
 gyre_li2020,gyre_li2020,others,False,False,False,False,"Analytical gyre. Values from [Li 2020, https://doi.org/10.1109/JOE.2019.2926822]"
+montreal_reykjavik,montreal_reykjavik,others,True,False,False,False,Oblique mercator proj of real data

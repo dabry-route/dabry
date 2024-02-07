@@ -593,6 +593,13 @@ class Chrono:
         self.t_end = 0.
         self.verbose = not no_verbose
 
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+
     def start(self, msg=''):
         if self.verbose:
             print(f'[*] {msg}')

@@ -89,7 +89,8 @@ class IOManager:
 
     def border(self, name: str):
         if not os.path.exists(self.pb_data_fpath):
-            raise FileNotFoundError('Problem data file not found "%s"' % self.pb_data_fpath)
+            return np.load(self.ff_fpath)['bounds'].transpose()[0 if name == 'bl' else 1][-2:]
+            #raise FileNotFoundError('Problem data file not found "%s"' % self.pb_data_fpath)
         return np.array(json.load(open(self.pb_data_fpath))[name])
 
     @property
