@@ -547,13 +547,18 @@ class WrapperFF(FlowField):
         if item == 'values':
             return self._scaler_speed * self.ff.values
         if item == 'bounds':
-            return np.array(((
-                                 (self.ff.t_start - self.time_origin)/self.scale_time,
-                                 (self.ff.t_end - self.time_origin)/self.scale_time
-                             ),
-                             (0., (self.ff.bounds[-2, 1] - self.bl[0]) / self.scale_length),
-                             (0., (self.ff.bounds[-1, 1] - self.bl[1]) / self.scale_length),
+            space_bounds = np.vstack((
+                (0., (self.ff.bounds[-2, 1] - self.bl[0]) / self.scale_length),
+                (0., (self.ff.bounds[-1, 1] - self.bl[1]) / self.scale_length),
             ))
+            if self.ff.t_end is not None:
+                time_bounds = (
+                    (self.ff.t_start - self.time_origin)/self.scale_time,
+                    (self.ff.t_end - self.time_origin)/self.scale_time
+                )
+                return np.vstack((time_bounds, space_bounds))
+            else:
+                return space_bounds
         return self.ff.__getattribute__(item)
 
 

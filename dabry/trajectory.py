@@ -63,14 +63,17 @@ class Trajectory:
         self.coords: str = coords
 
     @classmethod
+    def empty(cls):
+        return cls(np.array(()), np.array(((), ())), 'cartesian', np.array(((), ())), np.array(((), ())), np.array(()))
+
+    @classmethod
     def cartesian(cls,
                   times: ndarray,
                   states: ndarray,
                   controls: Optional[ndarray] = None,
                   costates: Optional[ndarray] = None,
                   cost: Optional[ndarray] = None,
-                  events: Optional[Dict[str, ndarray]] = None,
-                  info_dict: Optional[dict] = None):
+                  events: Optional[Dict[str, ndarray]] = None):
         return cls(times, states, Utils.COORD_CARTESIAN,
                    controls=controls, costates=costates, cost=cost, events=events)
 
@@ -81,8 +84,7 @@ class Trajectory:
             controls: Optional[ndarray] = None,
             costates: Optional[ndarray] = None,
             cost: Optional[ndarray] = None,
-            events: Optional[Dict[str, ndarray]] = None,
-            info_dict: Optional[dict] = None):
+            events: Optional[Dict[str, ndarray]] = None):
         return cls(times, states, Utils.COORD_GCS,
                    controls=controls, costates=costates, cost=cost, events=events)
 

@@ -1,5 +1,6 @@
 import warnings
 from abc import ABC
+from enum import Enum
 from typing import Optional, Dict, Iterable
 
 import numpy as np
@@ -37,11 +38,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
+class ClosureReason(Enum):
+    # Integration cannot proceed further in time
+    TERMINAL_INTEGRATION = 0
+    # Point created within obstacle
+    WITHIN_OBS = 1
+    SUBOPTIMAL = 2
+    IMPOSSIBLE_OBS_TRACKING = 3
+
+
+class NeuteringReason(Enum):
+    # Self and neighbour site lying in an obstacle
+    SELF_AND_NB_IN_OBS = 0
+
+
 class Site:
 
     def __init__(self, t_init: float, index_t_init: int,
                  state_origin: ndarray, costate_origin: ndarray, cost_origin: float, n_time: int,
-                 obstacle_name="", index_t_obs: int = 0, name="", init_next_nb=None):
+                 obstacle_name="", index_t_obs: int = 0, t_enter_obs: Optional[float] = None,
+                 obs_trigo: bool = True, name="", init_next_nb=None):
         self.t_init = t_init
         self.index_t_init = index_t_init
         if np.any(np.isnan(costate_origin)):
@@ -54,7 +70,10 @@ class Site:
         self.index_t_check_next = index_t_init
         self.obstacle_name = obstacle_name
         self.index_t_obs = index_t_obs
-        self.closure_reason = None
+        self.t_enter_obs: Optional[float] = t_enter_obs
+        self.obs_trigo = obs_trigo
+        self.closure_reason: Optional[ClosureReason] = None
+        self.neutering_reason: Optional[NeuteringReason] = None
         self.next_nb: list[Optional[Site]] = [None] * n_time
         self.name = name
         if init_next_nb is not None:
@@ -64,10 +83,15 @@ class Site:
     def closed(self):
         return self.closure_reason is not None
 
-    def close(self, reason: str):
-        # TODO: experimental
-        pass
-        # self.closure_reason = reason
+    def close(self, reason: ClosureReason):
+        self.closure_reason = reason
+
+    @property
+    def neutered(self):
+        return self.neutering_reason is not None
+
+    def neuter(self, reason: NeuteringReason):
+        self.neutering_reason = reason
 
     @property
     def has_neighbours(self):
@@ -160,6 +184,7 @@ class Site:
         return False
 
     def _update_obstacle_info(self):
+        # TODO: remove this, duplicate with integration from solver
         obs_events = [k for k, v in self.traj.events.items() if k.startswith('obs_') and v.shape[0] > 0]
         if len(obs_events) > 0:
             # Assuming at most one obstacle
@@ -177,7 +202,8 @@ class Site:
                 cond = np.all(np.isclose(self.traj.times[1:] - self.traj.times[:-1],
                                          self.traj.times[1] - self.traj.times[0]))
                 assert cond
-        self._update_obstacle_info()
+        # TODO: validate without following line
+        #self._update_obstacle_info()
 
     def init_next_nb(self, site):
         self.next_nb[0] = site
@@ -319,11 +345,9 @@ class SolverEF(ABC):
             full_name = 'obs_' + name + '_' + str(n if n is not None else 0)
             self.events[full_name] = obs.event
             self.obstacles[full_name] = obs
-        self.obs_active = None
-        self.obs_active_trigo = True
-        abs_max_step = self.total_duration if abs_max_step is None else abs_max_step
-        rel_max_step = 5e-3 if rel_max_step is None else rel_max_step
-        self.max_int_step: Optional[float] = min(abs_max_step, rel_max_step * self.total_duration)
+        abs_max_step = self.total_duration / 2 if abs_max_step is None else abs_max_step
+        self.max_int_step: Optional[float] = abs_max_step if rel_max_step is None else \
+            min(abs_max_step, rel_max_step * self.total_duration)
 
         self.dyn_augsys = self.dyn_augsys_cartesian if self.pb.coords == Utils.COORD_CARTESIAN else self.dyn_augsys_gcs
 
@@ -347,9 +371,9 @@ class SolverEF(ABC):
     def dyn_augsys_gcs(self, t: float, y: ndarray):
         return self.pb.augsys_dyn_timeopt_gcs(t, y[:2], y[2:])
 
-    def dyn_constr(self, t: float, x: ndarray):
-        sign = (2. * self.obs_active_trigo - 1.)
-        d = np.array(((0., -sign), (sign, 0.))) @ self.obs_active.d_value(x)
+    def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool):
+        sign = (2. * trigo - 1.)
+        d = np.array(((0., -sign), (sign, 0.))) @ self.obstacles[obstacle].d_value(x)
         ff_val = self.pb.model.ff.value(t, x)
         return ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max)
 
@@ -358,8 +382,9 @@ class SolverEF(ABC):
         return np.sum(np.square(x[:2] - self.pb.x_target)) - self._target_radius_sq
 
     @terminal
-    def _event_quit_obs(self, t, x):
-        n = self.obs_active.d_value(x) / np.linalg.norm(self.obs_active.d_value(x))
+    def _event_quit_obs(self, t, x, obstacle: str, trigo: bool):
+        d_value = self.obstacles[obstacle].d_value(x)
+        n = d_value / np.linalg.norm(d_value)
         ff_val = self.pb.model.ff.value(t, x)
         ff_ortho = ff_val @ n
         return self.pb.srf_max - np.abs(ff_ortho)
@@ -397,10 +422,10 @@ class SolverEF(ABC):
         self.pb.io.save_ff(self.pb.model.ff, bl=self.pb.bl, tr=self.pb.tr)
 
 
-class SolverEFBisection(SolverEF):
+class SolverEFSimple(SolverEF):
 
     def __init__(self, *args, **kwargs):
-        super(SolverEFBisection, self).__init__(*args, **kwargs)
+        super(SolverEFSimple, self).__init__(*args, **kwargs)
         self.layers: list[tuple[float]] = []
         self._tested_layers: list = []
         self._id_group_optitraj: int = 0
@@ -466,78 +491,16 @@ class SolverEFResampling(SolverEF):
     def trajs(self):
         return list(map(lambda x: x.traj, [site for site in self.sites.values() if site.traj is not None]))
 
-    def solve_ivp_constr(self, y0, t_eval, in_obs=False) -> Optional[Trajectory]:
-        if t_eval.shape[0] <= 1:
-            return None
-        if not in_obs:
-            res = scitg.solve_ivp(self.dyn_augsys, (t_eval[0], t_eval[-1]), y0,
-                                  t_eval=t_eval[1:],  # Remove initial point which is redudant
-                                  events=list(self.events.values()), dense_output=True, max_step=self.max_int_step)
-            if len(res.t) == 0:
-                times = np.array(())
-                states = np.array(((), ()))
-                costates = np.array(((), ()))
-                cost = np.array(())
-            else:
-                times = res.t
-                states = res.y.transpose()[:, :2]
-                costates = res.y.transpose()[:, 2:]
-                cost = res.t - self.t_init
-            events = self.t_events_to_dict(res.t_events)
-        else:
-            times = np.array(())
-            states = np.array(((), ()))
-            costates = np.array(((), ()))
-            cost = np.array(())
-            events = {}
-        traj = Trajectory.cartesian(times, states, costates=costates, cost=cost, events=events)
-
-        active_obstacles = [name for name, t_events in traj.events.items()
-                            if t_events.shape[0] > 0 and name != 'target']
-        times = np.array(())
-        states = np.array(((), ()))
-        costates = None
-        controls = None
-        cost = np.array(())
-        if len(active_obstacles) >= 2:
-            warnings.warn("Multiple active obstacles", category=RuntimeWarning)
-        if len(active_obstacles) >= 1:
-            obs_name = active_obstacles[0]
-            t_enter_obs = traj.events[obs_name][0]
-            self.obs_active = self.obstacles[obs_name]
-            state_aug_cross = res.sol(t_enter_obs)
-            cross = np.cross(self.obs_active.d_value(state_aug_cross[:2]),
-                             self.pb.model.dyn.value(t_enter_obs, state_aug_cross[:2],
-                                                     -state_aug_cross[2:] / np.linalg.norm(state_aug_cross[2:])))
-            self.obs_active_trigo = cross >= 0.
-            sign = 2 * self.obs_active_trigo - 1
-            direction = np.array(((0, -sign), (sign, 0))) @ self.obs_active.d_value(state_aug_cross[:2])
-            if is_possible_direction(self.pb.model.ff.value(t_enter_obs, state_aug_cross[:2]),
-                                     direction, self.pb.srf_max):
-                res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, t_eval[-1]), state_aug_cross[:2],
-                                      t_eval=t_eval[t_eval > t_enter_obs], events=[self._event_quit_obs],
-                                      max_step=self.max_int_step)
-                if len(res.t) == 0:
-                    times = np.array(())
-                    states = np.array(((), ()))
-                    costates = np.array(((), ()))
-                    controls = None
-                    cost = np.array(())
-                else:
-                    times = res.t
-                    states = res.y.transpose()
-                    costates = None
-                    controls = np.array([self.dyn_constr(t, x) - self.pb.model.ff.value(t, x)
-                                         for t, x in zip(res.t, res.y.transpose())])
-                    cost = res.t - self.t_init
-        traj_obs = Trajectory.cartesian(times, states, costates=costates, controls=controls, cost=cost)
-        return traj + traj_obs
+    def solve_ivp_custom(self, y0, t_eval, obstacle: Optional[str] = None,
+                         obstacle_time: Optional[float] = None) -> Optional[Trajectory]:
+        pass
 
     def integrate_site_to_target_time(self, site: Site, t_target: float):
         self.integrate_site_to_target_index(site, self.times.searchsorted(t_target, side='right') - 1)
 
     def integrate_site_to_target_index(self, site: Site, index_t: int):
         # Assuming site received integration up to site.index_t included
+        # Integrate up to index_t included
         if site.index_t >= index_t:
             return
         t_start = self.times[site.index_t]
@@ -545,16 +508,98 @@ class SolverEFResampling(SolverEF):
         state_start = site.state_at_index(site.index_t)
         costate_start = site.costate_at_index(site.index_t)
         t_eval = np.linspace(t_start, t_end, index_t - site.index_t + 1)
-        traj = self.solve_ivp_constr(np.hstack((state_start, costate_start)), t_eval,
-                                     in_obs=site.in_obs_at(site.index_t))
-        if len(traj) < t_eval.shape[0] - 1:
-            site.close("Integration stopped") if not self.mode_origin else None
+        if t_eval.shape[0] <= 1:
+            return
+        y0 = np.hstack((state_start, costate_start))
+        site_index_t_prev = site.index_t
+        if not site.in_obs_at(site.index_t):
+            res = scitg.solve_ivp(self.dyn_augsys, (t_eval[0], t_eval[-1]), y0,
+                                  t_eval=t_eval[1:],  # Remove initial point which is redudant
+                                  events=list(self.events.values()), dense_output=True, max_step=self.max_int_step)
+
+            times = res.t if len(res.t) > 0 else np.array(())
+            states = res.y.transpose()[:, :2] if len(res.t) > 0 else np.array(((), ()))
+            costates = res.y.transpose()[:, 2:] if len(res.t) > 0 else np.array(((), ()))
+            cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
+            events = self.t_events_to_dict(res.t_events)
+
+            traj_free = Trajectory.cartesian(times, states, costates=costates, cost=cost, events=events)
+
+            active_obstacles = [name for name, t_events in traj_free.events.items()
+                                if t_events.shape[0] > 0 and name != 'target']
+
+            if len(active_obstacles) >= 2:
+                warnings.warn("Multiple active obstacles", category=RuntimeWarning)
+            if len(active_obstacles) >= 1:
+                obs_name = active_obstacles[0]
+                t_enter_obs = traj_free.events[obs_name][0]
+                site.t_enter_obs = t_enter_obs
+                site.obstacle_name = obs_name
+                site.index_t_obs = site.index_t + len(traj_free) + 1
+
+                state_aug_cross = res.sol(t_enter_obs)
+                cross = np.cross(self.obstacles[obs_name].d_value(state_aug_cross[:2]),
+                                 self.pb.model.dyn.value(t_enter_obs, state_aug_cross[:2],
+                                                         -state_aug_cross[2:] / np.linalg.norm(
+                                                             state_aug_cross[2:])))
+                site.obs_trigo = cross >= 0.
+                sign = 2 * site.obs_trigo - 1
+                direction = np.array(((0, -sign), (sign, 0))) @ self.obstacles[obs_name].d_value(state_aug_cross[:2])
+                if is_possible_direction(self.pb.model.ff.value(t_enter_obs, state_aug_cross[:2]),
+                                         direction, self.pb.srf_max):
+                    res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, t_eval[t_eval > t_enter_obs][0]),
+                                          state_aug_cross[:2],
+                                          t_eval=np.array((t_eval[t_eval > t_enter_obs][0],)),
+                                          max_step=self.max_int_step,
+                                          args=[site.obstacle_name, site.obs_trigo])
+
+                    times = res.t if len(res.t) > 0 else np.array(())
+                    states = res.y.transpose() if len(res.t) > 0 else np.array(((), ()))
+                    controls = np.array([
+                        self.dyn_constr(t, x, site.obstacle_name, site.obs_trigo) - self.pb.model.ff.value(t, x)
+                        for t, x in zip(res.t, res.y.transpose())]) if len(res.t) > 0 else np.array(((), ()))
+                    cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
+
+                    traj_singleton = Trajectory.cartesian(times, states, cost=cost, controls=controls)
+                    if len(traj_singleton) == 0:
+                        site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+                else:
+                    traj_singleton = Trajectory.empty()
+                    site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+            else:
+                traj_singleton = Trajectory.empty()
+        else:
+            traj_free = Trajectory.empty()
+            traj_singleton = Trajectory.empty()
+        traj = traj_free + traj_singleton
+        site.extend_traj(traj)
+
+        # Here, either site.index_t == index_t or site.index_t < index_t and obstacle mode is on
+        if site.index_t < index_t and len(site.obstacle_name) > 0:
+            res = scitg.solve_ivp(self.dyn_constr, (t_eval[site.index_t - site_index_t_prev], t_eval[-1]),
+                                  site.state_at_index(site.index_t),
+                                  t_eval=t_eval[site.index_t - site_index_t_prev + 1:], events=[self._event_quit_obs],
+                                  max_step=self.max_int_step,
+                                  args=[site.obstacle_name, site.obs_trigo])
+            times = res.t if len(res.t) > 0 else np.array(())
+            states = res.y.transpose() if len(res.t) > 0 else np.array(((), ()))
+            controls = np.array([
+                self.dyn_constr(t, x, site.obstacle_name, site.obs_trigo) - self.pb.model.ff.value(t, x)
+                for t, x in zip(res.t, res.y.transpose())]) if len(res.t) > 0 else np.array(((), ()))
+            cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
+
+            traj_constr = Trajectory.cartesian(times, states, cost=cost, controls=controls)
+            if res.t_events[0].size > 0:
+                # The trajectory was unable to follow obstacle
+                site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+        else:
+            traj_constr = Trajectory.empty()
+
+        site.extend_traj(traj_constr)
 
         if traj.events.get('target') is not None and traj.events.get('target').shape[0] > 0:
             self.success = True
             self.solution_sites.add(site)
-
-        site.extend_traj(traj)
 
     def step(self):
         for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth):
@@ -612,7 +657,7 @@ class SolverEFResampling(SolverEF):
 
     def compute_new_sites(self, index_t_hi: Optional[int] = None) -> list[Site]:
         index_t_hi = index_t_hi if index_t_hi is not None else self.n_time - 1
-        prev_sites = [site for site in self.sites.values() if not site.closed]
+        prev_sites = [site for site in self.sites.values() if not site.closed and not site.neutered]
         new_sites: list[Site] = []
         for i_s, site in enumerate(prev_sites):
             site_nb = site.next_nb[site.index_t_check_next]
@@ -622,18 +667,21 @@ class SolverEFResampling(SolverEF):
                 state = site.state_at_index(i)
                 state_nb = site_nb.state_at_index(i)
                 if site.in_obs_at(i) and site_nb.in_obs_at(i):
-                    site.close("Lies in obstacle and neighbour too") if not self.mode_origin else None
+                    site.neuter(NeuteringReason.SELF_AND_NB_IN_OBS)
                     break
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
-                    index = 0 if self.mode_origin else i
+                    # Sample from start between free points which are fully defined from origin
+                    # else propagate approximation
+                    index = 0 if self.mode_origin and \
+                                 not site.in_obs_at(i) and not site_nb.in_obs_at(i) and \
+                                 site.index_t_init == 0 and site_nb.index_t_init == 0 else i
                     new_site = Site.from_parents(site, site_nb, index)
                     if len(self.pb._in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
                         # Choose not to resample points lying within obstacles
-                        site.close("Point lying inside obstacle at its creation") if not self.mode_origin else None
+                        site.close(ClosureReason.WITHIN_OBS)
                         new_site = None
                     break
                 new_id_check_next = i
-            new_id_check_next = 0 if self.mode_origin else new_id_check_next
             # Update the neighbouring property
             site.next_nb[site.index_t_check_next: new_id_check_next + 1] = \
                 [site_nb] * (new_id_check_next - site.index_t_check_next + 1)
@@ -651,13 +699,19 @@ class SolverEFResampling(SolverEF):
         min_cost = None
         for site in self.solution_sites:
             candidate_cost = np.min(
-                site.traj.cost[np.sum(np.square(site.traj.states - self.pb.x_target), axis=-1) < self._target_radius_sq])
+                site.traj.cost[
+                    np.sum(np.square(site.traj.states - self.pb.x_target), axis=-1) < self._target_radius_sq])
             if min_cost is None or candidate_cost < min_cost:
                 min_cost = candidate_cost
                 self.solution_site = site
 
     def cost_map_triangle(self, nx: int = 100, ny: int = 100):
         return cost_map_triangle(list(self.sites.values()), 0, self.n_time - 1, self.pb.bl, self.pb.tr, nx, ny)
+
+
+class SolverEFBisection(SolverEFResampling):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 class SolverEFTrimming(SolverEFResampling):
@@ -715,8 +769,6 @@ class SolverEFTrimming(SolverEFResampling):
             self._to_shoot_sites.extend(new_sites)
             self._sites_by_depth[0].extend(new_sites)  # Compatibility with SolverEFResampling
             self._sites_created_at_subframe[self.i_subframe] |= set(new_sites)
-        # TODO: insert trimming here
-        # self.sites_valid[self.i_subframe + 1] = ...
         self.trim()
         self.i_subframe += 1
 
@@ -738,7 +790,7 @@ class SolverEFTrimming(SolverEFResampling):
                 new_valid_sites.append(site)
                 continue
             if site.cost_at_index(self.index_t_next_subframe - 1) > 1.1 * value_opti:
-                site.close('Trimming') if not self.mode_origin else None
+                site.close(ClosureReason.SUBOPTIMAL)
             else:
                 new_valid_sites.append(site)
         self.sites_valid[self.i_subframe + 1] |= set(new_valid_sites)
@@ -746,9 +798,14 @@ class SolverEFTrimming(SolverEFResampling):
     def solve(self):
         self.setup()
         for _ in range(self.n_subframes):
-            print('Subframe %d/%d, Act: %d, Cls: %d (Tot: %d)' %
-                  (self.i_subframe, self.n_subframes - 1, len(self.sites_valid[self.i_subframe]),
-                   len([site for site in self.sites.values() if site.closed]), len(self.sites)))
+            s = 'Subframe {i_subframe}/{n_subframe}, Act: {n_active: >4}, Cls: {n_closed: >4} (Tot: {n_total: >4})'
+            print(s.format(
+                i_subframe=self.i_subframe,
+                n_subframe=self.n_subframes - 1,
+                n_active=len(self.sites_valid[self.i_subframe]),
+                n_closed=len([site for site in self.sites.values() if site.closed]),
+                n_total=len(self.sites))
+            )
             self.step()
         for site in self.solution_sites:
             site.extrapolate_back_traj(self.sites, self.n_costate_angle)
