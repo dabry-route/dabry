@@ -544,6 +544,16 @@ class WrapperFF(FlowField):
                                                     self.bl + x * self.scale_length)
 
     def __getattr__(self, item):
+        if item == 'values':
+            return self._scaler_speed * self.ff.values
+        if item == 'bounds':
+            return np.array(((
+                                 (self.ff.t_start - self.time_origin)/self.scale_time,
+                                 (self.ff.t_end - self.time_origin)/self.scale_time
+                             ),
+                             (0., (self.ff.bounds[-2, 1] - self.bl[0]) / self.scale_length),
+                             (0., (self.ff.bounds[-1, 1] - self.bl[1]) / self.scale_length),
+            ))
         return self.ff.__getattribute__(item)
 
 
@@ -1082,7 +1092,7 @@ def discretize_ff(ff: FlowField,
                   nt: Optional[int] = None,
                   bl: Optional[ndarray] = None,
                   tr: Optional[ndarray] = None):
-    if not isinstance(ff, DiscreteFF):
+    if not hasattr(ff, 'bounds'):
         nx = 50 if nx is None else nx
         ny = 50 if ny is None else ny
         nt = 25 if nt is None else nt

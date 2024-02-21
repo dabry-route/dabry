@@ -110,15 +110,13 @@ class IOManager:
         if not os.path.exists(self.case_dir):
             return
         for filename in os.listdir(self.case_dir):
-            if filename.endswith('ff.h5') and self.cache_ff:
+            if filename.endswith('ff.npz') and self.cache_ff:
                 continue
             if filename.endswith('rff.h5') and self.cache_rff:
                 continue
             path = os.path.join(self.case_dir, filename)
             if os.path.isdir(path):
-                for file in os.listdir(path):
-                    os.remove(os.path.join(path, file))
-                os.rmdir(path)
+                shutil.rmtree(path)
             else:
                 os.remove(path)
 

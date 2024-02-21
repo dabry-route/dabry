@@ -900,7 +900,7 @@ class Display:
         X = np.zeros((nx, ny))
         Y = np.zeros((nx, ny))
         if self.rescale_ff:
-            ur = max(1, nx // 18)  # nx // 20
+            ur = 1 # max(1, nx // 18)
         else:
             ur = 1
         factor = RAD_TO_DEG if self.coords == 'gcs' else 1.

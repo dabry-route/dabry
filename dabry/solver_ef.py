@@ -65,7 +65,9 @@ class Site:
         return self.closure_reason is not None
 
     def close(self, reason: str):
-        self.closure_reason = reason
+        # TODO: experimental
+        pass
+        # self.closure_reason = reason
 
     @property
     def has_neighbours(self):
@@ -205,7 +207,7 @@ class Site:
     def connect_to_parents(self, sites_dict, n_total_prefix):
         name_prev, name_next = Site.parents_name_from_name(self.name, n_total_prefix)
         site_prev, site_next = sites_dict[name_prev], sites_dict[name_next]
-        assert (site_prev.index_t_check_next in [self.index_t_init - 1, self.index_t_init])
+        # assert (site_prev.index_t_check_next in [self.index_t_init - 1, self.index_t_init])
         site_prev.next_nb[self.index_t_init] = self
         site_prev.index_t_check_next = self.index_t_init
         self.next_nb[self.index_t_init] = site_next
@@ -418,7 +420,7 @@ class SolverEFBisection(SolverEF):
             t_eval = self.times
             res = scitg.solve_ivp(self.dyn_augsys, (self.t_init, self.t_upper_bound),
                                   np.array(tuple(self.pb.x_init) + tuple(costate)), t_eval=t_eval,
-                                  events=list(self.events.values()))
+                                  events=list(self.events.values()), max_step=self.max_int_step)
             traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
                                         events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
             if traj.events['target'].shape[0] > 0:
@@ -438,7 +440,7 @@ class SolverEFBisection(SolverEF):
 
 class SolverEFResampling(SolverEF):
 
-    def __init__(self, *args, max_dist: Optional[float] = None, **kwargs):
+    def __init__(self, *args, max_dist: Optional[float] = None, mode_origin: bool = True, **kwargs):
         super().__init__(*args, **kwargs)
         self.max_dist = max_dist if max_dist is not None else self.target_radius
         self._max_dist_sq = self.max_dist ** 2
@@ -447,6 +449,7 @@ class SolverEFResampling(SolverEF):
         self._to_shoot_sites: list[Site] = []
         self.solution_sites: set[Site] = set()
         self.solution_site: Optional[Site] = None
+        self.mode_origin: bool = mode_origin
 
     def setup(self):
         super().setup()
@@ -545,8 +548,7 @@ class SolverEFResampling(SolverEF):
         traj = self.solve_ivp_constr(np.hstack((state_start, costate_start)), t_eval,
                                      in_obs=site.in_obs_at(site.index_t))
         if len(traj) < t_eval.shape[0] - 1:
-            site.close("Integration stopped")
-            return
+            site.close("Integration stopped") if not self.mode_origin else None
 
         if traj.events.get('target') is not None and traj.events.get('target').shape[0] > 0:
             self.success = True
@@ -620,16 +622,18 @@ class SolverEFResampling(SolverEF):
                 state = site.state_at_index(i)
                 state_nb = site_nb.state_at_index(i)
                 if site.in_obs_at(i) and site_nb.in_obs_at(i):
-                    site.close("Lies in obstacle and neighbour too")
+                    site.close("Lies in obstacle and neighbour too") if not self.mode_origin else None
                     break
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
-                    new_site = Site.from_parents(site, site_nb, i)
+                    index = 0 if self.mode_origin else i
+                    new_site = Site.from_parents(site, site_nb, index)
                     if len(self.pb._in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
                         # Choose not to resample points lying within obstacles
-                        site.close("Point lying inside obstacle at its creation")
+                        site.close("Point lying inside obstacle at its creation") if not self.mode_origin else None
                         new_site = None
                     break
                 new_id_check_next = i
+            new_id_check_next = 0 if self.mode_origin else new_id_check_next
             # Update the neighbouring property
             site.next_nb[site.index_t_check_next: new_id_check_next + 1] = \
                 [site_nb] * (new_id_check_next - site.index_t_check_next + 1)
@@ -734,7 +738,7 @@ class SolverEFTrimming(SolverEFResampling):
                 new_valid_sites.append(site)
                 continue
             if site.cost_at_index(self.index_t_next_subframe - 1) > 1.1 * value_opti:
-                site.close('Trimming')
+                site.close('Trimming') if not self.mode_origin else None
             else:
                 new_valid_sites.append(site)
         self.sites_valid[self.i_subframe + 1] |= set(new_valid_sites)
