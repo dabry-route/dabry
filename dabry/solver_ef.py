@@ -9,7 +9,7 @@ from numpy import ndarray
 from tqdm import tqdm
 
 from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha, \
-    is_possible_direction
+    is_possible_direction, diadic_valuation, alpha_to_int
 from dabry.misc import terminal
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
@@ -80,6 +80,13 @@ class Site:
             self.init_next_nb(init_next_nb)
 
     @property
+    def depth(self):
+        if '-' not in self.name:
+            return 0
+        _, depth, _ = self.name.split('-')
+        return int(depth)
+
+    @property
     def closed(self):
         return self.closure_reason is not None
 
@@ -100,77 +107,6 @@ class Site:
     @property
     def index_t(self):
         return self.index_t_init + (0 if self.traj is None else len(self.traj) - 1)
-
-    @classmethod
-    def from_parents(cls, site_prev, site_next, index_t):
-        if not np.isclose(site_prev.time_at_index(index_t), site_next.time_at_index(index_t)):
-            raise ValueError('Sites not sync in time for child creation')
-        if site_prev.in_obs_at(index_t) and site_next.in_obs_at(index_t):
-            raise ValueError('Illegal child creation between two obstacle-captured sites')
-        costate_prev = site_prev.costate_at_index(index_t)
-        costate_next = site_next.costate_at_index(index_t)
-        if site_prev.in_obs_at(index_t):
-            costate_prev = -site_prev.control_at_index(index_t) * np.linalg.norm(costate_next)
-        if site_next.in_obs_at(index_t):
-            costate_next = -site_next.control_at_index(index_t) * np.linalg.norm(costate_prev)
-        name = Site.name_from_parents_name(site_prev.name, site_next.name)
-        return Site(site_prev.time_at_index(index_t), index_t,
-                    0.5 * (site_prev.state_at_index(index_t) + site_next.state_at_index(index_t)),
-                    0.5 * (costate_prev + costate_next),
-                    0.5 * (site_prev.cost_at_index(index_t) + site_next.cost_at_index(index_t)),
-                    site_prev.n_time,
-                    name=name)
-
-    @property
-    def name_display(self):
-        return self.name[:3] + ('' if len(self.name) == 3 else ('-' + to_alpha(int(self.name[3:][::-1], 2))))
-
-    @classmethod
-    def build_prefix(cls, i: int):
-        return to_alpha(i).rjust(3, 'A')
-
-    @classmethod
-    def index_from_prefix(cls, prefix: str):
-        if len(prefix) > 3:
-            raise ValueError('Prefix exceeds length 3')
-        return (ord(prefix[0]) - 65) * 676 + (ord(prefix[1]) - 65) * 26 + (ord(prefix[2]) - 65)
-
-    @classmethod
-    def next_prefix(cls, prefix: str, n_total_prefix: int):
-        id_prf = cls.index_from_prefix(prefix)
-        return cls.build_prefix((id_prf + 1) % n_total_prefix)
-
-    @classmethod
-    def name_from_parents_name(cls, name_prev: str, name_next: str):
-        suff_prev = name_prev[3:]
-        suff_next = name_next[3:]
-        if name_prev[:3] != name_next[:3]:
-            suffix = suff_prev + '1'
-        else:
-            depth = max(len(suff_prev), len(suff_next)) + 1
-            suffix = bin((int(suff_prev.ljust(depth, '0'), 2) +
-                          int(suff_next.ljust(depth, '0'), 2)) // 2)[2:].rjust(depth, '0')
-        return name_prev[:3] + suffix
-
-    @classmethod
-    def parents_name_from_name(cls, name: str, n_total_prefix: int) -> tuple[Optional[str], Optional[str]]:
-        prefix = name[:3]
-        suffix = name[3:]
-        if len(suffix) == 0:
-            return None, None
-        depth = len(suffix)
-        suffix_next = bin(int(suffix, 2) + 1)[2:].rjust(depth, '0')
-        if len(suffix_next) > depth:
-            name_next = cls.next_prefix(prefix, n_total_prefix)
-        else:
-            name_next = prefix + suffix_next.rstrip('0')
-        id_suffix_prev = int(suffix, 2) - 1
-        if id_suffix_prev == 0:
-            name_prev = prefix
-        else:
-            suffix_prev = bin(id_suffix_prev)[2:].rjust(depth, '0')
-            name_prev = prefix + suffix_prev.rstrip('0')
-        return name_prev, name_next
 
     @property
     def n_time(self):
@@ -203,7 +139,7 @@ class Site:
                                          self.traj.times[1] - self.traj.times[0]))
                 assert cond
         # TODO: validate without following line
-        #self._update_obstacle_info()
+        # self._update_obstacle_info()
 
     def init_next_nb(self, site):
         self.next_nb[0] = site
@@ -228,73 +164,99 @@ class Site:
         return self.traj.cost[index - self.index_t_init]
 
     def is_root(self):
-        return len(self.name) == 3
-
-    def connect_to_parents(self, sites_dict, n_total_prefix):
-        name_prev, name_next = Site.parents_name_from_name(self.name, n_total_prefix)
-        site_prev, site_next = sites_dict[name_prev], sites_dict[name_next]
-        # assert (site_prev.index_t_check_next in [self.index_t_init - 1, self.index_t_init])
-        site_prev.next_nb[self.index_t_init] = self
-        site_prev.index_t_check_next = self.index_t_init
-        self.next_nb[self.index_t_init] = site_next
-
-    def integrate(self, t_eval: ndarray):
-        pass
-
-    def extrapolate_back_traj(self, sites_dict, n_total_prefix):
-        name_prev, name_next = Site.parents_name_from_name(self.name, n_total_prefix)
-        coeff_prev, coeff_next = 0.5, 0.5
-        index_hi = self.index_t_init - 1
-        times = self.traj.times.copy()
-        states = self.traj.states.copy()
-        n = times.shape[0]
-        costates = self.traj.costates.copy() if self.traj.costates is not None else np.nan * np.ones((n, 2))
-        controls = self.traj.controls.copy() if self.traj.controls is not None else np.nan * np.ones((n, 2))
-        costs = self.traj.cost.copy()
-        while name_prev is not None and name_next is not None:
-            site_prev, site_next = sites_dict[name_prev], sites_dict[name_next]
-            index_lo = max(site_prev.index_t_init, site_next.index_t_init)
-            rec_prev = site_prev.index_t_init > site_next.index_t_init
-            s_prev = slice(index_lo - site_prev.index_t_init, index_hi - site_prev.index_t_init + 1)
-            s_next = slice(index_lo - site_next.index_t_init, index_hi - site_next.index_t_init + 1)
-            times = np.concatenate((site_prev.traj.times[s_prev], times))
-            states = np.concatenate((
-                coeff_prev * site_prev.traj.states[s_prev] + coeff_next * site_next.traj.states[s_next], states))
-            n = s_prev.stop - s_prev.start
-            costates_prev = np.nan * np.ones((n, 2)) if site_prev.traj.costates is None else \
-                site_prev.traj.costates[s_prev]
-            costates_next = np.nan * np.ones((n, 2)) if site_next.traj.costates is None else \
-                site_next.traj.costates[s_next]
-            costates = np.concatenate((coeff_prev * costates_prev + coeff_next * costates_next,
-                                       costates))
-            controls_prev = np.nan * np.ones((n, 2)) if site_prev.traj.controls is None else \
-                site_prev.traj.controls[s_prev]
-            controls_next = np.nan * np.ones((n, 2)) if site_next.traj.controls is None else \
-                site_next.traj.controls[s_next]
-            controls = np.concatenate((coeff_prev * controls_prev + coeff_next * controls_next,
-                                       controls))
-            costs = np.concatenate((coeff_prev * site_prev.traj.cost[s_prev] + coeff_next * site_next.traj.cost[s_next],
-                                    costs))
-            if index_lo == 0:
-                break
-            index_hi = index_lo - 1
-            if rec_prev:
-                name_prev = Site.parents_name_from_name(name_prev, n_total_prefix)[0]
-                coeff_prev = coeff_prev / 2
-                coeff_next = 1 - coeff_prev
-            else:
-                name_next = Site.parents_name_from_name(name_next, n_total_prefix)[1]
-                coeff_next = coeff_next / 2
-                coeff_prev = 1 - coeff_next
-        # TODO: validate this
-        self.traj_full = Trajectory(times, states, self.traj.coords, controls=controls, costates=costates, cost=costs,
-                                    events=self.traj.events)
+        return '-' not in self.name
 
     def __str__(self):
         return f"<Site {self.name}>"
 
     def __repr__(self):
         return self.__str__()
+
+
+class SiteManager:
+
+    def __init__(self, n_sectors: int, max_depth: int):
+        self.n_sectors = n_sectors
+        self.max_depth = max_depth
+
+        # Avoid recomputing several times this value
+        self._pow_2_max_depth = pow(2, self.max_depth)
+        self._n_prefix_chars = int(np.ceil(np.log(n_sectors) / np.log(26)))
+        self._n_depth_chars = int(np.ceil(np.log10(self.max_depth)))
+        self._n_location_chars = int(np.ceil(np.log10(self._pow_2_max_depth)))
+
+    def index_from_pdl(self, prefix: int, depth: int, location: int):
+        if depth == 0 and location == 0:
+            return self._pow_2_max_depth * prefix
+        else:
+            return self._pow_2_max_depth * prefix + pow(2, self.max_depth - depth) * (2 * location + 1)
+
+    def pdl_from_index(self, index: int):
+        prefix = index // self._pow_2_max_depth
+        if index % self._pow_2_max_depth == 0:
+            return prefix, 0, 0
+        else:
+            u = index % self._pow_2_max_depth
+            depth = self.max_depth - diadic_valuation(u)
+            location = ((u // pow(2, self.max_depth - depth)) - 1) // 2
+            return prefix, depth, location
+
+    def name_from_index(self, index: int):
+        return self.name_from_pdl(*self.pdl_from_index(index))
+
+    def name_from_pdl(self, prefix: int, depth: int, location: int):
+        s_prefix = to_alpha(prefix).rjust(self._n_prefix_chars, 'A')
+        if depth == 0 and location == 0:
+            return s_prefix
+        return "{prefix}-{depth}-{location}".format(
+            prefix=s_prefix,
+            depth=str(depth),  # .rjust(self._n_depth_chars, '0'),
+            location=str(location)  # .rjust(self._n_location_chars, '0')
+        )
+
+    @staticmethod
+    def pdl_from_name(name: str):
+        if '-' not in name:
+            return alpha_to_int(name), 0, 0
+        s_prefix, s_depth, s_location = name.split('-')
+        return alpha_to_int(s_prefix), int(s_depth), int(s_location)
+
+    def index_from_name(self, name: str):
+        return self.index_from_pdl(*self.pdl_from_name(name))
+
+    def name_from_parents_name(self, name_prev: str, name_next: str):
+        index_prev = self.index_from_name(name_prev)
+        index_next = self.index_from_name(name_next)
+        cond = (index_prev + index_next) % 2 == 0
+        assert cond
+        return self.name_from_index((index_prev + index_next) // 2)
+
+    def parents_name_from_name(self, name: str) -> tuple[Optional[str], Optional[str]]:
+        index = self.index_from_name(name)
+        prefix, depth, location = self.pdl_from_name(name)
+        if depth == 0 and location == 0:
+            return None, None
+        return self.name_from_index(index - pow(2, self.max_depth - depth)), self.name_from_index(
+            index + pow(2, self.max_depth - depth))
+
+    def site_from_parents(self, site_prev, site_next, index_t) -> Site:
+        if not np.isclose(site_prev.time_at_index(index_t), site_next.time_at_index(index_t)):
+            raise ValueError('Sites not sync in time for child creation')
+        if site_prev.in_obs_at(index_t) and site_next.in_obs_at(index_t):
+            raise ValueError('Illegal child creation between two obstacle-captured sites')
+        costate_prev = site_prev.costate_at_index(index_t)
+        costate_next = site_next.costate_at_index(index_t)
+        if site_prev.in_obs_at(index_t):
+            costate_prev = -site_prev.control_at_index(index_t) * np.linalg.norm(costate_next)
+        if site_next.in_obs_at(index_t):
+            costate_next = -site_next.control_at_index(index_t) * np.linalg.norm(costate_prev)
+        name = self.name_from_parents_name(site_prev.name, site_next.name)
+        return Site(site_prev.time_at_index(index_t), index_t,
+                    0.5 * (site_prev.state_at_index(index_t) + site_next.state_at_index(index_t)),
+                    0.5 * (costate_prev + costate_next),
+                    0.5 * (site_prev.cost_at_index(index_t) + site_next.cost_at_index(index_t)),
+                    site_prev.n_time,
+                    name=name)
 
 
 class SolverEF(ABC):
@@ -475,12 +437,13 @@ class SolverEFResampling(SolverEF):
         self.solution_sites: set[Site] = set()
         self.solution_site: Optional[Site] = None
         self.mode_origin: bool = mode_origin
+        self.site_mngr: SiteManager = SiteManager(self.n_costate_angle - 1, self.max_depth)
 
     def setup(self):
         super().setup()
         self._to_shoot_sites = [
-            Site(self.t_init, 0, self.pb.x_init, np.array((np.cos(theta), np.sin(theta))), 0., self.n_time,
-                 name=Site.build_prefix(i_theta))
+            Site(self.t_init, 0, self.pb.x_init, 1000 * np.array((np.cos(theta), np.sin(theta))), 0., self.n_time,
+                 name=self.site_mngr.name_from_pdl(i_theta, 0, 0))
             for i_theta, theta in enumerate(np.linspace(0, 2 * np.pi, self.n_costate_angle, endpoint=False))]
         for i_site, site in enumerate(self._to_shoot_sites):
             site.init_next_nb(self._to_shoot_sites[(i_site + 1) % len(self._to_shoot_sites)])
@@ -491,6 +454,7 @@ class SolverEFResampling(SolverEF):
     def trajs(self):
         return list(map(lambda x: x.traj, [site for site in self.sites.values() if site.traj is not None]))
 
+    # TODO: remove this
     def solve_ivp_custom(self, y0, t_eval, obstacle: Optional[str] = None,
                          obstacle_time: Optional[float] = None) -> Optional[Trajectory]:
         pass
@@ -606,7 +570,7 @@ class SolverEFResampling(SolverEF):
             self.integrate_site_to_target_time(site, self.t_upper_bound)
             if site.traj is not None:
                 if not site.is_root():
-                    site.connect_to_parents(self.sites, self.n_costate_angle)
+                    self.connect_to_parents(site)
         self._to_shoot_sites = []
         new_sites = self.compute_new_sites()
         self._to_shoot_sites.extend(new_sites)
@@ -619,13 +583,13 @@ class SolverEFResampling(SolverEF):
             self.step()
         self.check_solutions()
         for site in self.solution_sites:
-            site.extrapolate_back_traj(self.sites, self.n_costate_angle)
+            self.extrapolate_back_traj(site)
 
     def get_trajs_by_depth(self, depth: int) -> Dict[str, Trajectory]:
         res = {}
         for site in self._sites_by_depth[depth]:
             if site.traj is not None:
-                res[site.name_display] = site.traj
+                res[site.name] = site.traj
         return res
 
     def get_trajs(self, depth: int) -> Dict[str, Trajectory]:
@@ -675,7 +639,7 @@ class SolverEFResampling(SolverEF):
                     index = 0 if self.mode_origin and \
                                  not site.in_obs_at(i) and not site_nb.in_obs_at(i) and \
                                  site.index_t_init == 0 and site_nb.index_t_init == 0 else i
-                    new_site = Site.from_parents(site, site_nb, index)
+                    new_site = self.site_mngr.site_from_parents(site, site_nb, index)
                     if len(self.pb._in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
                         # Choose not to resample points lying within obstacles
                         site.close(ClosureReason.WITHIN_OBS)
@@ -707,6 +671,68 @@ class SolverEFResampling(SolverEF):
 
     def cost_map_triangle(self, nx: int = 100, ny: int = 100):
         return cost_map_triangle(list(self.sites.values()), 0, self.n_time - 1, self.pb.bl, self.pb.tr, nx, ny)
+
+    def connect_to_parents(self, site: Site):
+        name_prev, name_next = self.site_mngr.parents_name_from_name(site.name)
+        site_prev, site_next = self.sites[name_prev], self.sites[name_next]
+        # assert (site_prev.index_t_check_next in [self.index_t_init - 1, self.index_t_init])
+        # Connection to parents
+        site_prev.next_nb[site.index_t_init] = site
+        site.next_nb[site.index_t_init] = site_next
+
+        # Updating validity of extremal field coverage
+        site_prev.index_t_check_next = site.index_t_init
+
+    def extrapolate_back_traj(self, site):
+        name_prev, name_next = self.site_mngr.parents_name_from_name(site.name)
+        coeff_prev, coeff_next = 0.5, 0.5
+        index_hi = site.index_t_init - 1
+        times = site.traj.times.copy()
+        states = site.traj.states.copy()
+        n = times.shape[0]
+        costates = site.traj.costates.copy() if site.traj.costates is not None else np.nan * np.ones((n, 2))
+        controls = site.traj.controls.copy() if site.traj.controls is not None else np.nan * np.ones((n, 2))
+        costs = site.traj.cost.copy()
+        while name_prev is not None and name_next is not None:
+            site_prev, site_next = self.sites[name_prev], self.sites[name_next]
+            index_lo = max(site_prev.index_t_init, site_next.index_t_init)
+            rec_prev = site_prev.index_t_init > site_next.index_t_init
+            s_prev = slice(index_lo - site_prev.index_t_init, index_hi - site_prev.index_t_init + 1)
+            s_next = slice(index_lo - site_next.index_t_init, index_hi - site_next.index_t_init + 1)
+            times = np.concatenate((site_prev.traj.times[s_prev], times))
+            states = np.concatenate((
+                coeff_prev * site_prev.traj.states[s_prev] + coeff_next * site_next.traj.states[s_next], states))
+            n = s_prev.stop - s_prev.start
+            costates_prev = np.nan * np.ones((n, 2)) if site_prev.traj.costates is None else \
+                site_prev.traj.costates[s_prev]
+            costates_next = np.nan * np.ones((n, 2)) if site_next.traj.costates is None else \
+                site_next.traj.costates[s_next]
+            costates = np.concatenate((coeff_prev * costates_prev + coeff_next * costates_next,
+                                       costates))
+            controls_prev = np.nan * np.ones((n, 2)) if site_prev.traj.controls is None else \
+                site_prev.traj.controls[s_prev]
+            controls_next = np.nan * np.ones((n, 2)) if site_next.traj.controls is None else \
+                site_next.traj.controls[s_next]
+            controls = np.concatenate((coeff_prev * controls_prev + coeff_next * controls_next,
+                                       controls))
+            costs = np.concatenate(
+                (coeff_prev * site_prev.traj.cost[s_prev] + coeff_next * site_next.traj.cost[s_next],
+                 costs))
+            if index_lo == 0:
+                break
+            index_hi = index_lo - 1
+            if rec_prev:
+                name_prev = self.site_mngr.parents_name_from_name(name_prev)[0]
+                coeff_prev = coeff_prev / 2
+                coeff_next = 1 - coeff_prev
+            else:
+                name_next = self.site_mngr.parents_name_from_name(name_next)[1]
+                coeff_next = coeff_next / 2
+                coeff_prev = 1 - coeff_next
+        # TODO: validate this
+        site.traj_full = Trajectory(times, states, site.traj.coords, controls=controls, costates=costates,
+                                    cost=costs,
+                                    events=site.traj.events)
 
 
 class SolverEFBisection(SolverEFResampling):
@@ -808,7 +834,7 @@ class SolverEFTrimming(SolverEFResampling):
             )
             self.step()
         for site in self.solution_sites:
-            site.extrapolate_back_traj(self.sites, self.n_costate_angle)
+            self.extrapolate_back_traj(site)
 
 
 def cost_map_triangle(sites: Iterable[Site], index_t_lo: int, index_t_hi: int, bl: ndarray, tr: ndarray,

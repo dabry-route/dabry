@@ -44,7 +44,7 @@ def terminal(func):
 
 def _to_alpha(i: int):
     if i == 0:
-        return 'A'
+        return ''
     else:
         return _to_alpha(i // 26) + chr(65 + (i % 26))
 
@@ -57,8 +57,15 @@ def to_alpha(i: int):
 
 
 def alpha_to_int(s: str):
-    if s == 'A':
+    if s == '':
         return 0
+    return ord(s[-1]) - 65 + 26 * alpha_to_int(s[:-1])
+
+
+def diadic_valuation(i: int):
+    if i % 2 == 1:
+        return 0
+    return 1 + diadic_valuation(i // 2)
 
 
 def directional_timeopt_control(ff_val: ndarray, d: ndarray, srf_max: float):
