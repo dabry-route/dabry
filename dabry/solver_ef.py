@@ -175,17 +175,36 @@ class Site:
 
 class SiteManager:
 
-    def __init__(self, n_sectors: int, max_depth: int):
+    def __init__(self, n_sectors: int, max_depth: int, looping_sectors=True):
         self.n_sectors = n_sectors
         self.max_depth = max_depth
+        self.looping_sectors = looping_sectors
 
         # Avoid recomputing several times this value
         self._pow_2_max_depth = pow(2, self.max_depth)
+        self._pow_2_max_depth_minus_1 = pow(2, self.max_depth - 1)
         self._n_prefix_chars = int(np.ceil(np.log(n_sectors) / np.log(26)))
         self._n_depth_chars = int(np.ceil(np.log10(self.max_depth)))
         self._n_location_chars = int(np.ceil(np.log10(self._pow_2_max_depth)))
 
+    @property
+    def n_total_sites(self):
+        return self.n_sectors * self._pow_2_max_depth + (0 if self.looping_sectors else 1)
+
+    def check_pdl(self, prefix: int, depth: int, location: int):
+        prefix_bound = self.n_sectors if self.looping_sectors else self.n_sectors + 1
+        if prefix < 0 or prefix >= prefix_bound:
+            raise IndexError(f'"prefix" out of range. (val: {prefix}, range: (0, {prefix_bound}))')
+        if depth < 0 or depth >= self.max_depth + 1:
+            raise IndexError(f'"depth" out of range. (val: {depth}, range: (0, {self.max_depth + 1}))')
+        if location < 0 or location >= self._pow_2_max_depth_minus_1:
+            raise IndexError(f'"location" out of range. (val: {location}, range: (0, {self._pow_2_max_depth_minus_1}))')
+        if not self.looping_sectors:
+            if prefix == self.n_sectors + 1 and (depth > 0 or location > 0):
+                raise IndexError('PDL out of range')
+
     def index_from_pdl(self, prefix: int, depth: int, location: int):
+        self.check_pdl(prefix, depth, location)
         if depth == 0 and location == 0:
             return self._pow_2_max_depth * prefix
         else:
@@ -205,6 +224,7 @@ class SiteManager:
         return self.name_from_pdl(*self.pdl_from_index(index))
 
     def name_from_pdl(self, prefix: int, depth: int, location: int):
+        self.check_pdl(prefix, depth, location)
         s_prefix = to_alpha(prefix).rjust(self._n_prefix_chars, 'A')
         if depth == 0 and location == 0:
             return s_prefix
@@ -229,6 +249,10 @@ class SiteManager:
         index_next = self.index_from_name(name_next)
         cond = (index_prev + index_next) % 2 == 0
         assert cond
+        if index_next < index_prev:
+            if not self.looping_sectors:
+                raise ValueError('Next parent index is inferior to previous parent in non-looping mode')
+            index_next += self.n_total_sites
         return self.name_from_index((index_prev + index_next) // 2)
 
     def parents_name_from_name(self, name: str) -> tuple[Optional[str], Optional[str]]:
@@ -237,7 +261,7 @@ class SiteManager:
         if depth == 0 and location == 0:
             return None, None
         return self.name_from_index(index - pow(2, self.max_depth - depth)), self.name_from_index(
-            index + pow(2, self.max_depth - depth))
+            (index + pow(2, self.max_depth - depth)) % self.n_total_sites)
 
     def site_from_parents(self, site_prev, site_next, index_t) -> Site:
         if not np.isclose(site_prev.time_at_index(index_t), site_next.time_at_index(index_t)):
@@ -267,7 +291,7 @@ class SolverEF(ABC):
                  mode: str = 'time',
                  max_depth: int = 20,
                  n_time: int = 100,
-                 n_costate_angle: int = 30,
+                 n_costate_sectors: int = 30,
                  t_init: Optional[float] = None,
                  n_costate_norm: int = 10,
                  costate_norm_bounds: tuple[float] = (0., 1.),
@@ -287,7 +311,7 @@ class SolverEF(ABC):
         self._target_radius_sq = self.target_radius ** 2
         self.times: ndarray = np.linspace(self.t_init, self.t_upper_bound, n_time)
         self.costate_norm_bounds = costate_norm_bounds
-        self.n_costate_angle = n_costate_angle
+        self.n_costate_sectors = n_costate_sectors
         self.n_costate_norm = n_costate_norm
         self.max_depth = max_depth
         self.success = False
@@ -398,7 +422,7 @@ class SolverEFSimple(SolverEF):
         self._tested_layers = []
 
     def step(self):
-        angles = np.linspace(0., 2 * np.pi, 2 ** self.depth * self.n_costate_angle + 1)
+        angles = np.linspace(0., 2 * np.pi, 2 ** self.depth * self.n_costate_sectors + 1)
         if self.depth != 0:
             angles = angles[1::2]
         costate_init = np.stack((np.cos(angles), np.sin(angles)), -1)
@@ -437,14 +461,14 @@ class SolverEFResampling(SolverEF):
         self.solution_sites: set[Site] = set()
         self.solution_site: Optional[Site] = None
         self.mode_origin: bool = mode_origin
-        self.site_mngr: SiteManager = SiteManager(self.n_costate_angle - 1, self.max_depth)
+        self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth)
 
     def setup(self):
         super().setup()
         self._to_shoot_sites = [
-            Site(self.t_init, 0, self.pb.x_init, 1000 * np.array((np.cos(theta), np.sin(theta))), 0., self.n_time,
+            Site(self.t_init, 0, self.pb.x_init, np.array((np.cos(theta), np.sin(theta))), 0., self.n_time,
                  name=self.site_mngr.name_from_pdl(i_theta, 0, 0))
-            for i_theta, theta in enumerate(np.linspace(0, 2 * np.pi, self.n_costate_angle, endpoint=False))]
+            for i_theta, theta in enumerate(np.linspace(0, 2 * np.pi, self.n_costate_sectors, endpoint=False))]
         for i_site, site in enumerate(self._to_shoot_sites):
             site.init_next_nb(self._to_shoot_sites[(i_site + 1) % len(self._to_shoot_sites)])
         self.sites = {site.name: site for site in self._to_shoot_sites}
@@ -788,7 +812,7 @@ class SolverEFTrimming(SolverEFResampling):
                 self.integrate_site_to_target_index(site, self.index_t_next_subframe - 1)
                 if site.traj is not None:
                     if not site.is_root() and not site.has_neighbours:
-                        site.connect_to_parents(self.sites, self.n_costate_angle)
+                        site.connect_to_parents(self.sites, self.n_costate_sectors)
                 cond = site.index_t == self.index_t_next_subframe - 1 or site.closed
                 assert cond
             new_sites = self.compute_new_sites(index_t_hi=self.index_t_next_subframe - 1)
