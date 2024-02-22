@@ -19,6 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install .
+          pip install pytest pytest-xdist
       - name: Test computation
         run: |
-          python tests/test_solverefr_batch.py
+          pytest -n 6 tests/ 

@@ -183,38 +183,14 @@ class NavigationProblem:
         # TODO : adapt to gcs
         return self.hamiltonian(t, state, costate, self.timeopt_control_cartesian(costate))
 
-    def control_angle(self, adjoint, state=None):
-        # TODO : remove when support of base solver is over
-        if self.coords == Utils.COORD_CARTESIAN:
-            # angle to x-axis in trigonometric angle
-            return np.arctan2(*(-adjoint)[::-1])
-        else:
-            # gcs, angle from north in cw order
-            mat = np.diag((1 / np.cos(state[1]), 1.))
-            pl = mat @ adjoint
-            return np.pi / 2. - np.arctan2(*-pl[::-1])
-
-    def in_obs(self, x):
-        # TODO: remove redundant function
-        obs_list = []
-        res = False
-        for i, obs in enumerate(self.obstacles):
-            val = obs.value(x)
-            if val < 0.:
-                res = True
-                obs_list.append(i)
-        if not res:
-            return [-1]
-        else:
-            return obs_list
-
     def _in_obs(self, state):
         return [obs for obs in self.obstacles if obs.value(state) < 0.]
 
     def orthodromic(self):
         fb = GSTargetFB(self.model.ff, self.srf_max, self.x_target)
         f = lambda x, t: self.model.dyn(t, x, fb.value(t, x))
-        t_max = 2 * self.time_scale
+        time_scale = self.length_reference / self.srf_max
+        t_max = 3 * time_scale
         # res = scitg.odeint(f, self.x_init, np.linspace(0, t_max, 100))
         # TODO continue implementation
         return -1
@@ -608,7 +584,6 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, obstacles=obstacles, name=b_name)
 
         if b_name == "trap":
-            # TODO: adjust coefficients
             srf = 1.
             x_init = np.array((0., 0.))
             x_target = np.array((1., 0.))
@@ -616,7 +591,7 @@ class NavigationProblem:
             tr = np.array((1.2, 0.6))
 
             nt = 40
-            wind_value = 4 * np.ones(nt)
+            wind_value = 2 * np.ones(nt)
             center = np.zeros((nt, 2))
             for k in range(30):
                 center[5 + k] = np.array((0.05 * k, 0.))

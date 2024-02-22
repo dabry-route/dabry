@@ -119,16 +119,6 @@ class Site:
             return True
         return False
 
-    def _update_obstacle_info(self):
-        # TODO: remove this, duplicate with integration from solver
-        obs_events = [k for k, v in self.traj.events.items() if k.startswith('obs_') and v.shape[0] > 0]
-        if len(obs_events) > 0:
-            # Assuming at most one obstacle
-            obs_name = obs_events[0]
-            obs_time = self.traj.events[obs_name][0]
-            self.obstacle_name = obs_name
-            self.index_t_obs = self.index_t_init + np.searchsorted(self.traj.times, obs_time)
-
     def extend_traj(self, traj: Trajectory):
         if self.traj is None:
             self.traj = traj
@@ -138,8 +128,6 @@ class Site:
                 cond = np.all(np.isclose(self.traj.times[1:] - self.traj.times[:-1],
                                          self.traj.times[1] - self.traj.times[0]))
                 assert cond
-        # TODO: validate without following line
-        # self._update_obstacle_info()
 
     def init_next_nb(self, site):
         self.next_nb[0] = site
@@ -247,12 +235,12 @@ class SiteManager:
     def name_from_parents_name(self, name_prev: str, name_next: str):
         index_prev = self.index_from_name(name_prev)
         index_next = self.index_from_name(name_next)
-        cond = (index_prev + index_next) % 2 == 0
-        assert cond
         if index_next < index_prev:
             if not self.looping_sectors:
                 raise ValueError('Next parent index is inferior to previous parent in non-looping mode')
             index_next += self.n_total_sites
+        cond = (index_prev + index_next) % 2 == 0
+        assert cond
         return self.name_from_index((index_prev + index_next) // 2)
 
     def parents_name_from_name(self, name: str) -> tuple[Optional[str], Optional[str]]:
@@ -478,11 +466,6 @@ class SolverEFResampling(SolverEF):
     def trajs(self):
         return list(map(lambda x: x.traj, [site for site in self.sites.values() if site.traj is not None]))
 
-    # TODO: remove this
-    def solve_ivp_custom(self, y0, t_eval, obstacle: Optional[str] = None,
-                         obstacle_time: Optional[float] = None) -> Optional[Trajectory]:
-        pass
-
     def integrate_site_to_target_time(self, site: Site, t_target: float):
         self.integrate_site_to_target_index(site, self.times.searchsorted(t_target, side='right') - 1)
 
@@ -617,7 +600,6 @@ class SolverEFResampling(SolverEF):
         return res
 
     def get_trajs(self, depth: int) -> Dict[str, Trajectory]:
-        # TODO: validate
         res = {}
         for i in range(self.depth):
             res = {**res, **self.get_trajs_by_depth(i)}
@@ -753,7 +735,6 @@ class SolverEFResampling(SolverEF):
                 name_next = self.site_mngr.parents_name_from_name(name_next)[1]
                 coeff_next = coeff_next / 2
                 coeff_prev = 1 - coeff_next
-        # TODO: validate this
         site.traj_full = Trajectory(times, states, site.traj.coords, controls=controls, costates=costates,
                                     cost=costs,
                                     events=site.traj.events)
@@ -812,7 +793,7 @@ class SolverEFTrimming(SolverEFResampling):
                 self.integrate_site_to_target_index(site, self.index_t_next_subframe - 1)
                 if site.traj is not None:
                     if not site.is_root() and not site.has_neighbours:
-                        site.connect_to_parents(self.sites, self.n_costate_sectors)
+                        self.connect_to_parents(site)
                 cond = site.index_t == self.index_t_next_subframe - 1 or site.closed
                 assert cond
             new_sites = self.compute_new_sites(index_t_hi=self.index_t_next_subframe - 1)
