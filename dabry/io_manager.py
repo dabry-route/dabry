@@ -46,20 +46,20 @@ class IOManager:
     """
 
     def __init__(self, name: str, cache_ff=False, cache_rff=False):
-        self.case_dir: Optional[str] = None
         self.obs_filename = 'obs.h5'
         self.pen_filename = 'penalty.h5'
         self.cache_ff = cache_ff
         self.cache_rff = cache_rff
         self._dabry_root_dir = os.path.abspath(os.path.join(__file__, '..'))
-        self.set_case(name)
+        self.output_dir = os.path.abspath('.')
+        self.case_name = name
 
     @property
-    def case_name(self):
-        return os.path.basename(self.case_dir)
+    def case_dir(self):
+        return os.path.join(self.output_dir, self.case_name)
 
-    def set_case(self, case_name):
-        self.case_dir = os.path.join(os.path.dirname(self._dabry_root_dir), 'output', case_name)
+    def set_dir(self, dirpath: str):
+        self.output_dir = os.path.abspath(dirpath)
 
     def setup_dir(self):
         if not os.path.exists(self.case_dir):

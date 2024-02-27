@@ -1,5 +1,6 @@
 h5py
 numpy
+plotly
 pygrib
 scipy
 tqdm

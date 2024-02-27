@@ -381,12 +381,6 @@ class SolverEF(ABC):
     def n_time(self):
         return self.times.shape[0]
 
-    def get_trajs(self, depth: int) -> Dict[str, Trajectory]:
-        res = {}
-        for traj in self.traj_groups[depth]:
-            res[str(self.trajs.index(traj))] = traj
-        return res
-
     def cost_map(self, nx: int = 100, ny: int = 100) -> ndarray:
         res = np.nan * np.ones((nx, ny))
         bl, spacings = self.pb.get_grid_params(nx, ny)
@@ -452,7 +446,6 @@ class SolverEFResampling(SolverEF):
         self.max_dist = max_dist if max_dist is not None else self.target_radius
         self._max_dist_sq = self.max_dist ** 2
         self.sites: dict[str, Site] = {}
-        self._sites_by_depth: list[list[Site]] = [[] for _ in range(self.max_depth)]
         self._to_shoot_sites: list[Site] = []
         self.solution_sites: set[Site] = set()
         self.solution_site: Optional[Site] = None
@@ -470,7 +463,6 @@ class SolverEFResampling(SolverEF):
         for i_site, site in enumerate(self._to_shoot_sites):
             site.init_next_nb(self._to_shoot_sites[(i_site + 1) % len(self._to_shoot_sites)])
         self.sites = {site.name: site for site in self._to_shoot_sites}
-        self._sites_by_depth[0].extend(list(self.sites.values()))
 
     @property
     def trajs(self):
@@ -591,7 +583,6 @@ class SolverEFResampling(SolverEF):
         self._to_shoot_sites = []
         new_sites = self.compute_new_sites()
         self._to_shoot_sites.extend(new_sites)
-        self._sites_by_depth[self.depth].extend(new_sites)
         self.trim_distance()
         self.depth += 1
 
@@ -610,19 +601,6 @@ class SolverEFResampling(SolverEF):
         self.check_solutions()
         for site in self.solution_sites:
             self.extrapolate_back_traj(site)
-
-    def get_trajs_by_depth(self, depth: int) -> Dict[str, Trajectory]:
-        res = {}
-        for site in self._sites_by_depth[depth]:
-            if site.traj is not None:
-                res[site.name] = site.traj
-        return res
-
-    def get_trajs(self, depth: int) -> Dict[str, Trajectory]:
-        res = {}
-        for i in range(self.depth):
-            res = {**res, **self.get_trajs_by_depth(i)}
-        return res
 
     def site_front(self, index_t):
         site0 = list(self.sites.values())[0]
@@ -823,7 +801,6 @@ class SolverEFTrimming(SolverEFResampling):
                 assert cond
             new_sites = self.compute_new_sites(index_t_hi=self.index_t_next_subframe - 1)
             self._to_shoot_sites.extend(new_sites)
-            self._sites_by_depth[0].extend(new_sites)  # Compatibility with SolverEFResampling
             self._sites_created_at_subframe[self.i_subframe] |= set(new_sites)
         self.trim()
         self.i_subframe += 1

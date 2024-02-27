@@ -5,8 +5,8 @@ from datetime import datetime
 
 from dabry.io_manager import IOManager
 from dabry.misc import Utils, Chrono
-from dabry.problem import all_problems, NavigationProblem
-from dabry.solver_ef import SolverEFBase
+from dabry.problem import NavigationProblem
+from dabry.solver_ef import SolverEFResampling
 
 """
 __main__.py
@@ -31,13 +31,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Dabry trajectory planning', prog='dabry')
-    subparsers = parser.add_subparsers()
+    subparsers = parser.add_subparsers(dest='dest')
 
     parser_idpb = subparsers.add_parser('case', help='Solve a given case from reference problems')
-    parser_idpb.add_argument('test_id', default=-1, help='Problem id (int) or name (string)')
+    parser_idpb.add_argument('name', help='Problem name')
     parser_idpb.add_argument('--airspeed', nargs='?', help='Vehicle speed relative to the flow in m/s', default=None)
-    parser_idpb.add_argument('--energy', action='store_const', const=True, default=False,
-                             help='(EXPERIMENTAL) Solve energy-optimal problem')
 
     parser_real = subparsers.add_parser('real', help='Solve a given case from real data')
     parser_real.add_argument('x_init_lon', help='Initial point longitude in degrees')
@@ -51,39 +49,22 @@ if __name__ == '__main__':
                              default=False)
 
     args = parser.parse_args(sys.argv[1:])
-    if 'test_id' in args.__dict__:
-        test_dir = os.path.dirname(__file__)
-        pb_id = args.test_id
-        try:
-            pb_id = int(pb_id)
-        except ValueError:
-            pass
-        if isinstance(pb_id, str):
-            try:
-                pb = all_problems[pb_id][0]()
-            except KeyError:
-                raise KeyError(f'Available problems : {list(all_problems.keys())}')
-            pb_name = pb_id
-        elif isinstance(pb_id, int):
-            # Assuming int
-            try:
-                pb = list(all_problems.values())[pb_id][0]()
-            except IndexError:
-                raise IndexError(f'Available problems : {list(all_problems.keys())}')
-            pb_name = list(all_problems.keys())[pb_id]
-        else:
-            raise Exception(f'Please provide problem number (int) or problem name (string)')
-        pb.io.set_case(pb_name)
+    if args.dest == 'case':
+        pb_unscaled = NavigationProblem.from_name(args.name)
+        pb = pb_unscaled.rescale()
+
+        solver = SolverEFResampling(pb)
+
+        with Chrono() as _:
+            solver.solve()
+
+        print(solver.success)
+
+        traj_ortho = pb.orthodromic()
+        traj_htarget = pb.htarget()
+
         pb.io.clean_output_dir()
-        if args.airspeed is not None:
-            pb.update_airspeed(float(args.airspeed))
-        t_upper_bound = pb.time_scale if pb.time_scale is not None else pb.geod_l / pb.model.srf
-        solver_ef = SolverEFBase(pb, t_upper_bound, max_steps=700, rel_nb_ceil=0.02, quick_solve=1, mode=args.energy)
-        res = solver_ef.solve(verbose=2)
-        pb.save_ff()
-        extremals = solver_ef.get_trajs()
-        pb.io.dump_trajs(extremals)
-        pb.io.dump_trajs([res.traj])
+        solver.save_results()
         pb.save_info()
         print(f'Results saved to {pb.io.case_dir}')
 
