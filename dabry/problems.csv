@@ -1,26 +1,26 @@
-name,s_name,group,unsteady,spherical,obstacles,gh_wf,descr
-,,,,,,,
-linear,linear,standard,False,False,False,True,Constant spatial derivative flow field
-gyre,gyre,standard,False,False,False,True,"Analytical gyre. Common to mimic ocean currents using a simple analytical flow field. Values are from [Kularatne 2016, Time and Energy Optimal Path Planning in General Flows] "
-gyre_rhoads2010,gyre_rhoads,standard,False,False,False,True,Special gyre setting showing a sharp discontinuity in the value function (time-to-go) at the origin
-three_vortices,3vor,standard,False,False,True,True,Three analytical vortices from potential fluids theory
-chertovskih,chertovskih,standard,False,False,True,True,Problem setting in which the optimal trajectory to destination follows a border (state constraint).
-moving_vortex,movor,standard,True,False,False,True,Moving vortex as an example of simple analytical unsteady flow field
-atlantic,atlantic,standard,True,True,False,False,Real spherical wind data over the Atlantic
-,,,,,,,
-,,,,,,,
-big_rankine,big_rankine,validation,False,False,False,False,Big Rankine vortex (core of the vortex) to force trajectories looping before reaching destination
-obstacle,obs,validation,False,False,True,True,No flow field. Verification case featuring a single obstacle.
-spherical_geodesic,spherical_geodesic,validation,False,True,False,True,No flow field. Verification case for the computation of the geodesic path in plate carree coordinates.
-trap,trap,validation,True,False,False,False,Special case with flow field acting as a trap for the vehicle.
-stream,stream,validation,False,False,False,False,"Stream of flow field. Appearing in [Subramani et al., https://doi.org/10.1016/j.ocemod.2016.01.006]"
-point_symmetric_techy2011,pointsym,validation,False,False,False,True,"Point symmetric analytical flow field. Considered in [Techy 2011, https://doi.org/10.1007/s11370-011-0092-9]"
-,,,,,,,
-,,,,,,,
-dakar_natal_constr,dakar_natal_constr,others,True,True,True,False,"Problem with unsteady flow field, spherical coordinates and featuring obstacles. Appearing in [Schnitzler et al., https://doi.org/10.1109/LCSYS.2023.3284339]"
-four_vortices,4vor,others,False,False,False,False,Four vortices almost symmetrical with an increment of flow speed in the bottom part to break symmetry
-linear_time_varying,tv_linear,others,True,False,False,False,Gradient of flow field where the intensity of the gradient evolves in time
-moving_vortices,movors,others,True,False,False,False,Multiple analytical vortices moving in the frame
-three_obstacles,3obs,others,False,False,False,False,Experimental flow field where obstacles are outward blowing virtual wind obstacles
-gyre_li2020,gyre_li2020,others,False,False,False,False,"Analytical gyre. Values from [Li 2020, https://doi.org/10.1109/JOE.2019.2926822]"
-montreal_reykjavik,montreal_reykjavik,others,True,False,False,False,Oblique mercator proj of real data
+name,s_name,group,unsteady,spherical,obstacles,gh_wf,time_bound,descr
+,,,,,,,,
+linear,linear,standard,False,False,False,True,,Constant spatial derivative flow field
+gyre,gyre,standard,False,False,False,True,,"Analytical gyre. Common to mimic ocean currents using a simple analytical flow field. Values are from [Kularatne 2016, Time and Energy Optimal Path Planning in General Flows] "
+gyre_rhoads2010,gyre_rhoads,standard,False,False,False,True,1,Special gyre setting showing a sharp discontinuity in the value function (time-to-go) at the origin
+three_vortices,3vor,standard,False,False,True,True,,Three analytical vortices from potential fluids theory
+chertovskih,chertovskih,standard,False,False,True,True,,Problem setting in which the optimal trajectory to destination follows a border (state constraint).
+moving_vortex,movor,standard,True,False,False,True,,Moving vortex as an example of simple analytical unsteady flow field
+atlantic,atlantic,standard,True,True,False,False,,Real spherical wind data over the Atlantic
+,,,,,,,,
+,,,,,,,,
+big_rankine,big_rankine,validation,False,False,False,False,4,Big Rankine vortex (core of the vortex) to force trajectories looping before reaching destination
+obstacle,obs,validation,False,False,True,True,,No flow field. Verification case featuring a single obstacle.
+spherical_geodesic,spherical_geodesic,validation,False,True,False,True,,No flow field. Verification case for the computation of the geodesic path in plate carree coordinates.
+trap,trap,validation,True,False,False,True,2,Special case with flow field acting as a trap for the vehicle.
+stream,stream,validation,False,False,False,False,,"Stream of flow field. Appearing in [Subramani et al., https://doi.org/10.1016/j.ocemod.2016.01.006]"
+point_symmetric_techy2011,pointsym,validation,False,False,False,True,,"Point symmetric analytical flow field. Considered in [Techy 2011, https://doi.org/10.1007/s11370-011-0092-9]"
+,,,,,,,,
+,,,,,,,,
+dakar_natal_constr,dakar_natal_constr,others,True,True,True,False,,"Problem with unsteady flow field, spherical coordinates and featuring obstacles. Appearing in [Schnitzler et al., https://doi.org/10.1109/LCSYS.2023.3284339]"
+four_vortices,4vor,others,False,False,False,False,,Four vortices almost symmetrical with an increment of flow speed in the bottom part to break symmetry
+linear_time_varying,tv_linear,others,True,False,False,False,,Gradient of flow field where the intensity of the gradient evolves in time
+moving_vortices,movors,others,True,False,False,False,,Multiple analytical vortices moving in the frame
+three_obstacles,3obs,others,False,False,False,False,,Experimental flow field where obstacles are outward blowing virtual wind obstacles
+gyre_li2020,gyre_li2020,others,False,False,False,False,,"Analytical gyre. Values from [Li 2020, https://doi.org/10.1109/JOE.2019.2926822]"
+montreal_reykjavik,montreal_reykjavik,others,True,False,False,False,,Oblique mercator proj of real data

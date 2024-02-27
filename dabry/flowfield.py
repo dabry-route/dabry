@@ -1002,7 +1002,7 @@ class BandGaussFF(FlowField):
 
 class BandFF(FlowField):
     """
-    Band of flow field. NON DIFFERENTIABLE (should be instanciated as discrete flow field)
+    Band of flow field.
     """
 
     def __init__(self, origin, vect, w_value, width):
@@ -1013,16 +1013,24 @@ class BandFF(FlowField):
         self.vect = vect / np.linalg.norm(vect)
         self.w_value = w_value
         self.width = width
+        self.transition_width = width / 10
 
     def value(self, t, x):
         dist = np.abs(np.cross(self.vect, x - self.origin))
-        if dist >= self.width / 2.:
+        if dist >= (self.width + self.transition_width / 2) / 2:
             return np.zeros(2)
+        if dist >= (self.width - self.transition_width / 2) / 2:
+            return (1 - (dist - (self.width - self.transition_width / 2) / 2) / self.transition_width) * self.w_value
         else:
             return self.w_value
 
     def d_value(self, t, x):
-        raise NotImplementedError('Please discretize FF before using derivatives')
+        # TODO: implement formula
+        eps = 1e-6
+        dx1 = eps * np.array((1, 0))
+        dx2 = eps * np.array((0, 1))
+        return np.column_stack(((self.value(t, x + dx1) - self.value(t, x - dx1))/(2 * eps),
+                          (self.value(t, x + dx2) - self.value(t, x - dx2))/(2 * eps)))
 
 
 class TrapFF(FlowField):

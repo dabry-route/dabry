@@ -295,7 +295,9 @@ class SolverEF(ABC):
         # Problem is assumed to be well conditioned ! (non-dimensionalized)
         self.pb = pb
         if total_duration is None:
-            self.total_duration = self.pb.auto_time_upper_bound()
+            # Inflation factor needed for particular case when heuristic trajectory
+            # is indeed leading to optimal cost
+            self.total_duration = 1.1 * self.pb.auto_time_upper_bound()
             if self.total_duration == np.infty:
                 self.total_duration = 2 * self.pb.length_reference / self.pb.srf_max
         else:

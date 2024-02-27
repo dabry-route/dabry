@@ -632,17 +632,13 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "stream":
-            # TODO: fix case
-            srf = 1.
-            sf = 1.
-            x_init = sf * np.array((1, 1))
-            x_target = sf * np.array((4, 4))
-            bl = sf * np.array((0.75, 0.75))
-            tr = sf * np.array((4.25, 4.25))
+            srf = 1
+            x_init = np.array((1, 1))
+            x_target = np.array((4, 4))
+            bl = np.array((0.75, 0.75))
+            tr = np.array((4.25, 4.25))
 
-            band_wind = BandFF(np.array((0., 2.5)), np.array((1., 0.)), np.array((-1., 0.)), 1)
-            ff = DiscreteFF.from_ff(band_wind, np.array((bl, tr)), force_no_diff=True)
-            ff.compute_derivatives()
+            ff = BandFF(np.array((0., 2.5)), np.array((1., 0.)), np.array((-1., 0.)), 1)
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "montreal_reykjavik":
