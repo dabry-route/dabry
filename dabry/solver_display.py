@@ -1,21 +1,23 @@
-from typing import Union
+from typing import Union, Optional
 
 import numpy as np
 
 from dabry.flowfield import DiscreteFF
 from dabry.obstacle import CircleObs
 from dabry.solver_ef import SolverEFResampling, SolverEFTrimming
+from dabry.trajectory import Trajectory
 
 
-def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timeslider=False,
-            no_trajectories=False, no_value_func=False, no_show=False):
+def display(solver: Union[SolverEFResampling | SolverEFTrimming],
+            trajectories: Optional[list[Trajectory]] = None, isub=4, timeslider=False,
+            no_trajectories=False, no_value_func=False, no_show=False, theme_dark=False):
     try:
         import plotly.figure_factory as figfac
         import plotly.graph_objects as go
     except ImportError:
         raise ImportError('"plotly" package requirement for solver display')
-    dark_mode = True
-    template = 'plotly_dark' if dark_mode else 'plotly'
+    trajectories = [] if trajectories is None else trajectories
+    template = 'plotly_dark' if theme_dark else 'plotly'
     ff_disc = DiscreteFF.from_ff(solver.pb.model.ff, (solver.pb.bl, solver.pb.tr),
                                  nt=10, force_no_diff=True)
 
@@ -25,7 +27,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timesl
         np.linspace(ff_disc.bounds[-1, 0], ff_disc.bounds[-1, 1], values[..., ::isub, ::isub, :].shape[-2]),
         indexing='ij'),
                                values[::isub, ::isub, 0], values[::isub, ::isub, 1],
-                               scaleratio=1., scale=0.1, line=dict(color='white' if dark_mode else 'black'),
+                               scaleratio=1., scale=0.1, line=dict(color='white' if theme_dark else 'black'),
                                hoverinfo='none', name='Flow field')
     colors = ['blue', 'red', 'green', 'cyan', 'magenta', 'orange']
     nx, ny = 100, 100
@@ -41,13 +43,13 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timesl
     #                          name='Cost contour', connectgaps=False, coloraxis='coloraxis'))
     fig.update_coloraxes(showscale=False)
     fig.add_trace(go.Scatter(x=[solver.pb.x_init[0]], y=[solver.pb.x_init[1]], name='Start',
-                             marker=dict(size=15, color='white' if dark_mode else 'black')))
+                             marker=dict(size=15, color='white' if theme_dark else 'black')))
     fig.add_trace(go.Scatter(x=[solver.pb.x_target[0]], y=[solver.pb.x_target[1]], name='Target',
-                             marker=dict(size=20, color='white' if dark_mode else 'black', symbol='star')))
+                             marker=dict(size=20, color='white' if theme_dark else 'black', symbol='star')))
     fig.add_shape(type="circle", x0=solver.pb.x_target[0] - solver.target_radius,
                   y0=solver.pb.x_target[1] - solver.target_radius,
                   x1=solver.pb.x_target[0] + solver.target_radius, y1=solver.pb.x_target[1] + solver.target_radius,
-                  xref="x", yref="y", fillcolor=None, line_color='white' if dark_mode else 'black')
+                  xref="x", yref="y", fillcolor=None, line_color='white' if theme_dark else 'black')
 
     for obs in solver.pb.obstacles:
         # TODO: adapt to show wrapped obstacles
@@ -75,11 +77,13 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming], isub=4, timesl
                                        line=dict(color=colors[depth % len(colors)]), name=traj_name, mode='lines')
                             for traj_name, traj, depth in name_traj_depth])
             fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
-                                       line=dict(color='lightgreen'), name=site.name, mode='lines')
+                                       line=dict(color='lightgreen', dash='dash'), name=site.name, mode='lines')
                             for site in solver.suboptimal_sites])
             fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
                                        line=dict(color='lightgreen', width=3), name=site.name, mode='lines')
                             for site in [solver.solution_site] if site is not None])
+            fig.add_traces([go.Scatter(x=traj.states[:, 0], y=traj.states[:, 1],
+                                       line=dict(), mode='lines') for traj in trajectories])
         else:
             # Add traces, one for each slider step
             substep = 10

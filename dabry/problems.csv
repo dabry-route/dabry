@@ -6,15 +6,15 @@ gyre_rhoads2010,gyre_rhoads,standard,False,False,False,True,Special gyre setting
 three_vortices,3vor,standard,False,False,True,True,Three analytical vortices from potential fluids theory
 chertovskih,chertovskih,standard,False,False,True,True,Problem setting in which the optimal trajectory to destination follows a border (state constraint).
 moving_vortex,movor,standard,True,False,False,True,Moving vortex as an example of simple analytical unsteady flow field
-atlantic,atlantic,standard,True,True,False,False,
+atlantic,atlantic,standard,True,True,False,False,Real spherical wind data over the Atlantic
 ,,,,,,,
 ,,,,,,,
-big_rankine,big_rankine,validation,False,False,False,True,Big Rankine vortex (core of the vortex) to force trajectories looping before reaching destination
+big_rankine,big_rankine,validation,False,False,False,False,Big Rankine vortex (core of the vortex) to force trajectories looping before reaching destination
 obstacle,obs,validation,False,False,True,True,No flow field. Verification case featuring a single obstacle.
 spherical_geodesic,spherical_geodesic,validation,False,True,False,True,No flow field. Verification case for the computation of the geodesic path in plate carree coordinates.
 trap,trap,validation,True,False,False,False,Special case with flow field acting as a trap for the vehicle.
 stream,stream,validation,False,False,False,False,"Stream of flow field. Appearing in [Subramani et al., https://doi.org/10.1016/j.ocemod.2016.01.006]"
-point_symmetric_techy2011,pointsym,validation,False,False,False,False,"Point symmetric analytical flow field. Considered in [Techy 2011, https://doi.org/10.1007/s11370-011-0092-9]"
+point_symmetric_techy2011,pointsym,validation,False,False,False,True,"Point symmetric analytical flow field. Considered in [Techy 2011, https://doi.org/10.1007/s11370-011-0092-9]"
 ,,,,,,,
 ,,,,,,,
 dakar_natal_constr,dakar_natal_constr,others,True,True,True,False,"Problem with unsteady flow field, spherical coordinates and featuring obstacles. Appearing in [Schnitzler et al., https://doi.org/10.1109/LCSYS.2023.3284339]"

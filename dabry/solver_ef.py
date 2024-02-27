@@ -74,6 +74,7 @@ class Site:
         self.obs_trigo = obs_trigo
         self.closure_reason: Optional[ClosureReason] = None
         self.neutering_reason: Optional[NeuteringReason] = None
+        self._index_neutered = -1
         self.next_nb: list[Optional[Site]] = [None] * n_time
         self.name = name
         if init_next_nb is not None:
@@ -97,7 +98,8 @@ class Site:
     def neutered(self):
         return self.neutering_reason is not None
 
-    def neuter(self, reason: NeuteringReason):
+    def neuter(self, index: int, reason: NeuteringReason):
+        self._index_neutered = index
         self.neutering_reason = reason
 
     @property
@@ -275,7 +277,7 @@ class SolverEF(ABC):
     _ALL_MODES = ['time', 'energy']
 
     def __init__(self, pb: NavigationProblem,
-                 total_duration: float,
+                 total_duration: Optional[float] = None,
                  mode: str = 'time',
                  max_depth: int = 20,
                  n_time: int = 100,
@@ -292,8 +294,12 @@ class SolverEF(ABC):
             raise ValueError('Mode "energy" is not implemented yet')
         # Problem is assumed to be well conditioned ! (non-dimensionalized)
         self.pb = pb
-        # Same for time
-        self.total_duration = total_duration
+        if total_duration is None:
+            self.total_duration = self.pb.auto_time_upper_bound()
+            if self.total_duration == np.infty:
+                self.total_duration = 2 * self.pb.length_reference / self.pb.srf_max
+        else:
+            self.total_duration = total_duration
         self.t_init = t_init if t_init is not None else self.pb.model.ff.t_start
         self.target_radius = target_radius if target_radius is not None else pb.target_radius
         self._target_radius_sq = self.target_radius ** 2
@@ -450,6 +456,8 @@ class SolverEFResampling(SolverEF):
         self.solution_site: Optional[Site] = None
         self.mode_origin: bool = mode_origin
         self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth)
+        self._ff_max_norm = np.max(np.linalg.norm(self.pb.model.ff.values, axis=-1)) if \
+            hasattr(self.pb.model.ff, 'values') else None
 
     def setup(self):
         super().setup()
@@ -582,7 +590,16 @@ class SolverEFResampling(SolverEF):
         new_sites = self.compute_new_sites()
         self._to_shoot_sites.extend(new_sites)
         self._sites_by_depth[self.depth].extend(new_sites)
+        self.trim_distance()
         self.depth += 1
+
+    def trim_distance(self):
+        if self._ff_max_norm is None or np.isclose(self._ff_max_norm, 0):
+            return
+        for site in self.sites.values():
+            sup_time = np.linalg.norm(site.state_at_index(site.index_t) - self.pb.x_target) / self._ff_max_norm
+            if self.times[-1] - self.times[site.index_t] > sup_time:
+                site.close(ClosureReason.SUBOPTIMAL)
 
     def solve(self):
         self.setup()
@@ -627,7 +644,7 @@ class SolverEFResampling(SolverEF):
 
     def compute_new_sites(self, index_t_hi: Optional[int] = None) -> list[Site]:
         index_t_hi = index_t_hi if index_t_hi is not None else self.n_time - 1
-        prev_sites = [site for site in self.sites.values() if not site.closed and not site.neutered]
+        prev_sites = [site for site in self.sites.values()]
         new_sites: list[Site] = []
         for i_s, site in enumerate(prev_sites):
             site_nb = site.next_nb[site.index_t_check_next]
@@ -637,7 +654,7 @@ class SolverEFResampling(SolverEF):
                 state = site.state_at_index(i)
                 state_nb = site_nb.state_at_index(i)
                 if site.in_obs_at(i) and site_nb.in_obs_at(i):
-                    site.neuter(NeuteringReason.SELF_AND_NB_IN_OBS)
+                    site.neuter(i, NeuteringReason.SELF_AND_NB_IN_OBS)
                     break
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
                     # Sample from start between free points which are fully defined from origin
@@ -667,13 +684,19 @@ class SolverEFResampling(SolverEF):
                 self.success = True
                 self.solution_sites.add(site)
         min_cost = None
+        solutions_sites_cost = {}
         for site in self.solution_sites:
             candidate_cost = np.min(
                 site.traj.cost[
                     np.sum(np.square(site.traj.states - self.pb.x_target), axis=-1) < self._target_radius_sq])
+            solutions_sites_cost[site] = candidate_cost
             if min_cost is None or candidate_cost < min_cost:
                 min_cost = candidate_cost
                 self.solution_site = site
+
+        for site, cost in solutions_sites_cost.items():
+            if cost > 1.15 * min_cost:
+                self.solution_sites.remove(site)
 
     def cost_map_triangle(self, nx: int = 100, ny: int = 100):
         return cost_map_triangle(list(self.sites.values()), 0, self.n_time - 1, self.pb.bl, self.pb.tr, nx, ny)

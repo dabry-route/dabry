@@ -5,7 +5,7 @@ from numpy import arctan2 as atan2
 from numpy import ndarray
 from numpy import sin, cos
 
-from dabry.misc import Utils
+from dabry.misc import Utils, directional_timeopt_control
 from dabry.flowfield import FlowField
 
 """
@@ -37,7 +37,7 @@ class Feedback(ABC):
     """
 
     @abstractmethod
-    def value(self, t: float, x: ndarray) -> ndarray:
+    def __call__(self, t: float, x: ndarray) -> ndarray:
         """
         :param t: The time at which to compute the control
         :param x: The state
@@ -51,77 +51,8 @@ class ConstantFB(Feedback):
     def __init__(self, value: ndarray):
         self.value = value.copy()
 
-    def value(self, t, x):
+    def __call__(self, t, x):
         return self.value
-
-
-class FixedHeadingFB(Feedback):
-    """
-    Defines a control law to follow a straight line from initial position
-    defined by its angle to the x-axis.
-    When the flow field value is too high for the vehicle to keep its line, the
-    control law steers perpendicular to the target direction
-    """
-
-    def __init__(self, ff: FlowField, srf: float, initial_steering: float):
-        """
-        :param ff: Flow field object
-        :param srf: Vehicle's speed relative to flow field
-        """
-        self.ff = ff
-        self.srf = srf
-        self.theta_0 = initial_steering
-
-    def value(self, t, x):
-        if self.ff.coords == Utils.COORD_CARTESIAN:
-            e_theta_0 = np.array([np.cos(self.theta_0), np.sin(self.theta_0)])
-        else:
-            # coords gcs
-            e_theta_0 = np.array([np.sin(self.theta_0), np.cos(self.theta_0)])
-        ff = self.ff.value(t, x)
-        ff_ortho = np.cross(e_theta_0, ff)
-        r = -ff_ortho / self.srf
-        if r > 1.:
-            res = np.pi / 2.
-        elif r < -1.:
-            res = -np.pi / 2.
-        else:
-            res = np.arcsin(r)
-            if self.ff.coords == Utils.COORD_GCS:
-                res *= -1
-        res += self.theta_0
-        return np.array((np.cos(res), np.sin(res)))
-
-
-class GreatCircleFB(Feedback):
-    """
-    Control law for GCS problems only.
-    Tries to stay on a great circle when flow field allows it.
-    """
-
-    def __init__(self, ff: FlowField, srf: float, target: ndarray):
-        self.ff = ff
-        self.srf = srf
-        self.lon_t, self.lat_t = target[0], target[1]
-
-    def value(self, t, x):
-        # First get the desired heading to follow great circle
-        lon, lat = x
-        lon_t, lat_t = self.lon_t, self.lat_t
-        u0 = np.arctan(1. / (np.cos(lat) * np.tan(lat_t) / np.sin(lon_t - lon) - np.sin(lat) / np.tan(lon_t - lon)))
-
-        e_0 = np.array([np.sin(u0), np.cos(u0)])
-        ff = self.ff.value(t, x)
-        ff_ortho = np.cross(e_0, ff)
-        r = -ff_ortho / self.srf
-        if r > 1.:
-            res = np.pi / 2.
-        elif r < -1.:
-            res = -np.pi / 2.
-        else:
-            res = -np.arcsin(r)
-        res += u0
-        return np.array((np.cos(res), np.sin(res)))
 
 
 class GSTargetFB(Feedback):
@@ -133,9 +64,8 @@ class GSTargetFB(Feedback):
         self.ff = ff
         self.srf = srf
         self.target = target.copy()
-        self.zero_ceil = 1e-3
 
-    def value(self, t, x):
+    def __call__(self, t, x):
         if self.ff.coords == Utils.COORD_GCS:
             # Got to 3D cartesian assuming spherical earth
             lon, lat = x[0], x[1]
@@ -153,21 +83,10 @@ class GSTargetFB(Feedback):
             e_target = np.zeros(2)
             e_target[:] = self.target - x
 
-        if np.linalg.norm(e_target) < self.zero_ceil:
-            return 0.
+        if np.isclose(np.linalg.norm(e_target), 0):
+            return np.zeros(2)
 
-        e_target = e_target / np.linalg.norm(e_target)
-        ff = self.ff.value(t, x)
-        ff_ortho = np.cross(e_target, ff)
-        r = -ff_ortho / self.srf
-        if r > 1.:
-            res = np.pi / 2.
-        elif r < -1.:
-            res = -np.pi / 2.
-        else:
-            res = np.arcsin(r)
-        res += atan2(e_target[1], e_target[0])
-        return np.array((np.cos(res), np.sin(res)))
+        return directional_timeopt_control(self.ff.value(t, x), e_target, self.srf)
 
 
 class HTargetFB(Feedback):
@@ -177,53 +96,38 @@ class HTargetFB(Feedback):
 
     def __init__(self, target: ndarray, coords: str):
         self.target = target.copy()
-        if coords == Utils.COORD_CARTESIAN:
-            self.value = self._value_R2
+        self.coords = coords
+
+    def __call__(self, t, x):
+        if self.coords == Utils.COORD_CARTESIAN:
+            e_target = np.zeros(2)
+            e_target[:] = self.target - x
+
+            if np.isclose(np.linalg.norm(e_target), 0):
+                return np.zeros(2)
+
+            e_target = e_target / np.linalg.norm(e_target)
+            res = atan2(e_target[1], e_target[0])
+            return np.array((np.cos(res), np.sin(res)))
         else:
-            self.value = self._value_S2
-        self.zero_ceil = 1e-3
+            # Got to 3D cartesian assuming spherical earth
+            lon, lat = x[0], x[1]
+            # Vector normal to earth at position
+            X3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            e_phi = np.array((-sin(lon), cos(lon), 0.))
+            e_lambda = np.array((-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat)))
+            lon, lat = self.target[0], self.target[1]
+            X_target3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
+            e_target = np.zeros(2)
+            e_target[0] = (X_target3 - X3) @ e_phi
+            e_target[1] = (X_target3 - X3) @ e_lambda
 
-    @classmethod
-    def for_R2(cls, target: ndarray):
-        cls(target, Utils.COORD_CARTESIAN)
+            if np.isclose(np.linalg.norm(e_target), 0):
+                return np.zeros(2)
 
-    @classmethod
-    def for_S2(cls, target: ndarray):
-        cls(target, Utils.COORD_GCS)
-
-    def _value_R2(self, _, x):
-        e_target = np.zeros(2)
-        e_target[:] = self.target - x
-
-        if np.linalg.norm(e_target) < self.zero_ceil:
-            return 0.
-
-        e_target = e_target / np.linalg.norm(e_target)
-        res = atan2(e_target[1], e_target[0])
-        return np.array((np.cos(res), np.sin(res)))
-
-    def _value_S2(self, _, x):
-        # Got to 3D cartesian assuming spherical earth
-        lon, lat = x[0], x[1]
-        # Vector normal to earth at position
-        X3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
-        e_phi = np.array((-sin(lon), cos(lon), 0.))
-        e_lambda = np.array((-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat)))
-        lon, lat = self.target[0], self.target[1]
-        X_target3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
-        e_target = np.zeros(2)
-        e_target[0] = (X_target3 - X3) @ e_phi
-        e_target[1] = (X_target3 - X3) @ e_lambda
-
-        if np.linalg.norm(e_target) < self.zero_ceil:
-            return 0.
-
-        e_target = e_target / np.linalg.norm(e_target)
-        res = atan2(e_target[1], e_target[0])
-        return np.array((np.cos(res), np.sin(res)))
-
-    def value(self, t, x):
-        pass
+            e_target = e_target / np.linalg.norm(e_target)
+            res = atan2(e_target[1], e_target[0])
+            return np.array((np.cos(res), np.sin(res)))
 
 
 class MapFB(Feedback):
@@ -236,7 +140,7 @@ class MapFB(Feedback):
         self.grid = np.array(grid)
         self.values = np.array(values)
 
-    def value(self, _, x):
+    def __call__(self, _, x):
         xx = (x[0] - self.grid[0, 0, 0]) / (self.grid[-1, 0, 0] - self.grid[0, 0, 0])
         yy = (x[1] - self.grid[0, 0, 1]) / (self.grid[0, -1, 1] - self.grid[0, 0, 1])
 

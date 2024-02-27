@@ -7,9 +7,10 @@ from typing import Optional, List
 
 import numpy as np
 from numpy import ndarray
+import scipy.integrate as scitg
 
 from dabry.aero import MermozAero, Aero
-from dabry.feedback import GSTargetFB
+from dabry.feedback import GSTargetFB, Feedback, HTargetFB
 from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearFF, RadialGaussFF, GyreFF, \
     PointSymFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
     FlowField, VortexFF, ZeroFF, WrapperFF
@@ -18,6 +19,7 @@ from dabry.misc import Utils, csv_to_dict
 from dabry.model import Model
 from dabry.obstacle import CircleObs, FrameObs, Obstacle, WrapperObs
 from dabry.penalty import Penalty, NullPenalty, WrapperPen
+from dabry.trajectory import Trajectory
 
 """
 problem.py
@@ -186,14 +188,56 @@ class NavigationProblem:
     def _in_obs(self, state):
         return [obs for obs in self.obstacles if obs.value(state) < 0.]
 
-    def orthodromic(self):
-        fb = GSTargetFB(self.model.ff, self.srf_max, self.x_target)
-        f = lambda x, t: self.model.dyn(t, x, fb.value(t, x))
+    def apply_feedback(self, fb: Feedback, time_scale_coeff=1., n_time=100):
+        def dyn_fb(t, x):
+            return self.model.dyn(t, x, fb(t, x))
         time_scale = self.length_reference / self.srf_max
-        t_max = 3 * time_scale
-        # res = scitg.odeint(f, self.x_init, np.linspace(0, t_max, 100))
-        # TODO continue implementation
-        return -1
+        t_max = time_scale_coeff * time_scale
+        times = np.linspace(self.model.ff.t_start, self.model.ff.t_start + t_max, n_time)
+        _target_radius_sq = self.target_radius ** 2
+
+        def event_target(t, x):
+            return np.sum(np.square(x - self.x_target)) - _target_radius_sq
+
+        event_target.terminal = True
+        res = scitg.solve_ivp(dyn_fb, (times[0], times[-1]), self.x_init, t_eval=times, events=[event_target])
+        return Trajectory(res.t, res.y.transpose(), self.model.coords, events=res.t_events)
+
+    def auto_time_upper_bound(self):
+        reached = False
+        time_scale_coeff = 1
+        time_ortho = np.infty
+        while not reached and time_scale_coeff < 10:
+            traj_ortho = self.orthodromic(time_scale_coeff=time_scale_coeff)
+            reached = traj_ortho.events[0].size > 0
+            time_scale_coeff *= 2
+        if reached:
+            time_ortho = traj_ortho.events[0][0]
+        reached = False
+        time_scale_coeff = 1
+        time_htarget = np.infty
+        while not reached and time_scale_coeff < 10:
+            traj_htarget = self.htarget(time_scale_coeff=time_scale_coeff)
+            reached = traj_htarget.events[0].size > 0
+            time_scale_coeff *= 2
+        if reached:
+            time_htarget = traj_htarget.events[0][0]
+
+        return min(time_ortho, time_htarget)
+
+    def orthodromic(self, time_scale_coeff=3, n_time=100):
+        """
+        Compute the orthodromic trajectory between start and target
+        :param time_scale_coeff: Inflation coefficient for the time scale.
+        :param n_time: Discretization number
+        :return: Trajectory
+        """
+        fb = GSTargetFB(self.model.ff, self.srf_max, self.x_target)
+        return self.apply_feedback(fb, time_scale_coeff, n_time)
+
+    def htarget(self, time_scale_coeff=3, n_time=100):
+        fb = HTargetFB(self.x_target, Utils.COORD_CARTESIAN)
+        return self.apply_feedback(fb, time_scale_coeff, n_time)
 
     def rescale(self):
         """
@@ -236,19 +280,6 @@ class NavigationProblem:
         return NavigationProblem(wrapper_ff, x_init, x_target, srf_max,
                                  bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty,
                                  name=self.name + ' (scaled)')
-
-    # TODO: reimplement this
-    def htarget(self):
-        # fb = HTargetFB(self.x_target, self.coords)
-        # self.load_feedback(fb)
-        # sc = DistanceSC(lambda x: self.distance(x, self.x_target), self.geod_l * 0.01)
-        # traj = self.integrate_trajectory(self.x_init, sc, int_step=self.time_scale / 2000, max_iter=6000,
-        #                                  t_init=self.model.ff.t_start)
-        # if sc.value(0, traj.points[traj.last_index]):
-        #     return traj.timestamps[traj.last_index] - self.model.ff.t_start
-        # else:
-        #     return -1
-        return -1
 
     @classmethod
     def from_database(cls, x_init: ndarray, x_target: ndarray, srf: float,

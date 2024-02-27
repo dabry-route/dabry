@@ -532,6 +532,7 @@ class WrapperFF(FlowField):
         self.scale_speed = scale_length / scale_time * (Utils.EARTH_RADIUS if ff.coords == Utils.COORD_GCS else 1.)
         # Multiplication will be quicker than division
         self._scaler_speed = 1 / self.scale_speed
+        self._scaler_dspeed = self.scale_length / self.scale_speed
         super().__init__(coords=ff.coords, t_start=(ff.t_start - self.time_origin)/self.scale_time,
                          t_end=None if ff.t_end is None else (ff.t_end - self.time_origin)/self.scale_time)
 
@@ -540,8 +541,8 @@ class WrapperFF(FlowField):
                                                   self.bl + x * self.scale_length)
 
     def d_value(self, t, x):
-        return self._scaler_speed * self.ff.d_value(self.time_origin + t * self.scale_time,
-                                                    self.bl + x * self.scale_length)
+        return self._scaler_dspeed * self.ff.d_value(self.time_origin + t * self.scale_time,
+                                                     self.bl + x * self.scale_length)
 
     def __getattr__(self, item):
         if item == 'values':
