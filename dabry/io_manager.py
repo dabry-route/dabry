@@ -109,6 +109,10 @@ class IOManager:
     def x_target(self) -> ndarray:
         return np.array(json.load(open(self.pb_data_fpath))["x_target"])
 
+    @property
+    def target_radius(self) -> ndarray:
+        return np.array(json.load(open(self.pb_data_fpath))["target_radius"])
+
     def setup_trajs(self):
         self.setup_dir()
         if not os.path.exists(self.trajs_dir):

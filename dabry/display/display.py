@@ -153,6 +153,7 @@ class Display:
         self.label_list = []
         self.scatter_init = None
         self.scatter_target = None
+        self.circle_target = None
 
         self.ax_rbutton = None
         self.reload_button = None
@@ -292,7 +293,7 @@ class Display:
         self.load_all()
         self.setup()
 
-    def run(self, noparams=True, noshow=False, movie=False, frames=None, fps=None,
+    def run(self, noshow=False, movie=False, frames=None, fps=None,
             movie_format='apng', mini=False, flags=''):
         self.configure()
         self.set_mode(flags)
@@ -308,7 +309,7 @@ class Display:
             self.to_movie(**kwargs)
         elif not noshow:
             try:
-                self.show(noparams=noparams)
+                self.show()
             except KeyboardInterrupt:
                 pass
 
@@ -327,6 +328,10 @@ class Display:
     @property
     def x_target(self):
         return self.io.x_target
+
+    @property
+    def target_radius(self):
+        return self.io.target_radius
 
     @property
     def tl_traj(self):
@@ -706,6 +711,8 @@ class Display:
             self.scatter_init.remove()
         if self.scatter_target is not None:
             self.scatter_target.remove()
+        if self.circle_target is not None:
+            self.circle_target.remove()
 
     def load_filter(self):
         self.filter_fpath = os.path.join(self.case_dir, self.filter_fname)
@@ -1347,8 +1354,8 @@ class Display:
 
             # if labeling:
             #     self.mainax.annotate('Target', c, (10, 10), textcoords='offset pixels', ha='center')
-            # if target_radius is not None:
-            #     self.mainax.add_patch(plt.Circle(c, target_radius))
+            self.circle_target = scatterax.add_patch(plt.Circle(factor * self.x_target, self.target_radius,
+                                                                facecolor='none', edgecolor='black'))
 
     def draw_obs(self):
         self.clear_obs()
@@ -1580,9 +1587,7 @@ class Display:
         elif event.key == 'x':
             self.toggle_ef_display()
 
-    def show(self, noparams=False, block=True):
-        if not noparams:
-            self.show_params()
+    def show(self, block=True):
         self.main_fig.savefig(self.img_fpath, **self.img_params)
 
         self.main_fig.canvas.mpl_connect('key_press_event', self.keyboard)
