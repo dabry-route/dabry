@@ -309,8 +309,9 @@ class NavigationProblem:
         grid_bounds = np.array((bl, tr)).transpose()
         ff = DiscreteFF.from_cds(grid_bounds, t_start, t_end, resolution=resolution,
                                  pressure_level=pressure_level, data_path=data_path)
-
-        return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
+        start_date = t_start if isinstance(t_start, float) else t_start.timestamp()
+        case_name = IOManager.format_cname(x_init, x_target, start_date)
+        return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=case_name)
 
     @classmethod
     def base_name(cls, name: str):

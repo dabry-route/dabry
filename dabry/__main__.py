@@ -51,22 +51,6 @@ if __name__ == '__main__':
     args = parser.parse_args(sys.argv[1:])
     if args.dest == 'case':
         pb_unscaled = NavigationProblem.from_name(args.name)
-        pb = pb_unscaled.rescale()
-
-        solver = SolverEFResampling(pb)
-
-        with Chrono() as _:
-            solver.solve()
-
-        print(solver.success)
-
-        traj_ortho = pb.orthodromic()
-        traj_htarget = pb.htarget()
-
-        pb.io.clean_output_dir()
-        solver.save_results()
-        pb.save_info()
-        print(f'Results saved to {pb.io.case_dir}')
 
     else:
         x_init_deg, x_target_deg, start_date, airspeed, pressure_level = \
@@ -79,42 +63,26 @@ if __name__ == '__main__':
         # Not an available parameter for the moment
         resolution = '0.5'
 
-        cds_dir = os.path.join('data', 'cds')
+        cds_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'cds'))
         IOManager.query_era5(start_date, stop_date, cds_dir, pressure_level=pressure_level, resolution=resolution)
-        pb = NavigationProblem.from_database(x_init, x_target, airspeed, start_date.timestamp(), stop_date.timestamp(),
-                                             resolution=resolution, pressure_level=pressure_level, data_path=cds_dir)
+        pb_unscaled = NavigationProblem.from_database(x_init, x_target, airspeed, start_date.timestamp(),
+                                                      stop_date.timestamp(), resolution=resolution,
+                                                      pressure_level=pressure_level, data_path=cds_dir)
 
-        case_name = IOManager.format_cname(x_init_deg, x_target_deg, start_date.timestamp())
-        pb.io.set_case('main_' + case_name)
-        pb.io.clean_output_dir()
+    pb = pb_unscaled.rescale()
 
-        pb.save_ff()
+    solver = SolverEFResampling(pb)
 
-        chrono = Chrono()
+    with Chrono() as _:
+        solver.solve()
 
-        # Setting the extremal solver
-        solver_ef = solver = SolverEFBase(pb, pb.time_scale, max_steps=700, rel_nb_ceil=0.02, quick_solve=True)
+    print(solver.success)
 
-        chrono.start('Solving problem using extremal field (EF)')
-        res_ef = solver_ef.solve()
-        chrono.stop()
-        if res_ef.status:
-            # Solution found
-            # Save optimal trajectory
-            pb.io.dump_trajs([res_ef.traj])
-            print(f'Target reached in : {Utils.time_fmt(res_ef.duration)}')
-        else:
-            print('No solution found')
+    traj_ortho = pb.orthodromic()
+    traj_htarget = pb.htarget()
 
-        extremals = solver_ef.get_trajs()
-        pb.io.dump_trajs(extremals)
-        # pb.io.dump_obs(pb, nx_rft, ny_rft)
-
-        pb.orthodromic()
-        # mdfm.dump_trajs([pb.trajs[-1]])
-
-        pb.save_info()
-        # Also copy the script that produced the result to output dir for later reproduction
-        pb.io.save_script(__file__)
-
-        print(f'Results saved to {pb.io.case_dir}')
+    pb.io.set_case_dir(os.path.join(os.path.abspath('.'), pb.name))
+    pb.io.clean_output_dir()
+    solver.save_results()
+    pb.save_info()
+    print(f'Results saved to {pb.io.case_dir}')

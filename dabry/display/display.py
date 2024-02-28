@@ -2,7 +2,6 @@ import os
 import sys
 import time
 import warnings
-import webbrowser
 from datetime import datetime
 from math import floor
 from typing import Optional, List, Dict
@@ -11,7 +10,6 @@ import h5py
 import matplotlib
 import matplotlib.cm as mpl_cm
 import scipy.ndimage
-import tqdm
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.widgets import Slider
@@ -19,10 +17,10 @@ from mpl_toolkits.basemap import Basemap
 from pyproj import Proj, Geod
 from scipy.interpolate import griddata
 
+from dabry.display.misc import *
 from dabry.flowfield import DiscreteFF
 from dabry.io_manager import IOManager
 from dabry.trajectory import Trajectory
-from misc import *
 
 state_names = [r"$x\:[m]$", r"$y\:[m]$"]
 control_names = [r"$u\:[rad]$"]
@@ -30,14 +28,11 @@ control_names = [r"$u\:[rad]$"]
 
 class Display:
     """
-    Defines all the visualization functions for navigation problems
+    Handles the visualization of navigation problems
     """
 
-    def __init__(self, name: str, title='Title', mode_3d=False):
-        """
-        :param coords: Either 'cartesian' for planar problems or 'gcs' for Earth-based problems
-        """
-        self.io = IOManager(name)
+    def __init__(self, name: str, case_dir: Optional[str] = None, mode_3d=False):
+        self.io = IOManager(name, case_dir=case_dir)
 
         self.x_offset = 0.
         self.y_offset = 0.
@@ -61,7 +56,7 @@ class Display:
         self.cm_norm_min = 0.
         self.cm_norm_max = 24  # 46.
         self.airspeed = None
-        self.title = title
+        self.title = ''
         self.axes_equal = True
         self.projection = 'ortho'
         self.sm_ff = None
@@ -81,8 +76,7 @@ class Display:
         # Dictionary reading case parameters
         self.params = {}
 
-        self.output_dir = None
-        self.output_imgpath = None
+        self.case_dir = case_dir
         self.img_params = {
             'dpi': 300,
             'format': 'png'
@@ -215,14 +209,108 @@ class Display:
 
         self.increment_factor = 0.001
 
-        self.x_init = None
-        self.x_target = None
-
         matplotlib.rcParams['pdf.fonttype'] = 42
         matplotlib.rcParams['ps.fonttype'] = 42
         # matplotlib.rcParams['text.usetex'] = True
 
         self.mode_3d = mode_3d
+
+    @staticmethod
+    def prompt_data_dir(output_dir: Optional[str] = None,
+                        latest=False, last=False) -> str:
+        output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'output')) if \
+            output_dir is None else output_dir
+        cache_fp = os.path.join(output_dir, '.cache_frontend')
+        case_dirs = [dir_name for dir_name in os.listdir(output_dir) if
+                     os.path.isdir(os.path.join(output_dir, dir_name))
+                     and not dir_name.startswith('.')
+                     and Display.is_readable(os.path.join(output_dir, dir_name))]
+        if len(case_dirs) == 0:
+            raise FileNotFoundError('No data found in folder "%s"' % output_dir)
+        last_tag = '{LAST}'
+        latest_tag = '{LATEST}'
+        if latest:
+            name = latest_tag
+        elif last:
+            name = last_tag
+        else:
+            try:
+                import easygui
+            except ImportError:
+                raise ImportError('"easygui" package required for interactive case selection')
+            name = easygui.choicebox('Choose case from available propositions extracted from "%s"' % output_dir,
+                                     'Case selection',
+                                     [latest_tag, last_tag] + list(sorted(case_dirs)))
+        if name is None:
+            print('No example selected, quitting', file=sys.stderr)
+            exit(1)
+        sel_dir = os.path.join(output_dir, name)
+        if name == latest_tag:
+            print('Opening latest file')
+            all_subdirs = list(map(lambda n: os.path.join(output_dir, n), case_dirs))
+            all_param_files = [os.path.join(dir_path, os.path.basename(dir_path) + '.json')
+                               for dir_path in all_subdirs if Display.is_readable(dir_path)]
+
+            latest_subdir = os.path.dirname(max(all_param_files, key=os.path.getmtime))
+            print(latest_subdir)
+            data_dir = latest_subdir
+        elif name == last_tag:
+            print('Opening last file')
+            with open(cache_fp, 'r') as f:
+                sel_dir = f.readline()
+                print(sel_dir)
+            data_dir = sel_dir
+        else:
+            data_dir = sel_dir
+            with open(cache_fp, 'w') as f:
+                f.writelines(sel_dir)
+        return data_dir
+
+    @classmethod
+    def is_readable(cls, dir_path: str):
+        basename = os.path.basename(dir_path)
+        params_path = os.path.join(dir_path, '%s.json' % basename)
+        if os.path.exists(params_path):
+            return True
+        return False
+
+    @classmethod
+    def from_scratch(cls, latest=False, last=False, mode_3d=False):
+        case_dir = Display.prompt_data_dir(latest=latest, last=last)
+        return cls(os.path.basename(case_dir), case_dir=case_dir, mode_3d=mode_3d)
+
+    @classmethod
+    def from_path(cls, path: str, latest=False, last=False, mode_3d=False):
+        if Display.is_readable(path):
+            case_dir = path
+        else:
+            case_dir = Display.prompt_data_dir(path, latest=latest, last=last)
+        return cls(os.path.basename(case_dir), case_dir=case_dir, mode_3d=mode_3d)
+
+    def configure(self):
+        self.set_title(os.path.basename(self.case_dir))
+        self.load_all()
+        self.setup()
+
+    def run(self, noparams=True, noshow=False, movie=False, frames=None, fps=None,
+            movie_format='apng', mini=False, flags=''):
+        self.configure()
+        self.set_mode(flags)
+        self.draw_all()
+        if movie:
+            kwargs = {}
+            if frames is not None:
+                kwargs['frames'] = frames
+            if fps is not None:
+                kwargs['fps'] = fps
+            kwargs['movie_format'] = movie_format
+            kwargs['mini'] = mini
+            self.to_movie(**kwargs)
+        elif not noshow:
+            try:
+                self.show(noparams=noparams)
+            except KeyboardInterrupt:
+                pass
 
     @property
     def bl(self):
@@ -231,6 +319,14 @@ class Display:
     @property
     def tr(self):
         return self.io.tr
+
+    @property
+    def x_init(self):
+        return self.io.x_init
+
+    @property
+    def x_target(self):
+        return self.io.x_target
 
     @property
     def tl_traj(self):
@@ -612,7 +708,7 @@ class Display:
             self.scatter_target.remove()
 
     def load_filter(self):
-        self.filter_fpath = os.path.join(self.output_dir, self.filter_fname)
+        self.filter_fpath = os.path.join(self.case_dir, self.filter_fname)
         if not os.path.exists(self.filter_fpath):
             return
         with open(self.filter_fpath, 'r') as f:
@@ -666,7 +762,7 @@ class Display:
                     t_start = t_start_cand
                 if t_end is None or t_end_cand > t_end:
                     t_end = t_end_cand
-            nt = int(np.round((t_end - t_start)/dt)) + 1
+            nt = int(np.round((t_end - t_start) / dt)) + 1
             bulk = np.nan * np.ones((nt, n_trajs, 2))
             times = np.linspace(t_start, t_end, nt)
             for i_traj, traj in enumerate(ef_list):
@@ -682,7 +778,7 @@ class Display:
         self.rff_zero_ceils = []
         if self.rff_fpath is None:
             filename = self.rff_fname if filename is None else filename
-            self.rff_fpath = os.path.join(self.output_dir, filename)
+            self.rff_fpath = os.path.join(self.case_dir, filename)
         if not os.path.exists(self.rff_fpath):
             return
         with h5py.File(self.rff_fpath, 'r') as f:
@@ -743,7 +839,7 @@ class Display:
     def load_obs(self, filename=None):
         if self.obs_fpath is None:
             filename = self.obs_fname if filename is None else filename
-            self.obs_fpath = os.path.join(self.output_dir, filename)
+            self.obs_fpath = os.path.join(self.case_dir, filename)
         if not os.path.exists(self.obs_fpath):
             return
         with h5py.File(self.obs_fpath, 'r') as f:
@@ -755,7 +851,7 @@ class Display:
     def load_pen(self, filename=None):
         if self.pen_fpath is None:
             filename = self.pen_fname if filename is None else filename
-            self.pen_fpath = os.path.join(self.output_dir, filename)
+            self.pen_fpath = os.path.join(self.case_dir, filename)
         if not os.path.exists(self.pen_fpath):
             return
         with h5py.File(self.pen_fpath, 'r') as f:
@@ -820,7 +916,6 @@ class Display:
                 no_display = True
             else:
                 self.ef_agg_display[ef_id] = False
-
 
     def draw_rff(self, debug=False, interp=True):
         self.clear_rff()
@@ -900,7 +995,7 @@ class Display:
         X = np.zeros((nx, ny))
         Y = np.zeros((nx, ny))
         if self.rescale_ff:
-            ur = 1 # max(1, nx // 18)
+            ur = 1  # max(1, nx // 18)
         else:
             ur = 1
         factor = RAD_TO_DEG if self.coords == 'gcs' else 1.
@@ -1343,31 +1438,20 @@ class Display:
                                      RAD_TO_DEG * self.ff['grid'][:, -1, 0].max(),
                                      RAD_TO_DEG * self.ff['grid'][-1, :, 1].min())
 
-    def show_params(self, fname=None):
-        fname = self.params_fname_formatted if fname is None else fname
-        path = os.path.join(self.output_dir, fname)
-        if not os.path.isfile(path):
-            print('Parameters HTML file not found', file=sys.stderr)
-        else:
-            webbrowser.open(path)
-
-    def set_output_path(self, path):
-        self.output_dir = path
-        basename = os.path.basename(path)
-        self.output_imgpath = os.path.join(path, basename + f'.{self.img_params["format"]}')
+    @property
+    def img_fpath(self):
+        basename = os.path.basename(self.case_dir)
+        return os.path.join(self.case_dir, basename + f'.{self.img_params["format"]}')
 
     def set_title(self, title):
         self.title = title
 
-    def set_coords(self, coords):
-        self.coords = coords
-
     def reload(self):
+        # TODO: reconsider function
         t_start = time.time()
         print('Reloading... ', end='')
 
         # Reload params
-        self.import_params()
         self.load_all()
 
         self.draw_all()
@@ -1459,15 +1543,6 @@ class Display:
         self.mode_ef_display = not self.mode_ef_display
         self.draw_all()
 
-    def update_title(self):
-        try:
-            if self.t_tick is not None:
-                ft_tick = f'{self.t_tick / 3600:.1f}h' if self.t_tick > 1800. else f'{self.t_tick:.2E}'
-                self.title += f' (ticks : {ft_tick})'
-            self.main_fig.suptitle(self.title)
-        except TypeError:
-            pass
-
     def increment_time(self, k=1):
         val = self.tcur / (self.tu - self.tl)
         next_val = val + self.increment_factor * k
@@ -1505,10 +1580,10 @@ class Display:
         elif event.key == 'x':
             self.toggle_ef_display()
 
-    def show(self, noparams=False, block=False):
+    def show(self, noparams=False, block=True):
         if not noparams:
             self.show_params()
-        self.main_fig.savefig(self.output_imgpath, **self.img_params)
+        self.main_fig.savefig(self.img_fpath, **self.img_params)
 
         self.main_fig.canvas.mpl_connect('key_press_event', self.keyboard)
         plt.show(block=block)
@@ -1535,13 +1610,19 @@ class Display:
 
     def to_movie(self, frames=50, fps=10, movie_format='apng', mini=False):
         self._info('Rendering animation')
-        anim_path = os.path.join(self.output_dir, 'anim')
+        anim_path = os.path.join(self.case_dir, 'anim')
         if not os.path.exists(anim_path):
             os.mkdir(anim_path)
         else:
             for filename in os.listdir(anim_path):
                 os.remove(os.path.join(anim_path, filename))
-        for i in tqdm.tqdm(range(frames)):
+        r = range(frames)
+        try:
+            from tqdm import tqdm
+            r = tqdm(r)
+        except ImportError:
+            warnings.warn('"tqdm" package is not installed for progress bar')
+        for i in r:
             val = i / (frames - 1)
             self.time_slider.set_val(val)
             self.reload_time(val)
@@ -1554,16 +1635,16 @@ class Display:
 
         pattern_in = os.path.join(anim_path, '*.png')
         first_file_in = os.path.join(anim_path, '0000.png')
-        palette = os.path.join(self.output_dir, 'palette.png')
+        palette = os.path.join(self.case_dir, 'palette.png')
 
         if movie_format == 'gif':
             os.system(f"ffmpeg -i {first_file_in} -y -vf palettegen {palette}")
-            file_out = os.path.join(self.output_dir, f'anim_s.{movie_format}')
+            file_out = os.path.join(self.case_dir, f'anim_s.{movie_format}')
             command = f"ffmpeg -y -framerate {fps} -pattern_type glob -i '{pattern_in}' -i {palette} -filter_complex 'paletteuse' '{file_out}'"
             os.system(command)
             os.remove(palette)
         else:
-            file_out = os.path.join(self.output_dir, f'anim.{movie_format}')
+            file_out = os.path.join(self.case_dir, f'anim.{movie_format}')
             command = f"ffmpeg -y -framerate {fps} -pattern_type glob -i '{pattern_in}' '{file_out}'"
             # -c: v libx264 - pix_fmt yuv420p
             os.system(command)

@@ -45,21 +45,21 @@ class IOManager:
     This class handles the writing and reading of files from or to disk
     """
 
-    def __init__(self, name: str, cache_ff=False, cache_rff=False):
+    def __init__(self, name: str, case_dir: Optional[str] = None, cache_ff=False, cache_rff=False):
         self.obs_filename = 'obs.h5'
         self.pen_filename = 'penalty.h5'
         self.cache_ff = cache_ff
         self.cache_rff = cache_rff
-        self._dabry_root_dir = os.path.abspath(os.path.join(__file__, '..'))
-        self.output_dir = os.path.abspath('.')
+        self._dabry_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        self.case_dir = case_dir if case_dir is not None else os.path.join(self._dabry_root_dir, 'output', name)
         self.case_name = name
 
     @property
-    def case_dir(self):
-        return os.path.join(self.output_dir, self.case_name)
+    def output_dir(self):
+        return os.path.dirname(self.case_dir)
 
-    def set_dir(self, dirpath: str):
-        self.output_dir = os.path.abspath(dirpath)
+    def set_case_dir(self, dirpath: str):
+        self.case_dir = os.path.abspath(dirpath)
 
     def setup_dir(self):
         if not os.path.exists(self.case_dir):
@@ -100,6 +100,14 @@ class IOManager:
     @property
     def tr(self) -> ndarray:
         return self.border('tr')
+
+    @property
+    def x_init(self) -> ndarray:
+        return np.array(json.load(open(self.pb_data_fpath))["x_init"])
+
+    @property
+    def x_target(self) -> ndarray:
+        return np.array(json.load(open(self.pb_data_fpath))["x_target"])
 
     def setup_trajs(self):
         self.setup_dir()
@@ -329,13 +337,11 @@ class IOManager:
     @staticmethod
     def query_era5(start_date: datetime, stop_date: datetime,
                    output_dir: str, pressure_level='1000', resolution='0.5'):
-        try:
-            import cdsapi
-        except ImportError:
-            raise ImportError('"cdsapi" module required to query ERA5')
         in_cache = []
         days_required = IOManager.days_between(start_date, stop_date)
         db_path = os.path.join(output_dir, resolution, pressure_level)
+        print(output_dir)
+        print(db_path)
         if not os.path.exists(db_path):
             os.makedirs(db_path)
         for ff_file in os.listdir(db_path):
@@ -352,6 +358,10 @@ class IOManager:
             print(f'Shall retrieve {len(days_required)} : {days_required}')
 
         for day_required in days_required:
+            try:
+                import cdsapi
+            except ImportError:
+                raise ImportError('"cdsapi" module required to query ERA5')
             server = cdsapi.Client()
             kwargs = {
                 "variable": ['u_component_of_wind', 'v_component_of_wind'],

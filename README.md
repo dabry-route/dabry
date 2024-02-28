@@ -7,28 +7,36 @@
 This module tackles trajectory optimization problems in strong,
 non-uniform and unsteady flow fields, in particular wind fields.
 
-It provides the following features for flow fields:
+The module performs origin-to-destination trajectory optimization (wrt. time)
+by sampling extremal trajectories.
+Extremal trajectories are Hamiltonian-minimizing trajectories.
+The time-optimal trajectory of a problem, when it exists,
+is a particular extremal trajectory.
+So the set of all extremal trajectories (parametrized by a real value, 
+the initial angle $\theta_0 \in [0, 2\pi[$) is guaranteed to contain the 
+time-optimal trajectory, and this motivates the extremal integration method.
+
+The module provides the following features for flow fields:
 - Python code for analytic flow fields (see `dabry/flowfield.py`)
 - Custom numpy zip (.npz) format definition for discrete flow fields (see `docs/flow_format.md`)
   - Translation from GRIB2 files to the npz format
- 
-The module performs origin-to-destination trajectory optimization (wrt. time)
-by sampling extremal trajectories i.e. Hamiltonian-minimizing trajectories which
-are guaranteed to contain the problem's solution when it exists.
 
 A demonstration notebook is given at `examples/Gyre.ipynb` and can be
 viewed using [nbviewer.org](https://nbviewer.org).
 
 The module supports 2D planar environment as well as spherical problems.
 
-## Installation (module mode)
+## Cloning the repo
 
-Clone the module
+Clone the module using
 ```sh
 git clone [repo-url]
 ```
 
-Install the project as a Python module using
+## Installation as Python module 
+
+After cloning the repo using the previous command,
+install the project as a Python module using
 ```sh
 python3 -m pip install -e ./dabry
 ```
@@ -37,27 +45,32 @@ python3 -m pip install -e ./dabry
 
 You can now run base examples calling `dabry` as Python module:
 ```shell
-python3 -m dabry case [case-name]
+python3 -m dabry case [case_name]
 ```
 Results will be automatically saved to a new folder 
 with the case's name in the current working directory.
 The different output files format specification can be found in `docs`.
 
-Available default problems are listed in `dabry/problems.csv`
+Available default problems for `case_name` 
+are listed in `dabry/problems.csv`
 
 ### Real data
 
-You can also run trajectory optimization on real problems using
-
+To directly run trajectory optimization on real wind fields, 
+you have to install the `cdsapi` module.
 ```shell
-python3 -m dabry real [lon-start] [lat-start] [lon-target] [lat-target] [date-start] [airspeed] [altitude]
+python3 -m pip install cdsapi
 ```
 
-For this you need an access to the [Copernicus Climate Data Store (CDS)](https://cds.climate.copernicus.eu)
-for wind data extraction.
+Then, configure your [CDS Python API key](https://cds.climate.copernicus.eu/api-how-to)
+for the `cdsapi` module to be allowed to extract wind fields from the
+CDS database.
 
-The `cdsapi` Python module is already installed but 
-you still need to install a [CDS Python API key](https://cds.climate.copernicus.eu/api-how-to).
+After that you can run trajectory optimization on real problems using
+
+```shell
+python3 -m dabry real [lon_start] [lat_start] [lon_target] [lat_target] [date_start] [airspeed] [altitude]
+```
 
 Note that an automatic CLI generator for `dabry`'s real cases
 is available on the 
