@@ -222,7 +222,7 @@ class DiscreteFF(FlowField):
     @classmethod
     def from_npz(cls, filepath):
         ff = np.load(filepath)
-        return cls(ff['values'], ff['bounds'], str(ff['coords']))
+        return cls(ff['values'], ff['bounds'], Coords.from_string(ff['coords']))
 
     @classmethod
     def from_h5(cls, filepath, **kwargs):
