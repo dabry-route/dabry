@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import Optional, List
 
 import numpy as np
-from numpy import ndarray
 import scipy.integrate as scitg
+from numpy import ndarray
 
 from dabry.aero import MermozAero, Aero
 from dabry.feedback import GSTargetFB, Feedback, HTargetFB
@@ -15,7 +15,7 @@ from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearF
     PointSymFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
     FlowField, VortexFF, ZeroFF, WrapperFF
 from dabry.io_manager import IOManager
-from dabry.misc import Utils, csv_to_dict
+from dabry.misc import Utils, csv_to_dict, Coords
 from dabry.model import Model
 from dabry.obstacle import CircleObs, FrameObs, Obstacle, WrapperObs
 from dabry.penalty import Penalty, NullPenalty, WrapperPen
@@ -128,6 +128,8 @@ class NavigationProblem:
             'target_radius': self.target_radius,
             'bl': self.bl.tolist(),
             'tr': self.tr.tolist(),
+            'time_orthodromic': self.time_orthodromic(),
+            'time_htarget': self.time_htarget()
         }
         with open(os.path.join(self.io.case_dir, f'{self.name}.json'), 'w') as f:
             json.dump(pb_info, f, indent=4)
@@ -185,14 +187,22 @@ class NavigationProblem:
         # TODO : adapt to gcs
         return self.hamiltonian(t, state, costate, self.timeopt_control_cartesian(costate))
 
-    def _in_obs(self, state):
+    def in_obs(self, state):
         return [obs for obs in self.obstacles if obs.value(state) < 0.]
 
-    def apply_feedback(self, fb: Feedback, time_scale_coeff=1., n_time=100):
+    def apply_feedback(self, fb: Feedback, rel_timeout=10, n_time=1000) -> Trajectory:
+        """
+        Integrate a trajectory applying feedback control
+        :param fb: The feedback control law
+        :param rel_timeout: The time scale multiplicator to build the timeout date
+        :param n_time: The time discretization number
+        :return: A Trajectory
+        """
         def dyn_fb(t, x):
             return self.model.dyn(t, x, fb(t, x))
+
         time_scale = self.length_reference / self.srf_max
-        t_max = time_scale_coeff * time_scale
+        t_max = rel_timeout * time_scale
         times = np.linspace(self.model.ff.t_start, self.model.ff.t_start + t_max, n_time)
         _target_radius_sq = self.target_radius ** 2
 
@@ -201,43 +211,32 @@ class NavigationProblem:
 
         event_target.terminal = True
         res = scitg.solve_ivp(dyn_fb, (times[0], times[-1]), self.x_init, t_eval=times, events=[event_target])
-        return Trajectory(res.t, res.y.transpose(), self.model.coords, events=res.t_events)
+        return Trajectory(res.t, res.y.transpose(), self.model.coords, events={'target': res.t_events[0]})
 
     def auto_time_upper_bound(self):
-        reached = False
-        time_scale_coeff = 1
-        time_ortho = np.infty
-        while not reached and time_scale_coeff < 10:
-            traj_ortho = self.orthodromic(time_scale_coeff=time_scale_coeff)
-            reached = traj_ortho.events[0].size > 0
-            time_scale_coeff *= 2
-        if reached:
-            time_ortho = traj_ortho.events[0][0]
-        reached = False
-        time_scale_coeff = 1
-        time_htarget = np.infty
-        while not reached and time_scale_coeff < 10:
-            traj_htarget = self.htarget(time_scale_coeff=time_scale_coeff)
-            reached = traj_htarget.events[0].size > 0
-            time_scale_coeff *= 2
-        if reached:
-            time_htarget = traj_htarget.events[0][0]
+        return min(self.time_orthodromic(), self.time_htarget())
 
-        return min(time_ortho, time_htarget)
-
-    def orthodromic(self, time_scale_coeff=3, n_time=100):
+    def orthodromic(self):
         """
         Compute the orthodromic trajectory between start and target
-        :param time_scale_coeff: Inflation coefficient for the time scale.
-        :param n_time: Discretization number
         :return: Trajectory
         """
         fb = GSTargetFB(self.model.ff, self.srf_max, self.x_target)
-        return self.apply_feedback(fb, time_scale_coeff, n_time)
+        return self.apply_feedback(fb)
 
-    def htarget(self, time_scale_coeff=3, n_time=100):
-        fb = HTargetFB(self.x_target, Utils.COORD_CARTESIAN)
-        return self.apply_feedback(fb, time_scale_coeff, n_time)
+    def htarget(self):
+        fb = HTargetFB(self.x_target, self.model.coords)
+        return self.apply_feedback(fb)
+
+    def time_orthodromic(self):
+        traj_ortho = self.orthodromic()
+        reached = traj_ortho.events['target'].size > 0
+        return traj_ortho.events['target'][0] if reached else np.infty
+
+    def time_htarget(self):
+        traj_htarget = self.htarget()
+        reached = traj_htarget.events['target'].size > 0
+        return traj_htarget.events['target'][0] if reached else np.infty
 
     def rescale(self):
         """
@@ -245,7 +244,7 @@ class NavigationProblem:
         and srf_max is 1
         :return: A rescaled NavigationProblem
         """
-        if self.coords == Utils.COORD_CARTESIAN:
+        if self.coords == Coords.CARTESIAN:
             scale_length = self.length_reference
             x_init = (self.x_init - self.bl) / scale_length
             x_target = (self.x_target - self.bl) / scale_length
@@ -254,7 +253,7 @@ class NavigationProblem:
             tr_pb_adim = (self.tr - self.bl) / scale_length
             srf_max = self.srf_max
         else:
-            # Case self.coords == Utils.COORD_GCS
+            # Case self.coords == Coords.GCS
             # Do not rescale lon/lat because computation will be false
             # TODO: think about shifting longitude to zero to avoid periodic bounds
             scale_length = 1.
@@ -434,21 +433,15 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "big_rankine":
-            srf = 0.1
+            srf = 1
 
-            x_init = np.array([0., 0.])
-            x_target = np.array([1.5, 0.])
+            x_init = np.array([0.2, 0.5])
+            x_target = np.array([0.8, 0.5])
 
-            bl = np.array((-0.5, -1.))
-            tr = np.array((2., 1.))
-            omega = np.array(((0.2, -0.2), (0.8, 0.2)))
+            bl = np.array((0, 0))
+            tr = np.array((1, 1))
 
-            vortex = [
-                RankineVortexFF(omega[0], -7., 1.),
-                RankineVortexFF(omega[1], -7., 1.)
-            ]
-
-            ff = vortex[0] + vortex[1]
+            ff = RankineVortexFF(np.array((0.5, 0.5)), -7., 1.)
 
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
@@ -586,7 +579,7 @@ class NavigationProblem:
             x_target = np.array((np.pi / 4, np.pi / 6))
             # Only DiscreteFF can be GCS so discretize a null flow field
             ff = DiscreteFF.from_ff(ZeroFF(), (x_init - np.array((0.15, 0.15)), x_target + np.array((0.15, 0.15))),
-                                    coords='gcs')
+                                    coords=Coords.GCS)
             srf = 1  # meters per second
             return cls(ff, x_init, x_target, srf, name=b_name)
 
@@ -645,8 +638,8 @@ class NavigationProblem:
         if b_name == "montreal_reykjavik":
             ff = DiscreteFF.from_npz(os.path.join(os.path.abspath(''), '..', 'data', 'cds_omerc', 'montreal_reykjavik',
                                                   'ff.npz'))
-            x_init = np.diag((5/6, 1/2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])  # reykyavik
-            x_target = np.diag((1/6, 1/2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])  # montreal
+            x_init = np.diag((5 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])  # reykyavik
+            x_target = np.diag((1 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])  # montreal
             return cls(ff, x_init, x_target, 10, name=b_name)
 
         else:

@@ -3,7 +3,7 @@ from typing import Optional
 import numpy as np
 
 from .dynamics import ZermeloS2Dyn, Dynamics, ZermeloR2Dyn
-from .misc import Utils
+from .misc import Utils, Coords
 from .flowfield import UniformFF, FlowField, DiscreteFF
 
 """
@@ -42,8 +42,8 @@ class Model:
 
     @classmethod
     def which_coords(cls, ff: FlowField):
-        return Utils.COORD_GCS if hasattr(ff, 'coords') and ff.coords == Utils.COORD_GCS else\
-            Utils.COORD_CARTESIAN
+        return Coords.GCS if hasattr(ff, 'coords') and ff.coords == Coords.GCS else\
+            Coords.CARTESIAN
 
     @property
     def ff(self):
@@ -62,7 +62,7 @@ class Model:
     @classmethod
     def zermelo(cls, ff: FlowField):
         coords = Model.which_coords(ff)
-        if coords == Utils.COORD_CARTESIAN:
+        if coords == Coords.CARTESIAN:
             return cls.zermelo_R2(ff)
         else:
             return cls.zermelo_S2(ff)

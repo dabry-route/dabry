@@ -1,6 +1,6 @@
 import numpy as np
 from dabry.flowfield import DiscreteFF
-from dabry.misc import Utils
+from dabry.misc import Coords
 
 
 def test_create():
@@ -8,5 +8,5 @@ def test_create():
     np.random.seed(42)
     values = np.random.random((nt, nx, ny, 2))
     bounds = np.random.random((3, 2))
-    coords = Utils.COORD_CARTESIAN
+    coords = Coords.CARTESIAN
     DiscreteFF(values, bounds, coords)

@@ -2,34 +2,7 @@ import colorsys
 from math import atan2
 import numpy as np
 from matplotlib import pyplot as plt
-
-
-class FontsizeConf:
-
-    def __init__(self):
-        self.fontsize = 18
-        self.axes_titlesize = 24
-        self.axes_labelsize = 22
-        self.xtick_labelsize = 22
-        self.ytick_labelsize = 22
-        self.legend_fontsize = 15
-        self.button_fontsize = 14
-        self.timedisp_major = 20
-        self.timedisp_minor = 14
-        self.font_family = 'lato'
-        self.mathtext_fontset = 'cm'
-
-
-ZO_WIND_NORM = 1
-ZO_WIND_VECTORS = 2
-ZO_RFF = 3
-ZO_WIND_ANCHORS = 4
-ZO_OBS = 5
-ZO_TRAJS = 6
-ZO_ANNOT = 7
-
-RAD_TO_DEG = 180. / np.pi
-DEG_TO_RAD = np.pi / 180.
+import matplotlib.colors as mpl_colors
 
 my_red = np.array([0.8, 0., 0., 1.])
 my_red_t = np.diag((1., 1., 1., 0.2)).dot(my_red)
@@ -62,39 +35,9 @@ reachability_colors = {
         'time-tick': my_orange2,
         'last': my_blue
     },
-    'approx': {
-        'steps': my_grey1,
-        'time-tick': my_orange_t,
-        'last': my_orange
-    },
-    'point': {
-        'steps': my_grey1,
-        'time-tick': my_orange,
-        'last': my_orange
-    },
-    'optimal': {
-        'steps': my_dark_blue,
-        'time-tick': my_dark_blue,
-        'last': my_dark_blue
-    },
-    'optimal-rft': {
-        'steps': my_orange,
-        'time-tick': my_orange,
-        'last': my_orange
-    },
-    'optimal-eft': {
-        'steps': my_purple,
-        'time-tick': my_purple,
-        'last': my_purple
-    },
-    'debug': {
-        'steps': my_green,
-        'time-tick': my_green,
-        'last': my_green
-    }
 }
 
-path_colors = ['r', 'b', '#fce808', 'b', 'g', 'r', 'c', 'm', 'y']
+path_colors = ['r', 'b', 'g', 'c', 'm', 'y']
 
 markers = ['o', '1', '2', '3', '4']
 
@@ -108,8 +51,6 @@ monocolor_colors = {
     'point': my_blue,
     'integral': my_black
 }
-
-EARTH_RADIUS = 6378.137e3  # [m] Earth equatorial radius
 
 # Windy default cm
 CM_WINDY = [[0, [98, 113, 183, 255]],
@@ -200,7 +141,7 @@ CM_WINDY_TRUNCATED_TRUNC = [[0, [98, 113, 183, 255]],
                             [24, [109, 97, 163, 255]]]
 
 # Define windy cm
-import matplotlib.colors as mpl_colors
+
 
 cm_values = CM_WINDY_TRUNCATED_TRUNC
 

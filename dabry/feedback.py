@@ -5,7 +5,7 @@ from numpy import arctan2 as atan2
 from numpy import ndarray
 from numpy import sin, cos
 
-from dabry.misc import Utils, directional_timeopt_control
+from dabry.misc import Utils, directional_timeopt_control, Coords
 from dabry.flowfield import FlowField
 
 """
@@ -66,7 +66,7 @@ class GSTargetFB(Feedback):
         self.target = target.copy()
 
     def __call__(self, t, x):
-        if self.ff.coords == Utils.COORD_GCS:
+        if self.ff.coords == Coords.GCS:
             # Got to 3D cartesian assuming spherical earth
             lon, lat = x[0], x[1]
             X3 = Utils.EARTH_RADIUS * np.array((cos(lon) * cos(lat), sin(lon) * cos(lat), sin(lat)))
@@ -94,12 +94,12 @@ class HTargetFB(Feedback):
     Control law heading towards target
     """
 
-    def __init__(self, target: ndarray, coords: str):
+    def __init__(self, target: ndarray, coords: Coords):
         self.target = target.copy()
         self.coords = coords
 
     def __call__(self, t, x):
-        if self.coords == Utils.COORD_CARTESIAN:
+        if self.coords == Coords.CARTESIAN:
             e_target = np.zeros(2)
             e_target[:] = self.target - x
 

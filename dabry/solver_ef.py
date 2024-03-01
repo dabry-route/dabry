@@ -9,7 +9,7 @@ from numpy import ndarray
 from tqdm import tqdm
 
 from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha, \
-    is_possible_direction, diadic_valuation, alpha_to_int
+    is_possible_direction, diadic_valuation, alpha_to_int, Coords
 from dabry.misc import terminal
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
@@ -331,7 +331,7 @@ class SolverEF(ABC):
         self.max_int_step: Optional[float] = abs_max_step if rel_max_step is None else \
             min(abs_max_step, rel_max_step * self.total_duration)
 
-        self.dyn_augsys = self.dyn_augsys_cartesian if self.pb.coords == Utils.COORD_CARTESIAN else self.dyn_augsys_gcs
+        self.dyn_augsys = self.dyn_augsys_cartesian if self.pb.coords == Coords.CARTESIAN else self.dyn_augsys_gcs
 
     def setup(self):
         self.traj_groups = []
@@ -643,7 +643,7 @@ class SolverEFResampling(SolverEF):
                                  not site.in_obs_at(i) and not site_nb.in_obs_at(i) and \
                                  site.index_t_init == 0 and site_nb.index_t_init == 0 else i
                     new_site = self.site_mngr.site_from_parents(site, site_nb, index)
-                    if len(self.pb._in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
+                    if len(self.pb.in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
                         # Choose not to resample points lying within obstacles
                         site.close(ClosureReason.WITHIN_OBS)
                         new_site = None
@@ -741,6 +741,11 @@ class SolverEFResampling(SolverEF):
         site.traj_full = Trajectory(times, states, site.traj.coords, controls=controls, costates=costates,
                                     cost=costs,
                                     events=site.traj.events)
+
+    def save_results(self):
+        super(SolverEFResampling, self).save_results()
+        if self.solution_site is not None and self.solution_site.traj_full is not None:
+            self.pb.io.save_traj(self.solution_site.traj_full, name='solution')
 
 
 class SolverEFBisection(SolverEFResampling):

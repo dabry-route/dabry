@@ -1,12 +1,12 @@
-import copy
 import json
+import os
 import warnings
 from typing import Optional, Dict
 
 import numpy as np
 from numpy import ndarray
 
-from dabry.misc import Utils
+from dabry.misc import Coords
 
 """
 trajectory.py
@@ -30,6 +30,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
+def traj_name_to_filename(name, meta=False):
+    suffix = '.npz' if not meta else '_meta.json'
+    return ("traj_%s" % name) + suffix
+
+
+def traj_filepath_to_name(filepath):
+    filename = os.path.basename(filepath)
+    if not filename.startswith('traj_'):
+        raise ValueError('Filename "%s" is not properly formatted' % filename)
+    return filename[5:].split('.')[0]
+
+
 class Trajectory:
     """
     The definition of a trajectory for the navigation problem
@@ -38,7 +50,7 @@ class Trajectory:
     def __init__(self,
                  times: ndarray,
                  states: ndarray,
-                 coords,
+                 coords: Coords,
                  controls: Optional[ndarray] = None,
                  costates: Optional[ndarray] = None,
                  cost: Optional[ndarray] = None,
@@ -46,7 +58,7 @@ class Trajectory:
         """
         :param times: Time stamps shape (n,)
         :param states: States (n, 2)
-        :param coords: Type of coordinates : 'cartesian or 'gcs'
+        :param coords: Type of coordinates
         :param controls: Controls (n-1, 2)
         :param costates: Costates (n, 2)
         :param cost: Instantaneous cost (n-1,)
@@ -60,11 +72,12 @@ class Trajectory:
 
         self.events: Dict[str, ndarray] = events if events is not None else {}
 
-        self.coords: str = coords
+        self.coords: Coords = coords
 
     @classmethod
     def empty(cls):
-        return cls(np.array(()), np.array(((), ())), 'cartesian', np.array(((), ())), np.array(((), ())), np.array(()))
+        return cls(np.array(()), np.array(((), ())), Coords.CARTESIAN,
+                   np.array(((), ())), np.array(((), ())), np.array(()))
 
     @classmethod
     def cartesian(cls,
@@ -74,7 +87,7 @@ class Trajectory:
                   costates: Optional[ndarray] = None,
                   cost: Optional[ndarray] = None,
                   events: Optional[Dict[str, ndarray]] = None):
-        return cls(times, states, Utils.COORD_CARTESIAN,
+        return cls(times, states, Coords.CARTESIAN,
                    controls=controls, costates=costates, cost=cost, events=events)
 
     @classmethod
@@ -85,7 +98,7 @@ class Trajectory:
             costates: Optional[ndarray] = None,
             cost: Optional[ndarray] = None,
             events: Optional[Dict[str, ndarray]] = None):
-        return cls(times, states, Utils.COORD_GCS,
+        return cls(times, states, Coords.GCS,
                    controls=controls, costates=costates, cost=cost, events=events)
 
     def __add__(self, other):
@@ -149,15 +162,16 @@ class Trajectory:
         return Trajectory(self.times.copy(), self.states.copy(), self.coords, controls=self.controls.copy(),
                           costates=self.costates.copy(), cost=self.cost.copy(), events=self.events.copy())
 
-    def save(self, filepath):
-        np.savez(filepath, times=self.times, states=self.states,
+    def save(self, name, dir_name):
+        np.savez(os.path.join(dir_name, traj_name_to_filename(name)),
+                 times=self.times, states=self.states,
                  costates=self.costates if self.costates is not None else np.array(((), ())),
                  controls=self.controls if self.controls is not None else np.array(((), ())),
                  cost=self.cost if self.cost is not None else np.array(()))
-        meta_data = {'coords': self.coords, 'events': {}}
+        meta_data = {'coords': self.coords.value, 'events': {}}
         for e_name, times in self.events.items():
             meta_data['events'][e_name] = times.tolist()
-        meta_fpath = filepath + '_meta.json'
+        meta_fpath = os.path.join(dir_name, traj_name_to_filename(name, meta=True))
         with open(meta_fpath, 'w') as f:
             json.dump(meta_data, f)
 
@@ -172,13 +186,13 @@ class Trajectory:
         data = np.load(filepath)
         try:
             meta_data = json.load(open(filepath[:-4] + '_meta.json'))
-            coords = meta_data['coords']
+            coords = Coords.from_string(meta_data['coords'])
             events = {}
             for k, v in meta_data['events'].items():
                 events[k] = np.array(v)
         except FileNotFoundError:
             warnings.warn('Metadata not found for trajectory', category=UserWarning)
-            coords = Utils.COORD_CARTESIAN
+            coords = Coords.CARTESIAN
             events = {}
 
         controls = data['controls'] if data['controls'].size > 0 else None

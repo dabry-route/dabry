@@ -3,6 +3,7 @@ import sys
 import time
 import warnings
 from datetime import datetime
+from enum import Enum
 from math import floor
 from typing import Optional, List, Dict
 
@@ -20,10 +21,34 @@ from scipy.interpolate import griddata
 from dabry.display.misc import *
 from dabry.flowfield import DiscreteFF
 from dabry.io_manager import IOManager
-from dabry.trajectory import Trajectory
+from dabry.trajectory import Trajectory, traj_filepath_to_name
+from dabry.misc import Utils, Coords
 
-state_names = [r"$x\:[m]$", r"$y\:[m]$"]
-control_names = [r"$u\:[rad]$"]
+
+class ZOrder(Enum):
+    WIND_NORM = 1
+    WIND_VECTORS = 2
+    RFF = 3
+    WIND_ANCHORS = 4
+    OBS = 5
+    TRAJS = 6
+    ANNOT = 7
+
+
+class FontsizeConf:
+
+    def __init__(self):
+        self.fontsize = 18
+        self.axes_titlesize = 24
+        self.axes_labelsize = 22
+        self.xtick_labelsize = 22
+        self.ytick_labelsize = 22
+        self.legend_fontsize = 15
+        self.button_fontsize = 14
+        self.timedisp_major = 20
+        self.timedisp_minor = 14
+        self.font_family = 'lato'
+        self.mathtext_fontset = 'cm'
 
 
 class Display:
@@ -85,7 +110,6 @@ class Display:
         self.params_fname_formatted = 'params.html'
 
         self.ff_fname = 'ff.h5'
-        self.trajs_fname = 'trajectories.h5'
         self.rff_fname = 'rff.h5'
         self.obs_fname = 'obs.h5'
         self.pen_fname = 'penalty.h5'
@@ -99,14 +123,14 @@ class Display:
 
         self.traj_filter = []
         # 0 for no aggregation (fronts), 1 for aggregation and time cursor, 2 for aggrgation and no time cursor
-        self.mode_aggregated = 0
+        self.mode_aggregated = False
         self.mode_controls = False  # Whether to print ff in tiles (False) or by interpolation (True)
         self.mode_ff = False  # Whether to display extremal field or not
         self.mode_ef = True  # Whether to display zones where ff is equal to airspeed
         self.mode_speed = True  # Whether to display trajectories annotation
         self.mode_annot = False  # Whether to display ff colors
         self.mode_ff_color = True  # Whether to display energy as colors
-        self.mode_energy = True  # Whether to draw extremal fields or not
+        self.mode_energy = False  # Whether to draw extremal fields or not
         self.mode_ef_display = True  # Whether to rescale ff
         self.rescale_ff = True
 
@@ -118,11 +142,11 @@ class Display:
         self.ff = None
         self.ff_norm_min = None
         self.ff_norm_max = None
-        self.trajs = []
-        self.trajs_regular = []
+        self.trajs: Dict[str, Trajectory] = {}
+        self.trajs_regular: Dict[str, Trajectory] = {}
         self.rff = None
         self.rff_cntr_kwargs = {
-            'zorder': ZO_RFF,
+            'zorder': ZOrder.RFF.value,
             'cmap': 'brg',
             'antialiased': True,
             'alpha': .8,
@@ -150,7 +174,6 @@ class Display:
         self.obs_contours = []
         self.pen_contours = []
 
-        self.label_list = []
         self.scatter_init = None
         self.scatter_target = None
         self.circle_target = None
@@ -192,6 +215,9 @@ class Display:
         self._tl_traj = None
         self._tu_traj = None
 
+        self._tl_ef = {}
+        self._tu_ef = {}
+
         self.tl_rff = None
         self.tu_rff = None
 
@@ -202,7 +228,7 @@ class Display:
 
         self.ef_index = None
         self.ef_nt = 100
-        self.extremal_fields: Dict[str, List[Trajectory]] = {}
+        self.extremal_fields: Dict[str, Dict[str, Trajectory]] = {}
         self.ef_bulks = {}
         # True or False dict whether group of extremals should be
         # displayed in aggregated mode
@@ -337,7 +363,7 @@ class Display:
     def tl_traj(self):
         if self._tl_traj is None:
             val = None
-            for traj in self.trajs:
+            for traj in self.trajs.values():
                 m = np.min(traj.times)
                 if val is None or m < val:
                     val = m
@@ -348,12 +374,32 @@ class Display:
     def tu_traj(self):
         if self._tu_traj is None:
             val = None
-            for traj in self.trajs:
+            for traj in self.trajs.values():
                 m = np.max(traj.times)
                 if val is None or m > val:
                     val = m
             self._tu_traj = val
         return self._tu_traj
+
+    def tl_ef(self, ef_id):
+        if ef_id not in self._tl_ef.keys():
+            val = None
+            for traj in self.extremal_fields[ef_id].values():
+                m = np.min(traj.times)
+                if val is None or m < val:
+                    val = m
+            self._tl_ef[ef_id] = val
+        return self._tl_ef[ef_id]
+
+    def tu_ef(self, ef_id):
+        if ef_id not in self._tu_ef.keys():
+            val = None
+            for traj in self.extremal_fields[ef_id].values():
+                m = np.max(traj.times)
+                if val is None or m > val:
+                    val = m
+            self._tu_ef[ef_id] = val
+        return self._tu_ef[ef_id]
 
     def _index(self, mode):
         """
@@ -399,7 +445,7 @@ class Display:
         # plt.rc('font', family=self.fsc.font_family)
         plt.rc('mathtext', fontset=self.fsc.mathtext_fontset)
 
-        self.main_fig = plt.figure(num=f"dabryvisu ({self.coords})",
+        self.main_fig = plt.figure(num=f"dabryvisu ({self.coords.value})",
                                    constrained_layout=False,
                                    figsize=(12, 8))
         self.main_fig.canvas.mpl_disconnect(self.main_fig.canvas.manager.key_press_handler_id)
@@ -468,8 +514,8 @@ class Display:
         """
         Sets the display of the map
         """
-        cartesian = (self.coords == 'cartesian')
-        gcs = (self.coords == 'gcs')
+        cartesian = (self.coords == Coords.CARTESIAN)
+        gcs = (self.coords == Coords.GCS)
 
         if self.mode_3d:
             self.ax = self.main_ax
@@ -491,26 +537,26 @@ class Display:
             #             self.bl[1] + self.tr[1]) / 1000.
 
             if self.projection == 'merc':
-                kwargs['llcrnrlon'] = RAD_TO_DEG * (self.bl[0] - self.x_offset * (self.tr[0] - self.bl[0]))
-                kwargs['llcrnrlat'] = RAD_TO_DEG * (self.bl[1] - self.y_offset * (self.tr[1] - self.bl[1]))
-                kwargs['urcrnrlon'] = RAD_TO_DEG * (self.tr[0] + self.x_offset * (self.tr[0] - self.bl[0]))
-                kwargs['urcrnrlat'] = RAD_TO_DEG * (self.tr[1] + self.y_offset * (self.tr[1] - self.bl[1]))
+                kwargs['llcrnrlon'] = Utils.RAD_TO_DEG * (self.bl[0] - self.x_offset * (self.tr[0] - self.bl[0]))
+                kwargs['llcrnrlat'] = Utils.RAD_TO_DEG * (self.bl[1] - self.y_offset * (self.tr[1] - self.bl[1]))
+                kwargs['urcrnrlon'] = Utils.RAD_TO_DEG * (self.tr[0] + self.x_offset * (self.tr[0] - self.bl[0]))
+                kwargs['urcrnrlat'] = Utils.RAD_TO_DEG * (self.tr[1] + self.y_offset * (self.tr[1] - self.bl[1]))
 
             elif self.projection == 'ortho':
                 kwargs['lon_0'], kwargs['lat_0'] = \
-                    0.5 * RAD_TO_DEG * (np.array((self.bl[0], self.bl[1])) + np.array((self.tr[0], self.tr[1])))
-                # tuple(RAD_TO_DEG * np.array(middle(np.array((self.bl[0], self.bl[1])),
+                    0.5 * Utils.RAD_TO_DEG * (np.array((self.bl[0], self.bl[1])) + np.array((self.tr[0], self.tr[1])))
+                # tuple(Utils.RAD_TO_DEG * np.array(middle(np.array((self.bl[0], self.bl[1])),
                 #                                    np.array((self.tr[0], self.tr[1])))))
                 proj = Proj(proj='ortho', lon_0=kwargs['lon_0'], lat_0=kwargs['lat_0'])
-                # pgrid = np.array(proj(RAD_TO_DEG * self.ff['grid'][:, :, 0],
-                # RAD_TO_DEG * self.ff['grid'][:, :, 1]))
+                # pgrid = np.array(proj(Utils.RAD_TO_DEG * self.ff['grid'][:, :, 0],
+                # Utils.RAD_TO_DEG * self.ff['grid'][:, :, 1]))
                 # px_min = np.min(pgrid[0])
                 # px_max = np.max(pgrid[0])
                 # py_min = np.min(pgrid[1])
                 # py_max = np.max(pgrid[1])
                 if self.x_init is not None and self.x_target is not None:
-                    x1, y1 = proj(*(RAD_TO_DEG * self.x_init))
-                    x2, y2 = proj(*(RAD_TO_DEG * self.x_target))
+                    x1, y1 = proj(*(Utils.RAD_TO_DEG * self.x_init))
+                    x2, y2 = proj(*(Utils.RAD_TO_DEG * self.x_target))
                     x_min = min(x1, x2)
                     x_max = max(x1, x2)
                     y_min = min(y1, y2)
@@ -532,10 +578,10 @@ class Display:
                             del kwargs['urcrnry']
                             break
             elif self.projection == 'omerc':
-                kwargs['lon_1'] = RAD_TO_DEG * self.x_init[0]
-                kwargs['lat_1'] = RAD_TO_DEG * self.x_init[1]
-                kwargs['lon_2'] = RAD_TO_DEG * self.x_target[0]
-                kwargs['lat_2'] = RAD_TO_DEG * self.x_target[1]
+                kwargs['lon_1'] = Utils.RAD_TO_DEG * self.x_init[0]
+                kwargs['lat_1'] = Utils.RAD_TO_DEG * self.x_init[1]
+                kwargs['lon_2'] = Utils.RAD_TO_DEG * self.x_target[0]
+                kwargs['lat_2'] = Utils.RAD_TO_DEG * self.x_target[1]
 
                 def middle(x1, x2):
                     bx = np.cos(x2[1]) * np.cos(x2[0] - x1[0])
@@ -549,16 +595,16 @@ class Display:
                     return dist
 
                 lon_0, lat_0 = middle(self.x_init, self.x_target)
-                kwargs['lon_0'], kwargs['lat_0'] = RAD_TO_DEG * lon_0, RAD_TO_DEG * lat_0
+                kwargs['lon_0'], kwargs['lat_0'] = Utils.RAD_TO_DEG * lon_0, Utils.RAD_TO_DEG * lat_0
                 kwargs['width'] = distance(self.x_init, self.x_target) * 1.35
                 kwargs['height'] = distance(self.x_init, self.x_target) * 1.35
 
             elif self.projection == 'lcc':
-                kwargs['lon_0'] = RAD_TO_DEG * 0.5 * (self.bl[0] + self.tr[0])
-                kwargs['lat_0'] = RAD_TO_DEG * 0.5 * (self.bl[1] + self.tr[1])
-                kwargs['lat_1'] = RAD_TO_DEG * (self.tr[1] + self.y_offset * (self.tr[1] - self.bl[1]))
-                kwargs['lat_2'] = RAD_TO_DEG * (self.bl[1] - self.y_offset * (self.tr[1] - self.bl[1]))
-                kwargs['width'] = (1 + self.x_offset) * (self.tr[0] - self.bl[0]) * EARTH_RADIUS
+                kwargs['lon_0'] = Utils.RAD_TO_DEG * 0.5 * (self.bl[0] + self.tr[0])
+                kwargs['lat_0'] = Utils.RAD_TO_DEG * 0.5 * (self.bl[1] + self.tr[1])
+                kwargs['lat_1'] = Utils.RAD_TO_DEG * (self.tr[1] + self.y_offset * (self.tr[1] - self.bl[1]))
+                kwargs['lat_2'] = Utils.RAD_TO_DEG * (self.bl[1] - self.y_offset * (self.tr[1] - self.bl[1]))
+                kwargs['width'] = (1 + self.x_offset) * (self.tr[0] - self.bl[0]) * Utils.EARTH_RADIUS
                 kwargs['height'] = kwargs['width']
 
             else:
@@ -571,23 +617,23 @@ class Display:
             self.map.drawcoastlines()
             self.map.fillcontinents()
             if self.x_init is not None and self.x_target is not None:
-                self.map.drawgreatcircle(RAD_TO_DEG * self.x_init[0],
-                                         RAD_TO_DEG * self.x_init[1],
-                                         RAD_TO_DEG * self.x_target[0],
-                                         RAD_TO_DEG * self.x_target[1], color='grey', linestyle='--')
+                self.map.drawgreatcircle(Utils.RAD_TO_DEG * self.x_init[0],
+                                         Utils.RAD_TO_DEG * self.x_init[1],
+                                         Utils.RAD_TO_DEG * self.x_target[0],
+                                         Utils.RAD_TO_DEG * self.x_target[1], color='grey', linestyle='--')
             lw = 0.5
             dashes = (2, 2)
             # draw parallels
             try:
-                lat_min = RAD_TO_DEG * min(self.bl[1], self.tr[1])
-                lat_max = RAD_TO_DEG * max(self.bl[1], self.tr[1])
+                lat_min = Utils.RAD_TO_DEG * min(self.bl[1], self.tr[1])
+                lat_max = Utils.RAD_TO_DEG * max(self.bl[1], self.tr[1])
                 n_lat = floor((lat_max - lat_min) / 10) + 2
                 self.map.drawparallels(10. * (floor(lat_min / 10.) + np.arange(n_lat)),  # labels=[1, 0, 0, 0],
                                        linewidth=lw,
                                        dashes=dashes, textcolor=(1., 1., 1., 0.))
                 # draw meridians
-                lon_min = RAD_TO_DEG * min(self.bl[0], self.tr[0])
-                lon_max = RAD_TO_DEG * max(self.bl[0], self.tr[0])
+                lon_min = Utils.RAD_TO_DEG * min(self.bl[0], self.tr[0])
+                lon_max = Utils.RAD_TO_DEG * max(self.bl[0], self.tr[0])
                 n_lon = floor((lon_max - lon_min) / 10) + 2
                 self.map.drawmeridians(10. * (floor(lon_min / 10.) + np.arange(n_lon)),  # labels=[1, 0, 0, 1],
                                        linewidth=lw,
@@ -616,22 +662,14 @@ class Display:
         if gcs:
             self.ax = self.map
 
-    def draw_point_by_name(self, name):
-        raise Exception('Name translation unsupported')
-        # if self.coords != 'gcs':
-        #     print('"draw_point_by_name" only available for GCS coordinates')
-        #     exit(1)
-        # self.map.scatter(loc[0], loc[1], s=8., color='red', marker='D', latlon=True, zorder=ZO_ANNOT)
-        # self.mainax.annotate(name, self.map(loc[0], loc[1]), (10, 10), textcoords='offset pixels', ha='center')
-
     def draw_point(self, x, y, label=None):
         kwargs = {
             's': 8.,
             'color': 'red',
             'marker': 'D',
-            'zorder': ZO_ANNOT
+            'zorder': ZOrder.ANNOT.value
         }
-        if self.coords == 'gcs':
+        if self.coords == Coords.GCS:
             kwargs['latlon'] = True
             pos_annot = self.map(x, y)
         else:
@@ -730,7 +768,7 @@ class Display:
             self.tu_ff = self.ff.t_end
 
     def load_trajs(self, filename=None):
-        self.trajs = []
+        self.trajs.clear()
         if not os.path.exists(self.io.trajs_dir):
             return
         for filename in os.listdir(self.io.trajs_dir):
@@ -739,28 +777,30 @@ class Display:
                 continue
             if not os.path.isdir(fpath):
                 traj = Trajectory.from_npz(fpath)
-                self.trajs.append(traj)
-                self.trajs_regular.append(traj)
+                name = traj_filepath_to_name(fpath)
+                self.trajs[name] = traj
+                self.trajs_regular[name] = traj
             else:
                 collection_name = os.path.basename(fpath)
                 if collection_name.startswith('ef'):
-                    self.extremal_fields[collection_name] = []
+                    self.extremal_fields[collection_name] = {}
                 for ffname in os.listdir(fpath):
                     ffpath = os.path.join(fpath, ffname)
                     if ffpath.endswith('.json'):
                         continue
                     traj = Trajectory.from_npz(ffpath)
-                    self.trajs.append(traj)
+                    name = collection_name + '_' + traj_filepath_to_name(ffpath)
+                    self.trajs[name] = traj
                     if collection_name.startswith('ef'):
-                        self.extremal_fields[collection_name].append(traj)
+                        self.extremal_fields[collection_name][name] = traj
                     else:
-                        self.trajs_regular.append(traj)
-        for ef_name, ef_list in self.extremal_fields.items():
-            n_trajs = len(ef_list)
+                        self.trajs_regular[name] = traj
+        for ef_name, ef_dict in self.extremal_fields.items():
+            n_trajs = len(ef_dict)
             t_start = None
             t_end = None
             dt = None
-            for traj in ef_list:
+            for traj in ef_dict.values():
                 t_start_cand = traj.times[0]
                 t_end_cand = traj.times[-1]
                 if len(traj) >= 2:
@@ -772,7 +812,7 @@ class Display:
             nt = int(np.round((t_end - t_start) / dt)) + 1
             bulk = np.nan * np.ones((nt, n_trajs, 2))
             times = np.linspace(t_start, t_end, nt)
-            for i_traj, traj in enumerate(ef_list):
+            for i_traj, traj in enumerate(ef_dict.values()):
                 i_start = (np.abs(times - traj.times[0])).argmin()
                 try:
                     bulk[i_start:i_start + len(traj), i_traj, :] = traj.states[:]
@@ -789,11 +829,11 @@ class Display:
         if not os.path.exists(self.rff_fpath):
             return
         with h5py.File(self.rff_fpath, 'r') as f:
-            if self.coords != f.attrs['coords']:
-                warnings.warn(f'RFF coords "{f.attrs["coords"]}" does not match current display coords "{self.coords}"',
+            if self.coords != Coords.from_string(f.attrs['coords']):
+                warnings.warn(f'RFF coords "{f.attrs["coords"]}" does not match current display coords "{self.coords.value}"',
                               category=UserWarning)
 
-            if self.coords == 'gcs':
+            if self.coords == Coords.GCS:
                 self.rff_cntr_kwargs['latlon'] = True
             self.nt_rft, self.nx_rft, self.ny_rft = f['data'].shape
             # ceil = min((self.tr[0] - self.bl[0]) / (3 * self.nx_rft),
@@ -914,8 +954,10 @@ class Display:
     def preprocessing(self):
         # Preprocessing
         # For extremal fields, group points in fronts
-        self.ef_index = lambda t: None if t < self.tl or t > self.tu else \
-            floor((self.ef_nt - 1) * (t - self.tl) / (self.tu - self.tl))
+        ef_0_name = list(self.extremal_fields.keys())[0]
+        self.ef_index = lambda t: None if t < self.tl_ef(ef_0_name) or \
+                                          t > self.tu_ef(ef_0_name) else \
+            floor((self.ef_nt - 1) * (t - self.tl_ef(ef_0_name)) / (self.tu_ef(ef_0_name) - self.tl_ef(ef_0_name)))
         no_display = False
         for ef_id in self.extremal_fields.keys():
             if not no_display:
@@ -959,7 +1001,7 @@ class Display:
                     zero_ceil = self.rff_zero_ceils[k]  # (data_max - data_min) / 1000.
                     if debug:
                         print(f'{k}, min : {data_min}, max : {data_max}, zero_ceil : {zero_ceil}')
-                    factor = RAD_TO_DEG if self.coords == 'gcs' else 1.
+                    factor = Utils.RAD_TO_DEG if self.coords == Coords.GCS else 1.
                     args = (factor * self.rff['grid'][:, :, 0],
                             factor * self.rff['grid'][:, :, 1],
                             self.rff['data'][k, :, :]) + (
@@ -973,7 +1015,7 @@ class Display:
                 i, alpha = self._index('rff')
                 rff_values = (1 - alpha) * self.rff['data'][i, :, :] + alpha * self.rff['data'][i + 1, :, :]
                 zero_ceil = (1 - alpha) * self.rff_zero_ceils[i] + alpha * self.rff_zero_ceils[i + 1]
-                if self.coords == 'gcs':
+                if self.coords == Coords.GCS:
                     nx, ny = self.rff['grid'][:, :, 0].shape
                     xi = np.linspace(self.rff['grid'][:, :, 0].min(), self.rff['grid'][:, :, 0].max(), 4 * nx)
                     yi = np.linspace(self.rff['grid'][:, :, 1].min(), self.rff['grid'][:, :, 1].max(), 4 * ny)
@@ -982,7 +1024,7 @@ class Display:
                     # interpolate
                     x, y, z = self.rff['grid'][:, :, 0], self.rff['grid'][:, :, 1], rff_values
                     zi = griddata((x.reshape(-1), y.reshape(-1)), z.reshape(-1), (xi, yi))
-                    args = (RAD_TO_DEG * xi, RAD_TO_DEG * yi, zi)
+                    args = (Utils.RAD_TO_DEG * xi, Utils.RAD_TO_DEG * yi, zi)
                 else:
                     args = (self.rff['grid'][:, :, 0], self.rff['grid'][:, :, 1], rff_values)
                 args = args + ([-zero_ceil / 2, zero_ceil / 2],)
@@ -1005,7 +1047,7 @@ class Display:
             ur = 1  # max(1, nx // 18)
         else:
             ur = 1
-        factor = RAD_TO_DEG if self.coords == 'gcs' else 1.
+        factor = Utils.RAD_TO_DEG if self.coords == Coords.GCS else 1.
         grid = np.stack(
             np.meshgrid(np.linspace(self.ff.bounds[-2, 0], self.ff.bounds[-2, 1], self.ff.values.shape[-3]),
                         np.linspace(self.ff.bounds[-1, 0], self.ff.bounds[-1, 1], self.ff.values.shape[-2]),
@@ -1034,7 +1076,7 @@ class Display:
 
         norm = mpl_colors.Normalize()
         self.cm = self.selected_cm
-        if self.coords == 'gcs' and self.ff_norm_max < 1.5 * self.cm_norm_max:
+        if self.coords == Coords.GCS and self.ff_norm_max < 1.5 * self.cm_norm_max:
             self.cm = windy_cm
             norm.autoscale(np.array([self.cm_norm_min, self.cm_norm_max]))
         else:
@@ -1050,9 +1092,9 @@ class Display:
                                                      norm=mpl_colors.Normalize(
                                                          vmin=self.engy_min / 3.6e6,
                                                          vmax=self.engy_max / 3.6e6))
-            if self.coords == 'gcs':
+            if self.coords == Coords.GCS:
                 self.ff_colorbar = self.ax.colorbar(self.sm_ff, pad=0.1)
-            elif self.coords == 'cartesian':
+            elif self.coords == Coords.CARTESIAN:
                 self.ff_colorbar = self.main_fig.colorbar(self.sm_ff, ax=self.ax, pad=0.03)
             self.ff_colorbar.set_label('Flow field [m/s]', labelpad=10)
             self.active_ffcb = True
@@ -1078,16 +1120,16 @@ class Display:
             'cmap': self.cm,
             'norm': norm,
             'alpha': alpha_bg,
-            'zorder': ZO_WIND_NORM,
+            'zorder': ZOrder.WIND_NORM.value,
         }
-        if self.coords == 'gcs':
+        if self.coords == Coords.GCS:
             kwargs['latlon'] = True
 
         if not self.mode_ff:
             if self.mode_3d:
                 colors = self.cm(norm(znorms3d))
                 self.ff_colormesh = self.ax.plot_surface(zX, zY, np.zeros(zX.shape), facecolors=colors,
-                                                         zorder=ZO_WIND_NORM)  # , **kwargs)
+                                                         zorder=ZOrder.WIND_NORM.value)  # , **kwargs)
             else:
                 kwargs['shading'] = 'auto'
                 kwargs['antialiased'] = True
@@ -1127,9 +1169,9 @@ class Display:
             'alpha': 0.7,
             'units': 'xy',
             'minshaft': 2.,
-            'zorder': ZO_WIND_VECTORS
+            'zorder': ZOrder.WIND_VECTORS.value
         }
-        if self.coords == 'gcs':
+        if self.coords == Coords.GCS:
             kwargs['latlon'] = True
         if np.any(qnorms > self.cm_norm_min + 0.01 * (self.cm_norm_max - self.cm_norm_min)):
             if not self.mode_3d:
@@ -1142,29 +1184,10 @@ class Display:
                 del kwargs['minshaft']
                 self.ff_quiver = self.ax.quiver(qX, qY, qZ, U, V, W, **kwargs)  # color=color)
 
-    # def setup_components(self):
-    #     for k, state_plot in enumerate(self.state):
-    #         state_plot.grid(visible=True, linestyle='-.', linewidth=0.5)
-    #         state_plot.tick_params(direction='in')
-    #         state_plot.yaxis.set_label_position("right")
-    #         state_plot.yaxis.tick_right()
-    #         state_plot.set_ylabel(state_names[k])
-    #         plt.setp(state_plot.get_xticklabels(), visible=False)
-    #
-    #     for k, control_plot in enumerate(self.control):
-    #         control_plot.grid(visible=True, linestyle='-.', linewidth=0.5)
-    #         control_plot.tick_params(direction='in')
-    #         control_plot.yaxis.set_label_position("right")
-    #         control_plot.yaxis.tick_right()
-    #         control_plot.set_ylabel(control_names[k])
-    #         # Last plot
-    #         if k == len(self.control) - 1:
-    #             control_plot.set_xlabel(r"$t\:[s]$")
-
-    def draw_trajs(self, nolabels=False, opti_only=False):
+    def draw_trajs(self):
         self.clear_trajs()
-        for k, traj in enumerate(self.trajs_regular):
-            self.draw_traj(k, nolabels=nolabels)
+        for name in self.trajs_regular.keys():
+            self.draw_traj(name, showlabel=True)
         if self.mode_ef:
             self.draw_ef()
 
@@ -1184,15 +1207,15 @@ class Display:
                                   'color': reachability_colors['pmp']['last'],
                                   'marker': 'o',
                                   'linewidths': 1.,
-                                  'zorder': ZO_TRAJS,
+                                  'zorder': ZOrder.TRAJS.value,
                                   }
-                        if self.coords == 'gcs':
+                        if self.coords == Coords.GCS:
                             kwargs['latlon'] = True
-                            points = np.dot(points, np.diag((RAD_TO_DEG, RAD_TO_DEG)))
+                            points = np.dot(points, np.diag((Utils.RAD_TO_DEG, Utils.RAD_TO_DEG)))
                         if self.mode_3d:
                             kwargs = {
                                 'color': reachability_colors['pmp']['last'],
-                                'zorder': ZO_TRAJS
+                                'zorder': ZOrder.TRAJS.value
                             }
                             scatter = self.ax.scatter(points[..., 0], points[..., 1], points[..., 2], **kwargs)
                         else:
@@ -1202,10 +1225,10 @@ class Display:
             for ef_name in self.extremal_fields.keys():
                 if not self.ef_agg_display[ef_name]:
                     continue
-                for k, traj in enumerate(self.extremal_fields[ef_name]):
-                    self.draw_traj(k, ef_id=ef_name)
+                for name, traj in self.extremal_fields[ef_name].items():
+                    self.draw_traj(name, ef_id=ef_name)
 
-    def draw_traj(self, itr, ef_id=None, nolabels=False):
+    def draw_traj(self, name, ef_id=None, showlabel=False):
         """
         Plots the given trajectory according to selected display mode
         """
@@ -1213,31 +1236,16 @@ class Display:
         # self.t_tick = max_time / (nt_tick - 1)
         trajs = self.trajs if ef_id is None else self.extremal_fields[ef_id]
 
-        # TODO Change this
-        label = 0
-        _type = 'pmp'
-        interrupted = False
-
-        annot_label = None
         linewidth = None
         if ef_id is not None:
             linewidth = 1.5
 
-        # Lines
-        if nolabels:
-            p_label = None
-        else:
-            p_label = f'{_type} {label}'
-            if p_label not in self.label_list:
-                self.label_list.append(p_label)
-            else:
-                p_label = None
-
         # Color selection
         color = {}
         if ef_id is None:
-            color['steps'] = reachability_colors['integral']['steps']
-            color['last'] = reachability_colors['integral']['last']
+            c = path_colors[list(trajs.keys()).index(name) % len(path_colors)]
+            color['steps'] = c
+            color['last'] = c
         else:
             color['steps'] = reachability_colors['pmp']['steps']
             color['last'] = reachability_colors['pmp']['last']
@@ -1249,73 +1257,73 @@ class Display:
         kwargs = {
             'color': color['steps'],
             'linestyle': 'solid',
-            'label': p_label,
-            'zorder': ZO_TRAJS,
+            'label': name if showlabel else None,
+            'zorder': ZOrder.TRAJS.value,
             'alpha': 0.7,
             'linewidth': 2.5 if linewidth is None else linewidth,
         }
-        points = trajs[itr].states[trajs[itr].times < self.tcur]
-        if self.coords == 'gcs':
+        points = trajs[name].states[trajs[name].times < self.tcur]
+        if self.coords == Coords.GCS:
             kwargs['latlon'] = True
-            points = np.dot(points, np.diag((RAD_TO_DEG, RAD_TO_DEG)))
+            points = np.dot(points, np.diag((Utils.RAD_TO_DEG, Utils.RAD_TO_DEG)))
 
         if ef_id is None or self.mode_ef_display:
             self.traj_lines.append(self.ax.plot(points[..., 0], points[..., 1], **kwargs))
 
         if self.mode_energy:
-            c = trajs[itr].cost[trajs[itr].times < self.tcur]
+            c = trajs[name].cost[trajs[name].times < self.tcur]
             # norm = mpl_colors.Normalize(vmin=3.6e6, vmax=10*3.6e6)
             self.traj_epoints.append(
                 self.ax.scatter(points[:-1, 0][::-1], points[:-1, 1][::-1], c=c[::-1], cmap='tab20b',
                                 norm=self.engy_norm))
 
         # Last points
-        kwargs = {'s': 10. if interrupted else 7.,
+        kwargs = {'s': 7.,
                   'color': color['last'],
-                  'marker': (r'x' if interrupted else 'o'),
+                  'marker': 'o',
                   'linewidths': 1.,
-                  'zorder': ZO_TRAJS,
+                  'zorder': ZOrder.TRAJS.value,
                   # 'label': info,
                   }
         if points.size > 0:
             px = points[-1, 0]
             py = points[-1, 1]
-            if self.coords == 'gcs':
+            if self.coords == Coords.GCS:
                 kwargs['latlon'] = True
-                px = RAD_TO_DEG * px
-                py = RAD_TO_DEG * py
+                px = Utils.RAD_TO_DEG * px
+                py = Utils.RAD_TO_DEG * py
             scatter = self.ax.scatter(px, py, **kwargs)
             self.traj_lp.append(scatter)
 
-        # Annotation
-        if self.mode_annot:
-            if self.coords == 'cartesian':
-                self.traj_annot.append(self.ax.annotate(str(annot_label), xy=(px, py), fontsize='x-small'))
-            else:
+            # Annotation
+            if self.mode_annot:
+                if self.coords == Coords.CARTESIAN:
+                    self.traj_annot.append(self.ax.annotate(name, xy=(px, py), fontsize='x-small'))
+                else:
 
-                self.traj_annot.append(self.main_ax.annotate(str(annot_label), xy=self.map(px, py), fontsize='x-small'))
+                    self.traj_annot.append(self.main_ax.annotate(name, xy=self.map(px, py), fontsize='x-small'))
 
         # Heading vectors
-        factor = 1. if self.coords == 'cartesian' else EARTH_RADIUS
+        factor = 1. if self.coords == Coords.CARTESIAN else Utils.EARTH_RADIUS
         kwargs = {
             'color': (0.2, 0.2, 0.2, 1.0),
             'pivot': 'tail',
             'alpha': 1.0,
-            'zorder': ZO_WIND_VECTORS
+            'zorder': ZOrder.WIND_VECTORS.value
         }
-        if self.coords == 'gcs':
+        if self.coords == Coords.GCS:
             kwargs['latlon'] = True
             kwargs['width'] = 1 / 500  # factor ** 2 / 1000000
             kwargs['scale'] = 50
             # kwargs['scale'] = 1 / factor
             # kwargs['units'] = 'xy'
-        elif self.coords == 'cartesian':
+        elif self.coords == Coords.CARTESIAN:
             kwargs['width'] = 1 / 500
             kwargs['scale'] = 50
         u = 0  # u = controls[iu]
         # f = -1. if ts[1] < ts[0] else 1.
         # cvec = f * np.array((np.cos(u), np.sin(u)))
-        # if self.coords == 'gcs':
+        # if self.coords == Coords.GCS:
         #     cvec = cvec[::-1]
         # if self.mode_controls:
         #     self.traj_controls.append(self.ax.quiver(px, py, cvec[0], cvec[1], **kwargs))
@@ -1324,7 +1332,7 @@ class Display:
         self.clear_solver()
         kwargs = {}
         # Selecting correct plot axis
-        if self.coords == 'gcs':
+        if self.coords == Coords.GCS:
             kwargs['latlon'] = True
             scatterax = self.map
         else:
@@ -1332,11 +1340,11 @@ class Display:
 
         # Init point
         if self.x_init is not None:
-            factor = RAD_TO_DEG if self.coords == 'gcs' else 1.
-            kwargs['s'] = 100 if self.coords == 'gcs' else 70
+            factor = Utils.RAD_TO_DEG if self.coords == Coords.GCS else 1.
+            kwargs['s'] = 100 if self.coords == Coords.GCS else 70
             kwargs['color'] = 'black'
             kwargs['marker'] = 'o'
-            kwargs['zorder'] = ZO_ANNOT
+            kwargs['zorder'] = ZOrder.ANNOT.value
             self.scatter_init = scatterax.scatter(*(factor * self.x_init), **kwargs)
 
             # if labeling:
@@ -1345,11 +1353,11 @@ class Display:
             #     self.mainax.add_patch(plt.Circle(c, target_radius))
         # Target point
         if self.x_target is not None:
-            factor = RAD_TO_DEG if self.coords == 'gcs' else 1.
-            kwargs['s'] = 230 if self.coords == 'gcs' else 100
+            factor = Utils.RAD_TO_DEG if self.coords == Coords.GCS else 1.
+            kwargs['s'] = 230 if self.coords == Coords.GCS else 100
             kwargs['color'] = 'black'
             kwargs['marker'] = '*'
-            kwargs['zorder'] = ZO_ANNOT
+            kwargs['zorder'] = ZOrder.ANNOT.value
             self.scatter_target = scatterax.scatter(*(factor * self.x_target), **kwargs)
 
             # if labeling:
@@ -1364,14 +1372,14 @@ class Display:
         if np.all(self.obstacles < 0.):
             return
         ma = np.ma.masked_array(self.obstacles, mask=self.obstacles < -0.5)
-        if self.coords == 'cartesian':
+        if self.coords == Coords.CARTESIAN:
             ax = self.main_ax
             kwargs = {}
             factor = 1.
         else:
             ax = self.ax
             kwargs = {'latlon': True}
-            factor = RAD_TO_DEG
+            factor = Utils.RAD_TO_DEG
         matplotlib.rcParams['hatch.color'] = (.2, .2, .2, 1.)
         self.obs_contours.append(ax.contourf(factor * self.obs_grid[..., 0],
                                              factor * self.obs_grid[..., 1],
@@ -1380,10 +1388,10 @@ class Display:
                                              # colors='grey',
                                              hatches=['//'],
                                              antialiased=True,
-                                             zorder=ZO_OBS,
+                                             zorder=ZOrder.OBS,
                                              **kwargs))
 
-        if self.coords == 'cartesian':
+        if self.coords == Coords.CARTESIAN:
             self.obs_contours.append(ax.contour(factor * self.obs_grid[..., 0],
                                                 factor * self.obs_grid[..., 1],
                                                 self.obstacles, [-0.5]))
@@ -1392,14 +1400,14 @@ class Display:
         self.clear_pen()
         if self.penalty is None:
             return
-        if self.coords == 'cartesian':
+        if self.coords == Coords.CARTESIAN:
             ax = self.main_ax
             kwargs = {}
             factor = 1.
         else:
             ax = self.ax
             kwargs = {'latlon': True}
-            factor = RAD_TO_DEG
+            factor = Utils.RAD_TO_DEG
         matplotlib.rcParams['hatch.color'] = (.2, .2, .2, 1.)
         i, a = self._index('pen')
         data = (1 - a) * self.penalty['data'][i] + a * self.penalty['data'][i + 1]
@@ -1408,10 +1416,10 @@ class Display:
                                              data,
                                              alpha=0.5,
                                              antialiased=True,
-                                             zorder=ZO_OBS,
+                                             zorder=ZOrder.OBS.value,
                                              **kwargs))
 
-        if self.coords == 'cartesian':
+        if self.coords == Coords.CARTESIAN:
             self.pen_contours.append(ax.contour(factor * self.penalty['grid'][..., 0],
                                                 factor * self.penalty['grid'][..., 1],
                                                 data, [-0.5]))
@@ -1435,15 +1443,15 @@ class Display:
             self.main_fig.canvas.draw()
 
     def draw_calibration(self):
-        if self.coords == 'gcs':
-            self.map.drawgreatcircle(RAD_TO_DEG * self.ff['grid'][:, 0, 0].min(),
-                                     RAD_TO_DEG * self.ff['grid'][0, :, 1].min(),
-                                     RAD_TO_DEG * self.ff['grid'][:, -1, 0].max(),
-                                     RAD_TO_DEG * self.ff['grid'][-1, :, 1].max())
-            self.map.drawgreatcircle(RAD_TO_DEG * self.ff['grid'][:, 0, 0].min(),
-                                     RAD_TO_DEG * self.ff['grid'][0, :, 1].max(),
-                                     RAD_TO_DEG * self.ff['grid'][:, -1, 0].max(),
-                                     RAD_TO_DEG * self.ff['grid'][-1, :, 1].min())
+        if self.coords == Coords.GCS:
+            self.map.drawgreatcircle(Utils.RAD_TO_DEG * self.ff['grid'][:, 0, 0].min(),
+                                     Utils.RAD_TO_DEG * self.ff['grid'][0, :, 1].min(),
+                                     Utils.RAD_TO_DEG * self.ff['grid'][:, -1, 0].max(),
+                                     Utils.RAD_TO_DEG * self.ff['grid'][-1, :, 1].max())
+            self.map.drawgreatcircle(Utils.RAD_TO_DEG * self.ff['grid'][:, 0, 0].min(),
+                                     Utils.RAD_TO_DEG * self.ff['grid'][0, :, 1].max(),
+                                     Utils.RAD_TO_DEG * self.ff['grid'][:, -1, 0].max(),
+                                     Utils.RAD_TO_DEG * self.ff['grid'][-1, :, 1].min())
 
     @property
     def img_fpath(self):
@@ -1479,7 +1487,7 @@ class Display:
             self.draw_all()
 
     def toggle_agg(self):
-        self.mode_aggregated = (self.mode_aggregated + 1) % 3
+        self.mode_aggregated = not self.mode_aggregated
         self.draw_all()
 
     def reload_time(self, val):
@@ -1599,9 +1607,7 @@ class Display:
         if 's' in flags:
             self.switch_agg()
         if 'a' in flags:
-            self.mode_aggregated = 1
-        if 'A' in flags:
-            self.mode_aggregated = 2
+            self.mode_aggregated = True
         if 'w' in flags:
             self.mode_ff = True
         if 't' in flags:

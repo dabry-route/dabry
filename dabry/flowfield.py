@@ -12,7 +12,7 @@ import pygrib
 from numpy import ndarray, pi, sin, cos
 from tqdm import tqdm
 
-from dabry.misc import Utils
+from dabry.misc import Utils, Coords, Units
 
 """
 flowfield.py
@@ -39,7 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 class FlowField(ABC):
 
     def __init__(self, _lch=None, _rch=None, _op=None, t_start=0., t_end=None, nt_int=None,
-                 coords=Utils.COORD_CARTESIAN):
+                 coords=Coords.CARTESIAN):
         self._lch = _lch
         self._rch = _rch
         self._op = _op
@@ -57,7 +57,7 @@ class FlowField(ABC):
         # False if dualization operation leaves flow field unchanged
         self.dualizable = True
 
-        self.coords = coords
+        self.coords: Coords = coords
 
     @property
     def is_unsteady(self):
@@ -180,7 +180,7 @@ class DiscreteFF(FlowField):
     Handles flow field loading from H5 format and derivative computation
     """
 
-    def __init__(self, values: ndarray, bounds: ndarray, coords: str, grad_values: Optional[ndarray] = None,
+    def __init__(self, values: ndarray, bounds: ndarray, coords: Coords, grad_values: Optional[ndarray] = None,
                  force_no_diff=False):
         super().__init__(nt_int=values.shape[0] if values.ndim == 4 else None)
 
@@ -232,10 +232,7 @@ class DiscreteFF(FlowField):
         """
 
         with h5py.File(filepath, 'r') as ff_data:
-            coords = ff_data.attrs['coords']
-
-            # Checking consistency before loading
-            Utils.ensure_coords(coords)
+            coords = Coords.from_string(ff_data.attrs['coords'])
 
             values = np.array(ff_data['data']).squeeze()
 
@@ -248,7 +245,8 @@ class DiscreteFF(FlowField):
                 t_start /= 1000.
                 if t_end is not None:
                     t_end /= 1000.
-            f = Utils.DEG_TO_RAD if ff_data.attrs['units_grid'] == Utils.U_DEG else 1.
+            units = Units.from_string(ff_data.attrs['units_grid'])
+            f = Utils.DEG_TO_RAD if units == Units.DEGREES else 1.
 
             bounds = np.stack((() if t_end is None else (np.array((t_start, t_end)),)) +
                               (f * ff_data['grid'][0, 0],
@@ -258,7 +256,7 @@ class DiscreteFF(FlowField):
 
     @classmethod
     def from_ff(cls, ff: FlowField, grid_bounds: Union[tuple[ndarray, ndarray], ndarray],
-                nx=100, ny=100, nt=50, coords: Optional[str] = None, **kwargs):
+                nx=100, ny=100, nt=50, coords: Optional[Coords] = None, **kwargs):
         """
         Create discrete flow field by sampling another flow field
         :param ff: Flow field
@@ -269,6 +267,7 @@ class DiscreteFF(FlowField):
         :param nx: First dimension discretization number
         :param ny: Second dimension discretization number
         :param nt: Time dimension discretization number
+        :param coords: The coordinate type for the flow field
         :param kwargs: Additional kwargs
         :return: A DiscreteFF object
         """
@@ -305,8 +304,8 @@ class DiscreteFF(FlowField):
                             grad_values[k, i, j, ...] = ff.d_value(t, state)
 
         coords = coords if coords is not None else \
-            Utils.COORD_GCS if hasattr(ff, 'coords') and ff.coords == Utils.COORD_GCS \
-                else Utils.COORD_CARTESIAN
+            Coords.GCS if hasattr(ff, 'coords') and ff.coords == Coords.GCS \
+                else Coords.CARTESIAN
         return cls(values, bounds, coords, grad_values=grad_values, **kwargs)
 
     @classmethod
@@ -438,7 +437,7 @@ class DiscreteFF(FlowField):
         values = np.array(uv_frames)
 
         return cls(values, np.column_stack((np.array((ts[0], ts[-1])), grid_bounds.transpose())).transpose(),
-                   Utils.COORD_GCS, grad_values=None, **kwargs)
+                   Coords.GCS, grad_values=None, **kwargs)
 
     def value(self, t, x):
         """
@@ -529,7 +528,7 @@ class WrapperFF(FlowField):
         self.time_origin = time_origin
         # In GCS convention, flow field magnitude is in meters per seconds
         # and should be cast to radians per seconds before regular scaling
-        self.scale_speed = scale_length / scale_time * (Utils.EARTH_RADIUS if ff.coords == Utils.COORD_GCS else 1.)
+        self.scale_speed = scale_length / scale_time * (Utils.EARTH_RADIUS if ff.coords == Coords.GCS else 1.)
         # Multiplication will be quicker than division
         self._scaler_speed = 1 / self.scale_speed
         self._scaler_dspeed = self.scale_length / self.scale_speed
@@ -1133,4 +1132,4 @@ def save_ff(ff: FlowField, filepath: str, fmt='npz',
         raise Exception('h5 not supported anymore for flow field save to disk')
     else:
         # fmt == 'npz'
-        np.savez(filepath, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords))
+        np.savez(filepath, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords.value))

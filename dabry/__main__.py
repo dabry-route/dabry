@@ -4,7 +4,7 @@ import sys
 from datetime import datetime
 
 from dabry.io_manager import IOManager
-from dabry.misc import Utils, Chrono
+from dabry.misc import Utils, Chrono, Coords
 from dabry.problem import NavigationProblem
 from dabry.solver_ef import SolverEFResampling
 
@@ -57,7 +57,7 @@ if __name__ == '__main__':
             Utils.process_pb_params(args.x_init_lon, args.x_init_lat, args.x_target_lon, args.x_target_lat,
                                     args.start_date, args.airspeed, args.pressure_level)
         x_init, x_target = Utils.DEG_TO_RAD * x_init_deg, Utils.DEG_TO_RAD * x_target_deg
-        duration = 2 * Utils.distance(x_init, x_target, coords=Utils.COORD_GCS) / airspeed
+        duration = 2 * Utils.distance(x_init, x_target, coords=Coords.GCS) / airspeed
         stop_date = datetime.fromtimestamp(start_date.timestamp() + duration)
 
         # Not an available parameter for the moment

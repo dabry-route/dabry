@@ -2,20 +2,19 @@ import json
 import os
 import shutil
 import sys
-import warnings
 from datetime import datetime, timedelta
 from time import strftime
-from typing import Optional, List, Union
+from typing import Optional, List
 
 import h5py
-import pygrib
 import numpy as np
+import pygrib
 from numpy import ndarray
 
-from dabry.misc import Utils
+from dabry.flowfield import FlowField, save_ff
+from dabry.misc import Utils, Units, Coords
 from dabry.penalty import DiscretePenalty
 from dabry.trajectory import Trajectory
-from dabry.flowfield import FlowField, DiscreteFF, discretize_ff, save_ff
 
 """
 io_manager.py
@@ -82,15 +81,15 @@ class IOManager:
         return os.path.join(self.case_dir, self.case_name + '.json')
 
     @property
-    def coords(self) -> str:
+    def coords(self) -> Coords:
         if not os.path.exists(self.ff_fpath):
             raise FileNotFoundError('Flow field file not found "%s"' % self.ff_fpath)
-        return str(np.load(self.ff_fpath, mmap_mode='r')['coords'])
+        return Coords.from_string(np.load(self.ff_fpath, mmap_mode='r')['coords'])
 
     def border(self, name: str):
         if not os.path.exists(self.pb_data_fpath):
             return np.load(self.ff_fpath)['bounds'].transpose()[0 if name == 'bl' else 1][-2:]
-            #raise FileNotFoundError('Problem data file not found "%s"' % self.pb_data_fpath)
+            # raise FileNotFoundError('Problem data file not found "%s"' % self.pb_data_fpath)
         return np.array(json.load(open(self.pb_data_fpath))[name])
 
     @property
@@ -135,6 +134,11 @@ class IOManager:
     def save_script(self, script_path):
         shutil.copy(script_path, self.case_dir)
 
+    def save_traj(self, traj: Trajectory, name: str, target_dir: Optional[str] = None):
+        if target_dir is None:
+            target_dir = self.trajs_dir
+        traj.save(name, target_dir)
+
     def save_trajs(self, trajs: List[Trajectory], group_name: Optional[str] = None):
         self.setup_trajs()
         if group_name is not None:
@@ -145,8 +149,7 @@ class IOManager:
             target_dir = self.trajs_dir
         for i_traj, traj in enumerate(trajs):
             name = str(i_traj).rjust(1 + int(np.log10(len(trajs) - 1)), '0')
-            traj_fpath = os.path.join(target_dir, 'traj_%s' % name)
-            traj.save(traj_fpath)
+            self.save_traj(traj, name, target_dir)
 
     # def dump_obs(self, nx=100, ny=100):
     #     filepath = os.path.join(self.case_dir, self.obs_filename)
@@ -198,8 +201,8 @@ class IOManager:
     def dump_penalty(self, penalty: DiscretePenalty):
         filepath = os.path.join(self.case_dir, self.pen_filename)
         with h5py.File(filepath, 'w') as f:
-            f.attrs['coords'] = 'gcs'
-            f.attrs['units_grid'] = Utils.U_RAD
+            f.attrs['coords'] = Coords.GCS.value
+            f.attrs['units_grid'] = Units.RADIANS.value
             dset = f.create_dataset('data', penalty.data.shape, dtype='f8')
             dset[:] = penalty.data
             dset = f.create_dataset('ts', penalty.ts.shape, dtype='f8')
@@ -207,8 +210,8 @@ class IOManager:
             dset = f.create_dataset('grid', penalty.grid.shape, dtype='f8')
             dset[:] = penalty.grid
 
-    def dump_ff_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Utils.COORD_GCS):
-        if coords == Utils.COORD_CARTESIAN:
+    def dump_ff_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Coords.GCS):
+        if coords == Coords.CARTESIAN:
             print('Cartesian conversion not handled yet', file=sys.stderr)
             exit(1)
         if type(srcfiles) == str:
@@ -257,8 +260,8 @@ class IOManager:
             dates[k] = IOManager.grib_date_to_unix(os.path.basename(grbfile))
 
         with h5py.File(filepath, 'w') as f:
-            f.attrs['coords'] = coords
-            f.attrs['units_grid'] = Utils.U_RAD
+            f.attrs['coords'] = coords.value
+            f.attrs['units_grid'] = Units.RADIANS.value
             f.attrs['analytical'] = False
             dset = f.create_dataset('data', (nt, nx, ny, 2), dtype='f8')
             dset[:] = UVs
@@ -294,8 +297,8 @@ class IOManager:
         # output_path = '/home/bastien/Documents/data/wind/ncdc/'
         x_init = np.array(x_init)
         x_target = np.array(x_target)
-        middle = Utils.middle(Utils.DEG_TO_RAD * x_init, Utils.DEG_TO_RAD * x_target, Utils.COORD_GCS)
-        distance = Utils.distance(Utils.DEG_TO_RAD * x_init, Utils.DEG_TO_RAD * x_target, Utils.COORD_GCS)
+        middle = Utils.middle(Utils.DEG_TO_RAD * x_init, Utils.DEG_TO_RAD * x_target, Coords.GCS)
+        distance = Utils.distance(Utils.DEG_TO_RAD * x_init, Utils.DEG_TO_RAD * x_target, Coords.GCS)
         factor = 1.2
         lon_0, lat_0 = Utils.RAD_TO_DEG * middle[0], Utils.RAD_TO_DEG * middle[1]
         proj = pyproj.Proj(proj='ortho', lon_0=lon_0, lat_0=lat_0)

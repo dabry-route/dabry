@@ -3,9 +3,6 @@ import sys
 
 from dabry.display.display import Display
 
-# import pandas as pd
-# from dash import Input, State, Output, Dash
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Trajectory planning display tool')
     kwstore_cost = {

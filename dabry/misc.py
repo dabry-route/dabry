@@ -2,6 +2,7 @@ import functools
 import sys
 import time
 from datetime import datetime
+from enum import Enum
 from math import pi, acos, cos, sin, floor, atan2
 
 import numpy as np
@@ -138,15 +139,38 @@ def triangle_mask_and_cost(x: ndarray, p1: ndarray, p2: ndarray, p3: ndarray,
                                                     infs), infs), infs)
 
 
-class Utils:
-    COORD_CARTESIAN = 'cartesian'
-    COORD_GCS = 'gcs'
-    COORDS = [COORD_CARTESIAN, COORD_GCS]
+class Coords(Enum):
+    CARTESIAN = 'cartesian'
+    GCS = 'gcs'
 
-    U_METERS = 'meters'
-    U_DEG = 'degrees'
-    U_RAD = 'rad'
-    UNITS = [U_METERS, U_DEG, U_RAD]
+    @classmethod
+    def from_string(cls, s: str):
+        if s == 'cartesian':
+            return Coords.CARTESIAN
+        elif s == 'gcs':
+            return Coords.GCS
+        else:
+            raise ValueError('Unknown coord type "%s"' % s)
+
+
+class Units(Enum):
+    METERS = 'meters'
+    RADIANS = 'rad'
+    DEGREES = 'degrees'
+
+    @classmethod
+    def from_string(cls, s: str):
+        if s == 'meters':
+            return Units.METERS
+        elif s == 'rad':
+            return Units.RADIANS
+        elif s == 'degrees':
+            return Units.DEGREES
+        else:
+            raise ValueError('Unknown units "%s"' % s)
+
+class Utils:
+
     DEG_TO_RAD = pi / 180.
     RAD_TO_DEG = 180. / pi
     AIRSPEED_DEFAULT = 23.  # [m/s]
@@ -230,27 +254,13 @@ class Utils:
             return np.linspace(b_min - delta_b, b_min, N)
 
     @staticmethod
-    def ensure_coords(coords):
-        if coords not in Utils.COORDS:
-            print(f'Unknown coords type "{coords}"')
-            exit(1)
-
-    @staticmethod
-    def ensure_units(units):
-        if units not in Utils.UNITS:
-            print(f'Unknown units "{units}"')
-            exit(1)
-
-    @staticmethod
-    def ensure_compatible(coords, units):
-        if coords == Utils.COORD_CARTESIAN:
-            if units not in [Utils.U_METERS]:
-                print(f'Uncompatible coords "{coords}" and grid units "{units}"')
-                exit(1)
-        elif coords == Utils.COORD_GCS:
-            if units not in [Utils.U_RAD, Utils.U_DEG]:
-                print(f'Uncompatible coords "{coords}" and grid units "{units}"')
-                exit(1)
+    def ensure_compatible(coords: Coords, units: Units):
+        if coords == Coords.CARTESIAN:
+            if units not in [Units.METERS]:
+                raise ValueError(f'Uncompatible coords "{coords.value}" and grid units "{units.value}"')
+        elif coords == Coords.GCS:
+            if units not in [Units.RADIANS, Units.DEGREES]:
+                raise ValueError(f'Uncompatible coords "{coords.value}" and grid units "{units.value}"')
 
     @staticmethod
     def central_angle(*args, mode='rad'):
@@ -342,8 +352,8 @@ class Utils:
         return 1 / det * np.array(((dp[1, 1], -dp[0, 1]), (-dp[1, 0], dp[0, 0])))
 
     @staticmethod
-    def middle(x1, x2, coords):
-        if coords == Utils.COORD_CARTESIAN:
+    def middle(x1, x2, coords: Coords):
+        if coords == Coords.CARTESIAN:
             # x1, x2 shall be cartesian vectors in meters
             return 0.5 * (x1 + x2)
         else:
@@ -355,8 +365,8 @@ class Utils:
                    atan2(np.sin(x1[1]) + np.sin(x2[1]), np.sqrt((np.cos(x1[1]) + bx) ** 2 + by ** 2))
 
     @staticmethod
-    def distance(x1, x2, coords):
-        if coords == Utils.COORD_GCS:
+    def distance(x1, x2, coords: Coords):
+        if coords == Coords.GCS:
             # x1, x2 shall be vectors (lon, lat) in radians
             return Utils.geodesic_distance(x1, x2)
         else:
@@ -407,17 +417,6 @@ class Utils:
         c = 0.5 * (bl + tr)
         half_delta = 0.5 * np.array((delta_x, delta_y))
         return c - factor * half_delta, c + factor * half_delta
-
-    @staticmethod
-    def heading_opti(x, p, t, coords):
-        if coords == Utils.COORD_CARTESIAN:
-            v = -p / np.linalg.norm(p)
-            res = np.arctan2(v[1], v[0])
-        else:  # coords == COORD_GCS
-            v = - np.diag([1 / cos(x[1]), 1.]) @ p
-            v = v / np.linalg.norm(v)
-            res = np.pi / 2. - np.arctan2(v[1], v[0])
-        return res
 
     @staticmethod
     def airspeed_opti(p, cost='dobrokhodov'):
@@ -477,12 +476,8 @@ class Utils:
 
         points = np.array(list(map(lambda theta: analytic_traj(theta, theta_f), np.linspace(-theta_f, theta_f, 1000))))
         from dabry.trajectory import Trajectory
-        return Trajectory(np.zeros(points.shape[0]),
-                          points,
-                          np.zeros(points.shape[0]),
-                          points.shape[0] - 1,
-                          coords=Utils.COORD_CARTESIAN,
-                          type='optimal')
+        return Trajectory.cartesian(np.linspace(0, 1, points.shape[0]),  # Warning: Fictitious time parameterization !
+                          points)
 
     @staticmethod
     def ccw(a, b, c):
