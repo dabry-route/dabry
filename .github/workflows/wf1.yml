@@ -22,4 +22,4 @@ jobs:
           pip install pytest pytest-xdist
       - name: Test computation
         run: |
-          pytest -n 6 tests/ -k efr
+          pytest -n 6 tests/
