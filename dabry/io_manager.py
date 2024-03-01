@@ -132,7 +132,7 @@ class IOManager:
                 os.remove(path)
 
     def save_script(self, script_path):
-        shutil.copy(script_path, self.case_dir)
+        shutil.copy(script_path, os.path.join(self.case_dir, 'script.py'))
 
     def save_traj(self, traj: Trajectory, name: str, target_dir: Optional[str] = None):
         if target_dir is None:

@@ -1,3 +1,4 @@
+import math
 import warnings
 from abc import ABC
 from enum import Enum
@@ -173,9 +174,9 @@ class SiteManager:
         # Avoid recomputing several times this value
         self._pow_2_max_depth = pow(2, self.max_depth)
         self._pow_2_max_depth_minus_1 = pow(2, self.max_depth - 1)
-        self._n_prefix_chars = int(np.ceil(np.log(n_sectors) / np.log(26)))
-        self._n_depth_chars = int(np.ceil(np.log10(self.max_depth)))
-        self._n_location_chars = int(np.ceil(np.log10(self._pow_2_max_depth)))
+        self._n_prefix_chars = int(np.ceil(math.log(n_sectors) / math.log(26)))
+        self._n_depth_chars = int(np.ceil(math.log10(self.max_depth)))
+        self._n_location_chars = int(np.ceil(math.log10(self._pow_2_max_depth)))
 
     @property
     def n_total_sites(self):
@@ -241,6 +242,10 @@ class SiteManager:
             if not self.looping_sectors:
                 raise ValueError('Next parent index is inferior to previous parent in non-looping mode')
             index_next += self.n_total_sites
+        _, d1, _ = self.pdl_from_name(name_prev)
+        _, d2, _ = self.pdl_from_name(name_next)
+        if d1 == self.max_depth - 1 or d2 == self.max_depth - 1:
+            raise Exception('Maximum depth reached: cannot create child site')
         cond = (index_prev + index_next) % 2 == 0
         assert cond
         return self.name_from_index((index_prev + index_next) // 2)
@@ -287,7 +292,7 @@ class SolverEF(ABC):
                  costate_norm_bounds: tuple[float] = (0., 1.),
                  target_radius: Optional[float] = None,
                  abs_max_step: Optional[float] = None,
-                 rel_max_step: Optional[float] = None):
+                 rel_max_step: Optional[float] = 0.01):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
         if mode == 'energy':
@@ -457,7 +462,7 @@ class SolverEFResampling(SolverEF):
     def setup(self):
         super().setup()
         self._to_shoot_sites = [
-            Site(self.t_init, 0, self.pb.x_init, np.array((np.cos(theta), np.sin(theta))), 0., self.n_time,
+            Site(self.t_init, 0, self.pb.x_init, 1000 * np.array((np.cos(theta), np.sin(theta))), 0., self.n_time,
                  name=self.site_mngr.name_from_pdl(i_theta, 0, 0))
             for i_theta, theta in enumerate(np.linspace(0, 2 * np.pi, self.n_costate_sectors, endpoint=False))]
         for i_site, site in enumerate(self._to_shoot_sites):
@@ -570,9 +575,9 @@ class SolverEFResampling(SolverEF):
 
         site.extend_traj(traj_constr)
 
-        if traj.events.get('target') is not None and traj.events.get('target').shape[0] > 0:
-            self.success = True
-            self.solution_sites.add(site)
+        # if traj.events.get('target') is not None and traj.events.get('target').shape[0] > 0:
+        #     self.success = True
+        #     self.solution_sites.add(site)
 
     def step(self):
         for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth):
@@ -642,11 +647,12 @@ class SolverEFResampling(SolverEF):
                     index = 0 if self.mode_origin and \
                                  not site.in_obs_at(i) and not site_nb.in_obs_at(i) and \
                                  site.index_t_init == 0 and site_nb.index_t_init == 0 else i
-                    new_site = self.site_mngr.site_from_parents(site, site_nb, index)
-                    if len(self.pb.in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
-                        # Choose not to resample points lying within obstacles
-                        site.close(ClosureReason.WITHIN_OBS)
-                        new_site = None
+                    if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1:
+                        new_site = self.site_mngr.site_from_parents(site, site_nb, index)
+                        if len(self.pb.in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
+                            # Choose not to resample points lying within obstacles
+                            site.close(ClosureReason.WITHIN_OBS)
+                            new_site = None
                     break
                 new_id_check_next = i
             # Update the neighbouring property
@@ -757,7 +763,7 @@ class SolverEFTrimming(SolverEFResampling):
 
     def __init__(self, *args,
                  n_index_per_subframe: int = 10,
-                 trimming_band_width: int = 1,
+                 trimming_band_width: int = 3,
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.n_index_per_subframe: int = n_index_per_subframe
@@ -827,7 +833,7 @@ class SolverEFTrimming(SolverEFResampling):
             if np.isnan(value_opti):
                 new_valid_sites.append(site)
                 continue
-            if site.cost_at_index(self.index_t_next_subframe - 1) > 1.1 * value_opti:
+            if site.cost_at_index(self.index_t_next_subframe - 1) > 1.02 * value_opti:
                 site.close(ClosureReason.SUBOPTIMAL)
             else:
                 new_valid_sites.append(site)
@@ -845,6 +851,7 @@ class SolverEFTrimming(SolverEFResampling):
                 n_total=len(self.sites))
             )
             self.step()
+        self.check_solutions()
         for site in self.solution_sites:
             self.extrapolate_back_traj(site)
 

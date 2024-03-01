@@ -433,15 +433,15 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "big_rankine":
-            srf = 1
+            srf = 0.01
 
             x_init = np.array([0.2, 0.5])
-            x_target = np.array([0.8, 0.5])
+            x_target = np.array([1.3, 0.5])
 
-            bl = np.array((0, 0))
-            tr = np.array((1, 1))
+            bl = np.array((-0.3, -0.3))
+            tr = np.array((1.6, 1.3))
 
-            ff = RankineVortexFF(np.array((0.5, 0.5)), -7., 1.)
+            ff = RankineVortexFF(np.array((0.5, 0.5)), -1., 1.)
 
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
@@ -636,10 +636,17 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "montreal_reykjavik":
-            ff = DiscreteFF.from_npz(os.path.join(os.path.abspath(''), '..', 'data', 'cds_omerc', 'montreal_reykjavik',
+            ff = DiscreteFF.from_npz(os.path.join(os.path.abspath('..'), 'data', 'cds_omerc', 'montreal_reykjavik',
                                                   'ff.npz'))
-            x_init = np.diag((5 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])  # reykyavik
-            x_target = np.diag((1 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])  # montreal
+            x_init = np.diag((5 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
+            x_target = np.diag((1 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
+            return cls(ff, x_init, x_target, 23, name=b_name)
+
+        if b_name == "reykjavik_dublin":
+            ff = DiscreteFF.from_npz(os.path.join(os.path.abspath('..'), 'data', 'cds_omerc', 'reykjavik_dublin',
+                                                  'ff.npz'))
+            x_init = np.diag((5 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
+            x_target = np.diag((1 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
             return cls(ff, x_init, x_target, 10, name=b_name)
 
         else:

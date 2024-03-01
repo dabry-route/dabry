@@ -9,7 +9,7 @@ moving_vortex,movor,standard,True,False,False,True,,Moving vortex as an example 
 montreal_reykjavik,montreal_reykjavik,standard,True,False,False,False,,Oblique mercator proj of real wind data
 ,,,,,,,,
 ,,,,,,,,
-big_rankine,big_rankine,validation,False,False,False,True,4,Big Rankine vortex (core of the vortex) to force trajectories looping before reaching destination
+big_rankine,big_rankine,validation,False,False,False,True,1,Big Rankine vortex (core of the vortex) to force trajectories looping before reaching destination
 obstacle,obs,validation,False,False,True,True,,No flow field. Verification case featuring a single obstacle.
 spherical_geodesic,spherical_geodesic,validation,False,True,False,True,,No flow field. Verification case for the computation of the geodesic path in plate carree coordinates.
 trap,trap,validation,True,False,False,True,2,Special case with flow field acting as a trap for the vehicle.
@@ -24,3 +24,4 @@ moving_vortices,movors,others,True,False,False,False,,Multiple analytical vortic
 three_obstacles,3obs,others,False,False,False,False,,Experimental flow field where obstacles are outward blowing virtual wind obstacles
 gyre_li2020,gyre_li2020,others,False,False,False,False,,"Analytical gyre. Values from [Li 2020, https://doi.org/10.1109/JOE.2019.2926822]"
 atlantic,atlantic,others,True,True,False,False,,Real spherical wind data over the Atlantic
+reykjavik_dublin,reykjavik_dublin,others,True,False,False,False,,Oblique mercator proj of real wind data
