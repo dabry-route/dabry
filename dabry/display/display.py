@@ -648,8 +648,8 @@ class Display:
                                   self.tr[0] + self.x_offset * (self.tr[0] - self.bl[0]))
             self.main_ax.set_ylim(self.bl[1] - self.y_offset * (self.tr[1] - self.bl[1]),
                                   self.tr[1] + self.y_offset * (self.tr[1] - self.bl[1]))
-            self.main_ax.set_xlabel('$x$ [m]')
-            self.main_ax.set_ylabel('$y$ [m]')
+            self.main_ax.set_xlabel('$x_1$')
+            self.main_ax.set_ylabel('$x_2$')
             self.main_ax.grid(visible=True, linestyle='-.', linewidth=0.5)
             self.main_ax.tick_params(direction='in')
             formatter = matplotlib.ticker.ScalarFormatter(useMathText=True)
@@ -1096,13 +1096,13 @@ class Display:
                 self.ff_colorbar = self.ax.colorbar(self.sm_ff, pad=0.1)
             elif self.coords == Coords.CARTESIAN:
                 self.ff_colorbar = self.main_fig.colorbar(self.sm_ff, ax=self.ax, pad=0.03)
-            self.ff_colorbar.set_label('Flow field [m/s]', labelpad=10)
+            self.ff_colorbar.set_label('Flow field', labelpad=10)
             self.active_ffcb = True
 
         set_ffcb = not needs_engy and not self.active_ffcb
         if set_ffcb:
             self.ff_colorbar.update_normal(self.sm_ff)
-            self.ff_colorbar.set_label('Flow field [m/s]')
+            self.ff_colorbar.set_label('Flow field')
             self.active_ffcb = True
         elif set_engycb and self.sm_engy is not None:
             self.ff_colorbar.update_normal(self.sm_engy)
