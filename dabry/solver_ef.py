@@ -2,7 +2,7 @@ import math
 import warnings
 from abc import ABC
 from enum import Enum
-from typing import Optional, Dict, Iterable
+from typing import Optional, Dict, Iterable, List
 
 import numpy as np
 import scipy.integrate as scitg
@@ -837,6 +837,7 @@ class SolverEFTrimming(SolverEFResampling):
                 site.close(ClosureReason.SUBOPTIMAL)
             else:
                 new_valid_sites.append(site)
+        # TODO: Add distance trimming here
         self.sites_valid[self.i_subframe + 1] |= set(new_valid_sites)
 
     def solve(self):
