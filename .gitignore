@@ -160,21 +160,20 @@ cython_debug/
 .idea/
 
 output/*
-/rft/html/
-/rft/input/
-/rft/dev/
-/rft/output/
-/rft/main/
-/rft/main.prj
-/LICENSE_HEADER
 /tests/out
 data/*
 /misc/
 /local/
 /utils/
+env-display
+env-test
 
 /ze_pipeline.sh
 /DABRYPATH
 /DVISUPATH
 /dev/energy.ipynb
 /dev/see_wind.ipynb
+
+.~lock*
+
+!/data/demo

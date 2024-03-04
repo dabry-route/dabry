@@ -1,4 +1,3 @@
 #!/usr/bin/bash
 source ./env/bin/activate
-export DABRYPATH=$(pwd)
-export PYTHONPATH=$PYTHONPATH:$DABRYPATH/src
+export PYTHONPATH=$PYTHONPATH:$(pwd)
