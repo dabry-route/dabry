@@ -1099,6 +1099,41 @@ class ChertovskihFF(FlowField):
                          (-2 * x[0], 0)))
 
 
+class GyreMSEASFF(FlowField):
+
+    def __init__(self):
+        super().__init__(t_end=2)
+        self.A = 1
+        self.eps = 0.1
+        self.T = 0.25
+
+    def _a(self, t):
+        return self.eps * np.sin(2 * np.pi * t / self.T)
+
+    def _b(self, t):
+        return 1 - 2 * self._a(t)
+
+    def _f(self, t, x):
+        return self._a(t) * x ** 2 + self._b(t) * x
+
+    def _dfdx(self, t, x):
+        return 2 * self._a(t) * x + self._b(t)
+
+    def value(self, t, x):
+        return np.array((
+            - np.pi * self.A * np.sin(np.pi * self._f(t, x[0])) * np.cos(np.pi * x[1]),
+            np.pi * self.A * np.cos(np.pi * self._f(t, x[0])) * np.sin(np.pi * x[1]) * self._dfdx(t, x[0])
+        ))
+
+    def d_value(self, t, x):
+        # TODO: implement formula
+        eps = 1e-6
+        dx1 = eps * np.array((1, 0))
+        dx2 = eps * np.array((0, 1))
+        return np.column_stack(((self.value(t, x + dx1) - self.value(t, x - dx1)) / (2 * eps),
+                                (self.value(t, x + dx2) - self.value(t, x - dx2)) / (2 * eps)))
+
+
 def discretize_ff(ff: FlowField,
                   nx: Optional[int] = None,
                   ny: Optional[int] = None,

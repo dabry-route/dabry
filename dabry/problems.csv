@@ -25,3 +25,4 @@ three_obstacles,3obs,others,False,False,False,False,,Experimental flow field whe
 gyre_li2020,gyre_li2020,others,False,False,False,False,,"Analytical gyre. Values from [Li 2020, https://doi.org/10.1109/JOE.2019.2926822]"
 atlantic,atlantic,others,True,True,False,False,,Real spherical wind data over the Atlantic
 reykjavik_dublin,reykjavik_dublin,others,True,False,False,False,,Oblique mercator proj of real wind data
+double_gyre_time_dependent,dg_td,others,False,False,False,False,,Time-dependent double-gyre. See https://shaddenlab.berkeley.edu/uploads/LCS-tutorial/examples.html

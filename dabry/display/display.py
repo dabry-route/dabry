@@ -954,6 +954,8 @@ class Display:
     def preprocessing(self):
         # Preprocessing
         # For extremal fields, group points in fronts
+        if len(self.extremal_fields) == 0:
+            return
         ef_0_name = list(self.extremal_fields.keys())[0]
         self.ef_index = lambda t: None if t < self.tl_ef(ef_0_name) or \
                                           t > self.tu_ef(ef_0_name) else \

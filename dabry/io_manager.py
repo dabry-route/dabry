@@ -140,6 +140,8 @@ class IOManager:
         traj.save(name, target_dir)
 
     def save_trajs(self, trajs: List[Trajectory], group_name: Optional[str] = None):
+        if len(trajs) == 0:
+            return
         self.setup_trajs()
         if group_name is not None:
             target_dir = os.path.join(self.trajs_dir, group_name)

@@ -13,7 +13,7 @@ from dabry.aero import MermozAero, Aero
 from dabry.feedback import GSTargetFB, Feedback, HTargetFB
 from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearFF, RadialGaussFF, GyreFF, \
     PointSymFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
-    FlowField, VortexFF, ZeroFF, WrapperFF
+    FlowField, VortexFF, ZeroFF, WrapperFF, GyreMSEASFF
 from dabry.io_manager import IOManager
 from dabry.misc import Utils, csv_to_dict, Coords
 from dabry.model import Model
@@ -648,6 +648,14 @@ class NavigationProblem:
             x_init = np.diag((5 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
             x_target = np.diag((1 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
             return cls(ff, x_init, x_target, 10, name=b_name)
+
+        if b_name == "double_gyre_time_dependent":
+            ff = GyreMSEASFF()
+            x_init = np.array((0.25, 0.25))
+            x_target = np.array((1.75, 0.75))
+            bl = np.array((0, 0))
+            tr = np.array((2, 1))
+            return cls(ff, x_init, x_target, 0.5, name=b_name, bl=bl, tr=tr)
 
         else:
             raise ValueError('No corresponding problem for name "%s"' % b_name)
