@@ -1,0 +1,2 @@
+Oblique Mercator projection of ERA5 surface wind reanalysis. 
+Downloaded from the Climate Data Store (CDS) using the cdsapi Python module.

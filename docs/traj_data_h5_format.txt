@@ -4,7 +4,8 @@
  'last_index' : integer,
  'label' : integer,
  'info': string,
- 'interrupted' : {False, True}]
+ 'interrupted' : {False, True},
+ (OPT) 'constant_airspeed': float
 	data : (nt, 2)
 	ts : (nt, )
 	(OPT) controls : (nt, )

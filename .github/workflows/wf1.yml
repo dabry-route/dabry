@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install .
+          pip install pytest pytest-xdist
       - name: Test computation
         run: |
-          export DABRYPATH=$(pwd)
-          bash tests/test.sh
+          pytest -n 6 tests/
