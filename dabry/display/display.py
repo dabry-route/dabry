@@ -1622,7 +1622,7 @@ class Display:
         if 'e' not in flags:
             self.mode_energy = False
 
-    def to_movie(self, frames=50, fps=10, movie_format='apng', mini=False):
+    def to_movie(self, frames=50, fps=10, movie_format='mp4', mini=False):
         self._info('Rendering animation')
         anim_path = os.path.join(self.case_dir, 'anim')
         if not os.path.exists(anim_path):
@@ -1651,7 +1651,9 @@ class Display:
         first_file_in = os.path.join(anim_path, '0000.png')
         palette = os.path.join(self.case_dir, 'palette.png')
 
-        if movie_format == 'gif':
+        if movie_format == 'raw':
+            return
+        elif movie_format == 'gif':
             os.system(f"ffmpeg -i {first_file_in} -y -vf palettegen {palette}")
             file_out = os.path.join(self.case_dir, f'anim_s.{movie_format}')
             command = f"ffmpeg -y -framerate {fps} -pattern_type glob -i '{pattern_in}' -i {palette} -filter_complex 'paletteuse' '{file_out}'"
