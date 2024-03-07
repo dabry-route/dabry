@@ -1364,8 +1364,9 @@ class Display:
 
             # if labeling:
             #     self.mainax.annotate('Target', c, (10, 10), textcoords='offset pixels', ha='center')
-            self.circle_target = scatterax.add_patch(plt.Circle(factor * self.x_target, self.target_radius,
-                                                                facecolor='none', edgecolor='black'))
+            if self.coords == Coords.CARTESIAN:
+                self.circle_target = scatterax.add_patch(plt.Circle(factor * self.x_target, self.target_radius,
+                                                                    facecolor='none', edgecolor='black'))
 
     def draw_obs(self):
         self.clear_obs()

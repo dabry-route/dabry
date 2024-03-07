@@ -1,5 +1,9 @@
 # Trajectory optimization in flow fields
 
+NOTE: The article "Schnitzler et al., 
+General extremal field method for time-optimal trajectory planning in flow fields, DOI 10.1109/LCSYS.2023.3284339"
+refers to release v1.0.0 of the source code.
+
 ![](docs/movor.gif)
 
 ## Presentation
@@ -78,4 +82,18 @@ is available on the
 
 ## Visualization
 
-Visualize results using the visualisation module `dabry/display`
+Make sure the dependencies from `requirements_display.txt` are installed.
+
+If the previous computation put the results in the `"movor (scaled)"` directory (for instance),
+then the interactive display can be launched using
+```shell
+python -m dabry.display "movor (scaled)"
+```
+
+If `easygui` is installed, then the command
+
+```shell
+python -m dabry.display .
+```
+launches an interactive prompt to select the example to display from 
+current directory.
