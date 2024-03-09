@@ -1,8 +1,11 @@
 import math
+import math
+import signal
+import sys
 import warnings
 from abc import ABC
 from enum import Enum
-from typing import Optional, Dict, Iterable, List
+from typing import Optional, Dict, Iterable
 
 import numpy as np
 import scipy.integrate as scitg
@@ -39,18 +42,38 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 
+class DelayedKeyboardInterrupt:
+    # From https://stackoverflow.com/questions/842557/
+    # how-to-prevent-a-block-of-code-from-being-interrupted-by-keyboardinterrupt-in-py
+
+    def __init__(self):
+        self.signal_received = False
+        self.old_handler = None
+
+    def __enter__(self):
+        self.signal_received = False
+        self.old_handler = signal.signal(signal.SIGINT, self.handler)
+
+    def handler(self, sig, frame):
+        self.signal_received = (sig, frame)
+        print('SIGINT received. Delaying KeyboardInterrupt.', file=sys.stderr)
+
+    def __exit__(self, type, value, traceback):
+        signal.signal(signal.SIGINT, self.old_handler)
+
+
 class ClosureReason(Enum):
     # Integration cannot proceed further in time
     TERMINAL_INTEGRATION = 0
     # Point created within obstacle
-    WITHIN_OBS = 1
-    SUBOPTIMAL = 2
-    IMPOSSIBLE_OBS_TRACKING = 3
+    SUBOPTIMAL = 1
+    IMPOSSIBLE_OBS_TRACKING = 2
 
 
 class NeuteringReason(Enum):
     # Self and neighbour site lying in an obstacle
     SELF_AND_NB_IN_OBS = 0
+    CHILD_IN_OBS = 1
 
 
 class Site:
@@ -69,6 +92,7 @@ class Site:
                                          cost=np.array((cost_origin,)))
         self.traj_full: Optional[Trajectory] = None
         self.index_t_check_next = index_t_init
+        self.prev_index_t_check_next = index_t_init
         self.obstacle_name = obstacle_name
         self.index_t_obs = index_t_obs
         self.t_enter_obs: Optional[float] = t_enter_obs
@@ -76,6 +100,7 @@ class Site:
         self.closure_reason: Optional[ClosureReason] = None
         self.neutering_reason: Optional[NeuteringReason] = None
         self._index_neutered = -1
+        self._index_closed = None
         self.next_nb: list[Optional[Site]] = [None] * n_time
         self.name = name
         if init_next_nb is not None:
@@ -100,6 +125,8 @@ class Site:
         return self.neutering_reason is not None
 
     def neuter(self, index: int, reason: NeuteringReason):
+        if self.neutering_reason is not None:
+            return
         self._index_neutered = index
         self.neutering_reason = reason
 
@@ -115,8 +142,12 @@ class Site:
     def n_time(self):
         return len(self.next_nb)
 
+    @property
+    def in_obs(self):
+        return len(self.obstacle_name) > 0
+
     def in_obs_at(self, index: int):
-        if len(self.obstacle_name) == 0:
+        if not self.in_obs:
             return False
         if index >= self.index_t_obs:
             return True
@@ -292,7 +323,9 @@ class SolverEF(ABC):
                  costate_norm_bounds: tuple[float] = (0., 1.),
                  target_radius: Optional[float] = None,
                  abs_max_step: Optional[float] = None,
-                 rel_max_step: Optional[float] = 0.01):
+                 rel_max_step: Optional[float] = 0.01,
+                 free_max_step: bool = False,
+                 cost_map_shape: Optional[tuple[int, int]] = (100, 100)):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
         if mode == 'energy':
@@ -333,10 +366,15 @@ class SolverEF(ABC):
             self.events[full_name] = obs.event
             self.obstacles[full_name] = obs
         abs_max_step = self.total_duration / 2 if abs_max_step is None else abs_max_step
-        self.max_int_step: Optional[float] = abs_max_step if rel_max_step is None else \
+        self.max_int_step: Optional[float] = None if free_max_step else abs_max_step if rel_max_step is None else \
             min(abs_max_step, rel_max_step * self.total_duration)
 
+        self._integrator_kwargs = {'method': 'LSODA'}
+        if self.max_int_step is not None:
+            self._integrator_kwargs['max_step'] = self.max_int_step
+
         self.dyn_augsys = self.dyn_augsys_cartesian if self.pb.coords == Coords.CARTESIAN else self.dyn_augsys_gcs
+        self._cost_map = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
 
     def setup(self):
         self.traj_groups = []
@@ -386,7 +424,7 @@ class SolverEF(ABC):
     def n_time(self):
         return self.times.shape[0]
 
-    def cost_map(self, nx: int = 100, ny: int = 100) -> ndarray:
+    def cost_map_from_trajs(self, nx: int = 100, ny: int = 100) -> ndarray:
         res = np.nan * np.ones((nx, ny))
         bl, spacings = self.pb.get_grid_params(nx, ny)
         for traj in self.trajs:
@@ -426,7 +464,7 @@ class SolverEFSimple(SolverEF):
             t_eval = self.times
             res = scitg.solve_ivp(self.dyn_augsys, (self.t_init, self.t_upper_bound),
                                   np.array(tuple(self.pb.x_init) + tuple(costate)), t_eval=t_eval,
-                                  events=list(self.events.values()), max_step=self.max_int_step)
+                                  events=list(self.events.values()), **self._integrator_kwargs)
             traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
                                         events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
             if traj.events['target'].shape[0] > 0:
@@ -452,8 +490,10 @@ class SolverEFResampling(SolverEF):
         self._max_dist_sq = self.max_dist ** 2
         self.sites: dict[str, Site] = {}
         self._to_shoot_sites: list[Site] = []
+        self._checked_for_solution: set[Site] = set()
         self.solution_sites: set[Site] = set()
         self.solution_site: Optional[Site] = None
+        self.solution_site_min_cost_index: Optional[int] = None
         self.mode_origin: bool = mode_origin
         self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth)
         self._ff_max_norm = np.max(np.linalg.norm(self.pb.model.ff.values, axis=-1)) if \
@@ -493,7 +533,7 @@ class SolverEFResampling(SolverEF):
         if not site.in_obs_at(site.index_t):
             res = scitg.solve_ivp(self.dyn_augsys, (t_eval[0], t_eval[-1]), y0,
                                   t_eval=t_eval[1:],  # Remove initial point which is redudant
-                                  events=list(self.events.values()), dense_output=True, max_step=self.max_int_step)
+                                  events=list(self.events.values()), dense_output=True, **self._integrator_kwargs)
 
             times = res.t if len(res.t) > 0 else np.array(())
             states = res.y.transpose()[:, :2] if len(res.t) > 0 else np.array(((), ()))
@@ -528,8 +568,7 @@ class SolverEFResampling(SolverEF):
                     res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, t_eval[t_eval > t_enter_obs][0]),
                                           state_aug_cross[:2],
                                           t_eval=np.array((t_eval[t_eval > t_enter_obs][0],)),
-                                          max_step=self.max_int_step,
-                                          args=[site.obstacle_name, site.obs_trigo])
+                                          args=[site.obstacle_name, site.obs_trigo], **self._integrator_kwargs)
 
                     times = res.t if len(res.t) > 0 else np.array(())
                     states = res.y.transpose() if len(res.t) > 0 else np.array(((), ()))
@@ -557,8 +596,8 @@ class SolverEFResampling(SolverEF):
             res = scitg.solve_ivp(self.dyn_constr, (t_eval[site.index_t - site_index_t_prev], t_eval[-1]),
                                   site.state_at_index(site.index_t),
                                   t_eval=t_eval[site.index_t - site_index_t_prev + 1:], events=[self._event_quit_obs],
-                                  max_step=self.max_int_step,
-                                  args=[site.obstacle_name, site.obs_trigo])
+                                  args=[site.obstacle_name, site.obs_trigo],
+                                  **self._integrator_kwargs)
             times = res.t if len(res.t) > 0 else np.array(())
             states = res.y.transpose() if len(res.t) > 0 else np.array(((), ()))
             controls = np.array([
@@ -579,8 +618,30 @@ class SolverEFResampling(SolverEF):
         #     self.success = True
         #     self.solution_sites.add(site)
 
+    @property
+    def validity_index(self):
+        validity_list = \
+        [
+            site.index_t_check_next for site in
+            set(self.sites.values()).difference(
+                set(site for site in self.sites.values() if len(site.traj) == 1)
+            )
+            if not site._index_neutered == site.index_t_check_next + 1 and
+               not (site.neutered and site.index_t_check_next >= site._index_neutered) and
+               not (site.closed and site.index_t_check_next == site.index_t) and
+               not site.next_nb[site.index_t_check_next].closed
+        ]
+        return 0 if len(validity_list) == 0 else min(validity_list)
+
+    def missed_obstacles(self):
+        res = []
+        for site in self.sites.values():
+            if np.any(np.any(self.pb.in_obs(state)) for state in site.traj.states):
+                res.append(site)
+        return res
+
     def step(self):
-        for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth):
+        for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth, file=sys.stdout):
             self.integrate_site_to_target_time(site, self.t_upper_bound)
             if site.traj is not None:
                 if not site.is_root():
@@ -589,6 +650,13 @@ class SolverEFResampling(SolverEF):
         new_sites = self.compute_new_sites()
         self._to_shoot_sites.extend(new_sites)
         self.trim_distance()
+        print("Cost guarantee: {val:.3f}/{total:.3f} ({ratio:.1f}%) {candsol}".format(
+            val=self.times[self.validity_index],
+            total=self.times[-1],
+            ratio=100 * self.times[self.validity_index] / self.times[-1],
+            candsol=f"Cand. sol. {self.solution_site.cost_at_index(self.solution_site_min_cost_index):.3f}"
+            if self.solution_site is not None else ""
+        ))
         self.depth += 1
 
     def trim_distance(self):
@@ -601,11 +669,25 @@ class SolverEFResampling(SolverEF):
 
     def solve(self):
         self.setup()
-        for _ in range(self.max_depth):
-            self.step()
-        self.check_solutions()
+        dki = DelayedKeyboardInterrupt()
+        with dki:
+            for _ in range(self.max_depth):
+                if dki.signal_received:
+                    break
+                self.step()
+                self.check_solutions()
+                if self.found_guaranteed_solution:
+                    break
         for site in self.solution_sites:
             self.extrapolate_back_traj(site)
+        missed_obs = self.missed_obstacles()
+        # TODO: find a way to avoid near zero obstacle detection
+        # if len(missed_obs) > 0:
+        #     warnings.warn("Missed obstacles in trajectory collection. Consider lowering integration max step size.")
+
+    def get_cost_map(self):
+        self._cost_map.update_from_sites(self.sites.values(), 0, self.validity_index)
+        return self._cost_map.values
 
     def site_front(self, index_t):
         site0 = list(self.sites.values())[0]
@@ -633,31 +715,32 @@ class SolverEFResampling(SolverEF):
         new_sites: list[Site] = []
         for i_s, site in enumerate(prev_sites):
             site_nb = site.next_nb[site.index_t_check_next]
-            new_id_check_next = site.index_t_check_next
+            new_id_check_next = prev_id_check_next = site.index_t_check_next
             new_site: Optional[Site] = None
-            for i in range(site.index_t_check_next, min(site.index_t + 1, site_nb.index_t + 1, index_t_hi)):
+            upper_index = min(site.index_t + 1, site_nb.index_t + 1, index_t_hi)
+            for i in range(site.index_t_check_next, upper_index):
                 state = site.state_at_index(i)
                 state_nb = site_nb.state_at_index(i)
                 if site.in_obs_at(i) and site_nb.in_obs_at(i):
                     site.neuter(i, NeuteringReason.SELF_AND_NB_IN_OBS)
-                    break
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
                     # Sample from start between free points which are fully defined from origin
                     # else propagate approximation
                     index = 0 if self.mode_origin and \
                                  not site.in_obs_at(i) and not site_nb.in_obs_at(i) and \
                                  site.index_t_init == 0 and site_nb.index_t_init == 0 else i
-                    if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1:
+                    if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
                         new_site = self.site_mngr.site_from_parents(site, site_nb, index)
                         if len(self.pb.in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
                             # Choose not to resample points lying within obstacles
-                            site.close(ClosureReason.WITHIN_OBS)
+                            site.neuter(i, NeuteringReason.CHILD_IN_OBS)
                             new_site = None
                     break
                 new_id_check_next = i
             # Update the neighbouring property
             site.next_nb[site.index_t_check_next: new_id_check_next + 1] = \
                 [site_nb] * (new_id_check_next - site.index_t_check_next + 1)
+            site.prev_index_t_check_next = site.index_t_check_next
             site.index_t_check_next = new_id_check_next
             if new_site is not None:
                 self.sites[new_site.name] = new_site
@@ -665,7 +748,8 @@ class SolverEFResampling(SolverEF):
         return new_sites
 
     def check_solutions(self):
-        for site in self.sites.values():
+        to_check = set(self.sites.values()).difference(self._checked_for_solution)
+        for site in to_check:
             if np.any(np.sum(np.square(site.traj.states - self.pb.x_target), axis=-1) < self._target_radius_sq):
                 self.success = True
                 self.solution_sites.add(site)
@@ -679,13 +763,20 @@ class SolverEFResampling(SolverEF):
             if min_cost is None or candidate_cost < min_cost:
                 min_cost = candidate_cost
                 self.solution_site = site
+                self.solution_site_min_cost_index = self.solution_site.index_t_init + \
+                                                    list(self.solution_site.traj.cost).index(min_cost)
 
         for site, cost in solutions_sites_cost.items():
             if cost > 1.15 * min_cost:
                 self.solution_sites.remove(site)
 
-    def cost_map_triangle(self, nx: int = 100, ny: int = 100):
-        return cost_map_triangle(list(self.sites.values()), 0, self.n_time - 1, self.pb.bl, self.pb.tr, nx, ny)
+        self._checked_for_solution.union(to_check)
+
+    @property
+    def found_guaranteed_solution(self):
+        if self.solution_site_min_cost_index is None:
+            return False
+        return self.validity_index >= self.solution_site_min_cost_index
 
     def connect_to_parents(self, site: Site):
         name_prev, name_next = self.site_mngr.parents_name_from_name(site.name)
@@ -773,7 +864,6 @@ class SolverEFTrimming(SolverEFResampling):
         self._sites_created_at_subframe: list[set[Site]] = [set()
                                                             for _ in range(self.n_subframes)]
         self.depth = 1
-        self._partial_cost_map = None
 
     def setup(self):
         super().setup()
@@ -822,14 +912,13 @@ class SolverEFTrimming(SolverEFResampling):
         i_subframe_start_cm = self.i_subframe + 1 - self._trimming_band_width
         sites_for_cost_map = self._sites_created_at_subframe[self.i_subframe].union(
             *self.sites_valid[i_subframe_start_cm:self.i_subframe + 1])
-        cost_map = cost_map_triangle(sites_for_cost_map, self.index_t_subframe(i_subframe_start_cm),
-                                     self.index_t_next_subframe - 1,
-                                     self.pb.bl, self.pb.tr, nx, ny)
-        self._partial_cost_map = cost_map
+        self._cost_map.update_from_sites(sites_for_cost_map, self.index_t_subframe(i_subframe_start_cm),
+                                         self.index_t_next_subframe - 1)
         bl, spacings = self.pb.get_grid_params(nx, ny)
         new_valid_sites = []
         for site in [site for site in sites_considered if not site.closed]:
-            value_opti = Utils.interpolate(cost_map, bl, spacings, site.state_at_index(self.index_t_next_subframe - 1))
+            value_opti = Utils.interpolate(self._cost_map.values, bl, spacings,
+                                           site.state_at_index(self.index_t_next_subframe - 1))
             if np.isnan(value_opti):
                 new_valid_sites.append(site)
                 continue
@@ -857,33 +946,40 @@ class SolverEFTrimming(SolverEFResampling):
             self.extrapolate_back_traj(site)
 
 
-def cost_map_triangle(sites: Iterable[Site], index_t_lo: int, index_t_hi: int, bl: ndarray, tr: ndarray,
-                      nx: int, ny: int) -> ndarray:
-    res = np.inf * np.ones((nx, ny))
-    grid_vectors = np.stack(np.meshgrid(np.linspace(bl[0], tr[0], nx),
-                                        np.linspace(bl[1], tr[1], ny),
-                                        indexing='ij'), -1)
-    for site in sites:
-        for index_t in range(max(index_t_lo, site.index_t_init), min(index_t_hi + 1, site.index_t_check_next)):
-            site_nb = site.next_nb[index_t]
+class CostMap:
 
-            # site, index_t    1 o --------- o 3 site, index + 1
-            #                    | \   tri1  |
-            #                    |    \      |
-            #                    | tri2  \   |
-            #                    |          \|
-            # site_nb, index_t 2 o-----------o 4 site_nb, index_t + 1
-            point1 = site.state_at_index(index_t)
-            point3 = site.state_at_index(index_t + 1)
-            point2 = site_nb.state_at_index(index_t)
-            point4 = site_nb.state_at_index(index_t + 1)
-            cost1 = site.cost_at_index(index_t)
-            cost3 = site.cost_at_index(index_t + 1)
-            cost2 = site_nb.cost_at_index(index_t)
-            cost4 = site_nb.cost_at_index(index_t + 1)
-            tri1_cost = triangle_mask_and_cost(grid_vectors, point1, point3, point4, cost1, cost3, cost4)
-            np.minimum(res, tri1_cost, out=res)
-            if index_t > 0:
-                tri2_cost = triangle_mask_and_cost(grid_vectors, point1, point4, point2, cost1, cost4, cost2)
-                np.minimum(res, tri2_cost, out=res)
-    return res
+    def __init__(self, bl: ndarray, tr: ndarray, nx: int, ny: int):
+        self.bl = bl.copy()
+        self.tr = tr.copy()
+        self.grid_vectors = np.stack(np.meshgrid(np.linspace(self.bl[0], self.tr[0], nx),
+                                                 np.linspace(self.bl[1], self.tr[1], ny),
+                                                 indexing='ij'), -1)
+        self.values = np.inf * np.ones((nx, ny))
+
+    def update_from_sites(self, sites: Iterable[Site], index_t_lo: int, index_t_hi: int):
+        for site in sites:
+            # TODO: more efficient screening here
+            # lower_index = max(index_t_lo, site.index_t_init, site.prev_index_t_check_next)
+            lower_index = max(index_t_lo, site.index_t_init)
+            for index_t in range(lower_index, min(index_t_hi + 1, site.index_t_check_next)):
+                site_nb = site.next_nb[index_t]
+
+                # site, index_t    1 o --------- o 3 site, index + 1
+                #                    | \   tri1  |
+                #                    |    \      |
+                #                    | tri2  \   |
+                #                    |          \|
+                # site_nb, index_t 2 o-----------o 4 site_nb, index_t + 1
+                point1 = site.state_at_index(index_t)
+                point3 = site.state_at_index(index_t + 1)
+                point2 = site_nb.state_at_index(index_t)
+                point4 = site_nb.state_at_index(index_t + 1)
+                cost1 = site.cost_at_index(index_t)
+                cost3 = site.cost_at_index(index_t + 1)
+                cost2 = site_nb.cost_at_index(index_t)
+                cost4 = site_nb.cost_at_index(index_t + 1)
+                tri1_cost = triangle_mask_and_cost(self.grid_vectors, point1, point3, point4, cost1, cost3, cost4)
+                np.minimum(self.values, tri1_cost, out=self.values)
+                if index_t > 0:
+                    tri2_cost = triangle_mask_and_cost(self.grid_vectors, point1, point4, point2, cost1, cost4, cost2)
+                    np.minimum(self.values, tri2_cost, out=self.values)
