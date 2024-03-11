@@ -15,6 +15,7 @@ from tqdm import tqdm
 from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha, \
     is_possible_direction, diadic_valuation, alpha_to_int, Coords
 from dabry.misc import terminal
+from dabry.obstacle import lagmul_value
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
 
@@ -391,23 +392,24 @@ class SolverEF(ABC):
         pass
 
     def dyn_augsys_cartesian(self, t: float, y: ndarray):
-        return self.pb.augsys_dyn_timeopt_cartesian(t, y[:2], y[2:])
+        return self.pb.augsys_dyn_timeopt_cartesian(t, y[:2], y[2:], np.zeros(len(self.obstacles)))
 
     def dyn_augsys_gcs(self, t: float, y: ndarray):
-        return self.pb.augsys_dyn_timeopt_gcs(t, y[:2], y[2:])
+        return self.pb.augsys_dyn_timeopt_gcs(t, y[:2], y[2:], np.zeros(len(self.obstacles)))
 
-    def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool):
-        sign = (2. * trigo - 1.)
-        d = np.array(((0., -sign), (sign, 0.))) @ self.obstacles[obstacle].d_value(x)
-        ff_val = self.pb.model.ff.value(t, x)
-        return ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max)
+    def dyn_constr(self, t: float, y: ndarray, obstacle: str, lagmul_init: ndarray):
+        # TODO: support for GCS
+        lagmul = lagmul_init.copy()
+        lagmul[list(self.obstacles.keys()).index(obstacle)] =\
+            lagmul_value(t, y[:2], y[2:], self.pb.srf_max, self.pb.model.ff, self.obstacles[obstacle])
+        return self.pb.augsys_dyn_timeopt_cartesian(t, y[:2], y[2:], lagmul)
 
     @non_terminal
     def _event_target(self, _, x):
         return np.sum(np.square(x[:2] - self.pb.x_target)) - self._target_radius_sq
 
     @terminal
-    def _event_quit_obs(self, t, x, obstacle: str, trigo: bool):
+    def _event_quit_obs(self, t, x, obstacle: str):
         d_value = self.obstacles[obstacle].d_value(x)
         n = d_value / np.linalg.norm(d_value)
         ff_val = self.pb.model.ff.value(t, x)
@@ -556,17 +558,12 @@ class SolverEFResampling(SolverEF):
                 site.index_t_obs = site.index_t + len(traj_free) + 1
 
                 state_aug_cross = res.sol(t_enter_obs)
-                cross = np.cross(self.obstacles[obs_name].d_value(state_aug_cross[:2]),
-                                 self.pb.model.dyn.value(t_enter_obs, state_aug_cross[:2],
-                                                         -state_aug_cross[2:] / np.linalg.norm(
-                                                             state_aug_cross[2:])))
-                site.obs_trigo = cross >= 0.
-                sign = 2 * site.obs_trigo - 1
-                direction = np.array(((0, -sign), (sign, 0))) @ self.obstacles[obs_name].d_value(state_aug_cross[:2])
                 if is_possible_direction(self.pb.model.ff.value(t_enter_obs, state_aug_cross[:2]),
-                                         direction, self.pb.srf_max):
+                                         np.array(((0, -1), (1, 0))) @
+                                         self.obstacles[obs_name].d_value(state_aug_cross[:2]),
+                                         self.pb.srf_max):
                     res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, t_eval[t_eval > t_enter_obs][0]),
-                                          state_aug_cross[:2],
+                                          state_aug_cross,
                                           t_eval=np.array((t_eval[t_eval > t_enter_obs][0],)),
                                           args=[site.obstacle_name, site.obs_trigo], **self._integrator_kwargs)
 

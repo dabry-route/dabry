@@ -4,7 +4,8 @@ from typing import Union
 import numpy as np
 from numpy import ndarray
 
-from dabry.misc import Utils, terminal
+from dabry.flowfield import FlowField
+from dabry.misc import Utils, terminal, directional_timeopt_control
 
 """
 obstacle.py
@@ -61,6 +62,21 @@ class Obstacle(ABC):
         for i in range(n):
             grad[i] = (self.value(x + emat[i]) - self.value(x - emat[i])) / (2 * eps)
         return grad
+
+    def d2_value(self, x: ndarray) -> ndarray:
+        """
+        Hessian of obstacle value function
+        :param x: Position at which to get derivative (1D numpy array)
+        :return: Hessian of obstacle function at point
+        """
+        # Finite differencing, centered scheme
+        eps = 1e-8
+        n = x.shape[0]
+        emat = np.diag(n * (eps,))
+        hess = np.zeros((n, n))
+        for i in range(n):
+            hess[i, :] = (self.d_value(x + emat[i]) - self.d_value(x - emat[i])) / (2 * eps)
+        return hess
 
 
 class WrapperObs(Obstacle):
@@ -170,3 +186,12 @@ class GreatCircleObs(Obstacle):
         d_dphi = np.array((-np.sin(x[0]) * np.cos(x[1]), np.cos(x[0]) * np.cos(x[1]), 0))
         d_dlam = np.array((-np.cos(x[0]) * np.sin(x[1]), -np.sin(x[0]) * np.sin(x[1]), np.cos(x[1])))
         return np.array((self.dir_vect @ d_dphi, self.dir_vect @ d_dlam))
+
+
+def lagmul_value(t: float, state: ndarray, costate: ndarray, srf_max: float, ff: FlowField, obs: Obstacle):
+    grad_norm = np.linalg.norm(obs.d_value(state))
+    n = -obs.d_value(state) / grad_norm
+    d = np.array(((0., 1), (-1, 0.))) @ n
+    d_control = (1. if - costate @ d > 0 else -1.) * d
+    control = directional_timeopt_control(ff.value(t, state), d_control, srf_max)
+    return -1 / grad_norm * (costate @ n - costate @ n * (control @ n / control @ d))

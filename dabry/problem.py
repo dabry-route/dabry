@@ -104,6 +104,22 @@ class NavigationProblem:
             self.obstacles.append(self.obs_frame)
         # self.obstacles.extend(NavigationProblem.spherical_frame(bl, tr, offset_rel=0))
 
+    def jac_obs(self, state: ndarray):
+        """
+        Jacobian of the obstacle functions
+        :param state: The state where to evaluate Jacobian
+        :return: The Jacobian matrix size k x n where k is the number of obstacles and n the state dimension
+        """
+        return np.stack([obs.d_value(state) for obs in self.obstacles])
+
+    def hess_obs(self, state: ndarray):
+        """
+        Hessian of the obstacle functions
+        :param state: The state where to evaluate Hessian
+        :return: The Hessian matrix size k x n x n where k is the number of obstacles and n the state dimension
+        """
+        return np.stack([obs.d2_value(state) for obs in self.obstacles])
+
     def get_grid_params(self, nx: int, ny: int) -> tuple[ndarray, ndarray]:
         """
         Get the (bottom-left corner, spacings) representation of the underlying grid
@@ -169,23 +185,25 @@ class NavigationProblem:
     def timeopt_control_gcs(self, state: ndarray, costate: ndarray):
         return timeopt_control_gcs(state, costate, self.srf_max)
 
-    def augsys_dyn_timeopt(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
+    def augsys_dyn_timeopt(self, t: float, state: ndarray, costate: ndarray, control: ndarray, lagmul: ndarray):
         return np.hstack((self.model.dyn.value(t, state, control),
-                          -self.model.dyn.d_value__d_state(t, state, control).transpose() @ costate
-                          - self.penalty.d_value(t, state)))
+                          -self.model.dyn.d_value__d_state(t, state, control).transpose() @
+                          (costate - np.transpose(lagmul @ self.jac_obs(state))) +
+                          lagmul @ self.hess_obs(state) @ self.model.dyn.value(t, state, control)))
 
-    def augsys_dyn_timeopt_cartesian(self, t: float, state: ndarray, costate: ndarray):
-        return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_cartesian(costate))
+    def augsys_dyn_timeopt_cartesian(self, t: float, state: ndarray, costate: ndarray, lagmul: ndarray):
+        return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_cartesian(costate), lagmul)
 
-    def augsys_dyn_timeopt_gcs(self, t: float, state: ndarray, costate: ndarray):
-        return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_gcs(state, costate))
+    def augsys_dyn_timeopt_gcs(self, t: float, state: ndarray, costate: ndarray, lagmul: ndarray):
+        return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_gcs(state, costate), lagmul)
 
-    def hamiltonian(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
-        return costate @ (control + self.model.ff.value(t, state)) + 1
+    def hamiltonian(self, t: float, state: ndarray, costate: ndarray, control: ndarray, lagmul: ndarray):
+        return (costate - - np.transpose(lagmul @ self.jac_obs(state))) @ \
+               (control + self.model.ff.value(t, state)) - 1
 
-    def hamiltonian_reduced(self, t: float, state: ndarray, costate: ndarray):
+    def hamiltonian_reduced(self, t: float, state: ndarray, costate: ndarray, lagmul: ndarray):
         # TODO : adapt to gcs
-        return self.hamiltonian(t, state, costate, self.timeopt_control_cartesian(costate))
+        return self.hamiltonian(t, state, costate, self.timeopt_control_cartesian(costate), lagmul)
 
     def in_obs(self, state):
         return [obs for obs in self.obstacles if obs.value(state) < 0.]

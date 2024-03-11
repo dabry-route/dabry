@@ -8,6 +8,8 @@ from math import pi, acos, cos, sin, floor, atan2
 import numpy as np
 from numpy import ndarray
 
+from dabry.obstacle import Obstacle
+
 """
 misc.py
 Defines various procedures for distance computation, time formatting,
