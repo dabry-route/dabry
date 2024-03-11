@@ -5,6 +5,7 @@ import sys
 import warnings
 from abc import ABC
 from enum import Enum
+from multiprocessing import Process, Pool
 from typing import Optional, Dict, Iterable
 
 import numpy as np
@@ -482,6 +483,9 @@ class SolverEFSimple(SolverEF):
             res.extend(list(group))
         return res
 
+def job(args):
+    site, solver = args
+    return solver.integrate_site_to_target_time(site, solver.t_upper_bound)
 
 class SolverEFResampling(SolverEF):
 
@@ -514,21 +518,21 @@ class SolverEFResampling(SolverEF):
     def trajs(self):
         return list(map(lambda x: x.traj, [site for site in self.sites.values() if site.traj is not None]))
 
-    def integrate_site_to_target_time(self, site: Site, t_target: float):
-        self.integrate_site_to_target_index(site, self.times.searchsorted(t_target, side='right') - 1)
+    def integrate_site_to_target_time(self, site: Site, t_target: float) -> Trajectory:
+        return self.integrate_site_to_target_index(site, self.times.searchsorted(t_target, side='right') - 1)
 
-    def integrate_site_to_target_index(self, site: Site, index_t: int):
+    def integrate_site_to_target_index(self, site: Site, index_t: int) -> Trajectory:
         # Assuming site received integration up to site.index_t included
         # Integrate up to index_t included
         if site.index_t >= index_t:
-            return
+            return Trajectory.empty()
         t_start = self.times[site.index_t]
         t_end = self.times[index_t]
         state_start = site.state_at_index(site.index_t)
         costate_start = site.costate_at_index(site.index_t)
         t_eval = np.linspace(t_start, t_end, index_t - site.index_t + 1)
         if t_eval.shape[0] <= 1:
-            return
+            return Trajectory.empty()
         y0 = np.hstack((state_start, costate_start))
         site_index_t_prev = site.index_t
         if not site.in_obs_at(site.index_t):
@@ -590,13 +594,12 @@ class SolverEFResampling(SolverEF):
             traj_free = Trajectory.empty()
             traj_singleton = Trajectory.empty()
         traj = traj_free + traj_singleton
-        site.extend_traj(traj)
-
+        index_t = len(traj)
         # Here, either site.index_t == index_t or site.index_t < index_t and obstacle mode is on
         if site.index_t < index_t and len(site.obstacle_name) > 0:
-            res = scitg.solve_ivp(self.dyn_constr, (t_eval[site.index_t - site_index_t_prev], t_eval[-1]),
-                                  site.state_at_index(site.index_t),
-                                  t_eval=t_eval[site.index_t - site_index_t_prev + 1:], events=[self._event_quit_obs],
+            res = scitg.solve_ivp(self.dyn_constr, (t_eval[index_t - site_index_t_prev], t_eval[-1]),
+                                  traj.states[-1],
+                                  t_eval=t_eval[index_t - site_index_t_prev + 1:], events=[self._event_quit_obs],
                                   args=[site.obstacle_name, site.obs_trigo],
                                   **self._integrator_kwargs)
             times = res.t if len(res.t) > 0 else np.array(())
@@ -613,7 +616,7 @@ class SolverEFResampling(SolverEF):
         else:
             traj_constr = Trajectory.empty()
 
-        site.extend_traj(traj_constr)
+        return traj + traj_constr
 
         # if traj.events.get('target') is not None and traj.events.get('target').shape[0] > 0:
         #     self.success = True
@@ -641,9 +644,23 @@ class SolverEFResampling(SolverEF):
                 res.append(site)
         return res
 
-    def step(self):
-        for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth, file=sys.stdout):
-            self.integrate_site_to_target_time(site, self.t_upper_bound)
+    def step(self, parallel=True):
+        parallel = True
+        if parallel:
+            with Pool(5) as p:
+                trajs = p.map(job, zip(self._to_shoot_sites, len(self._to_shoot_sites) * [self]))
+                for site in self._to_shoot_sites:
+                    trajs.append(job((site, self)))
+                for k, site in enumerate(self._to_shoot_sites):
+                    site.extend_traj(trajs[k])
+        else:
+            trajs = []
+            for site in tqdm(self._to_shoot_sites):
+                trajs.append(job((site, self)))
+            for k, site in enumerate(self._to_shoot_sites):
+                site.extend_traj(trajs[k])
+
+        for site in self._to_shoot_sites:
             if site.traj is not None:
                 if not site.is_root():
                     self.connect_to_parents(site)

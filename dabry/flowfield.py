@@ -142,12 +142,12 @@ class FlowField(ABC):
     def __rmul__(self, other):
         return self.__mul__(other)
 
-    def __getattr__(self, item):
-        if type(self._lch) == float:
-            return self._rch.__getattribute__(item)
-        if type(self._rch) == float:
-            return self._lch.__getattribute__(item)
-        raise AttributeError(f'{item}')
+    # def __getattr__(self, item):
+    #     if type(self._lch) == float:
+    #         return self._rch.__getattribute__(item)
+    #     if type(self._rch) == float:
+    #         return self._lch.__getattribute__(item)
+    #     raise AttributeError(f'{item}')
 
     def _index(self, t):
         """
@@ -543,23 +543,23 @@ class WrapperFF(FlowField):
         return self._scaler_dspeed * self.ff.d_value(self.time_origin + t * self.scale_time,
                                                      self.bl + x * self.scale_length)
 
-    def __getattr__(self, item):
-        if item == 'values':
-            return self._scaler_speed * self.ff.values
-        if item == 'bounds':
-            space_bounds = np.vstack((
-                (0., (self.ff.bounds[-2, 1] - self.bl[0]) / self.scale_length),
-                (0., (self.ff.bounds[-1, 1] - self.bl[1]) / self.scale_length),
-            ))
-            if self.ff.t_end is not None:
-                time_bounds = (
-                    (self.ff.t_start - self.time_origin)/self.scale_time,
-                    (self.ff.t_end - self.time_origin)/self.scale_time
-                )
-                return np.vstack((time_bounds, space_bounds))
-            else:
-                return space_bounds
-        return self.ff.__getattribute__(item)
+    # def __getattr__(self, item):
+    #     if item == 'values':
+    #         return self._scaler_speed * self.ff.values
+    #     if item == 'bounds':
+    #         space_bounds = np.vstack((
+    #             (0., (self.ff.bounds[-2, 1] - self.bl[0]) / self.scale_length),
+    #             (0., (self.ff.bounds[-1, 1] - self.bl[1]) / self.scale_length),
+    #         ))
+    #         if self.ff.t_end is not None:
+    #             time_bounds = (
+    #                 (self.ff.t_start - self.time_origin)/self.scale_time,
+    #                 (self.ff.t_end - self.time_origin)/self.scale_time
+    #             )
+    #             return np.vstack((time_bounds, space_bounds))
+    #         else:
+    #             return space_bounds
+    #     return self.ff.__getattribute__(item)
 
 
 class TwoSectorsFF(FlowField):

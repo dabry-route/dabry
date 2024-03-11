@@ -204,7 +204,7 @@ def solver_structure(solver: SolverEFResampling):
     fig.add_traces(
         [go.Scatter(x=-np.cos(2 * np.pi * index / (solver.n_costate_sectors * 2 ** 5)) * np.arange(0, solver.n_time),
                     y=-np.sin(2 * np.pi * index / (solver.n_costate_sectors * 2 ** 5)) * np.arange(0, solver.n_time),
-                    line=dict(color='grey'), name=index, mode='lines')
+                    line=dict(color='grey'), name=str(index), mode='lines')
          for index in np.arange(solver.n_costate_sectors * 2 ** 5)])
     fig.add_traces([go.Scatter(x=site.costate_at_index(site.index_t_init)[0] * np.arange(site.index_t_init, solver.n_time) / np.linalg.norm(site.costate_at_index(site.index_t_init)),
                                y=site.costate_at_index(site.index_t_init)[1] * np.arange(site.index_t_init, solver.n_time) / np.linalg.norm(site.costate_at_index(site.index_t_init)),
