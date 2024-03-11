@@ -436,9 +436,10 @@ class SolverEF(ABC):
                     res[index] = traj.times[k]
         return res
 
-    def save_results(self):
-        self.pb.io.save_trajs(self.trajs, group_name='ef_01')
-        self.pb.io.save_ff(self.pb.model.ff, bl=self.pb.bl, tr=self.pb.tr)
+    def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
+                     time_offset: Optional[float] = None):
+        self.pb.io.save_trajs(self.trajs, group_name='ef_01', scale_length=scale_length, scale_time=scale_time,
+                              time_offset=time_offset)
 
 
 class SolverEFSimple(SolverEF):
@@ -839,10 +840,12 @@ class SolverEFResampling(SolverEF):
                                     cost=costs,
                                     events=site.traj.events)
 
-    def save_results(self):
-        super(SolverEFResampling, self).save_results()
+    def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
+                     time_offset: Optional[float] = None):
+        super(SolverEFResampling, self).save_results(scale_length, scale_time, time_offset)
         if self.solution_site is not None and self.solution_site.traj_full is not None:
-            self.pb.io.save_traj(self.solution_site.traj_full, name='solution')
+            self.pb.io.save_traj(self.solution_site.traj_full, name='solution',
+                                 scale_length=scale_length, scale_time=scale_time, time_offset=time_offset)
 
 
 class SolverEFBisection(SolverEFResampling):

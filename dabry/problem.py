@@ -238,12 +238,7 @@ class NavigationProblem:
         reached = traj_htarget.events['target'].size > 0
         return traj_htarget.events['target'][0] if reached else np.infty
 
-    def rescale(self):
-        """
-        Builds a new problem where space and time variables are of unit magnitude
-        and srf_max is 1
-        :return: A rescaled NavigationProblem
-        """
+    def scaling_params(self):
         if self.coords == Coords.CARTESIAN:
             scale_length = self.length_reference
             x_init = (self.x_init - self.bl) / scale_length
@@ -267,6 +262,15 @@ class NavigationProblem:
             srf_max = self.srf_max / Utils.EARTH_RADIUS
 
         scale_time = scale_length / srf_max
+        return x_init, x_target, bl_pb_adim, bl_wrapper, tr_pb_adim, scale_length, scale_time
+
+    def rescale(self):
+        """
+        Builds a new problem where space and time variables are of unit magnitude
+        and srf_max is 1
+        :return: A rescaled NavigationProblem
+        """
+        x_init, x_target, bl_pb_adim, bl_wrapper, tr_pb_adim, scale_length, scale_time = self.scaling_params()
         # In the new system, srf_max is unit
         srf_max = 1.
 
