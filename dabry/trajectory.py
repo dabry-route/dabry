@@ -162,12 +162,16 @@ class Trajectory:
         return Trajectory(self.times.copy(), self.states.copy(), self.coords, controls=self.controls.copy(),
                           costates=self.costates.copy(), cost=self.cost.copy(), events=self.events.copy())
 
-    def save(self, name, dir_name):
+    def save(self, name, dir_name, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
+             time_offset: Optional[float] = None):
+        scale_length = 1 if scale_length is None else scale_length
+        scale_time = 1 if scale_time is None else scale_time
+        time_offset = 0 if time_offset is None else time_offset
         np.savez(os.path.join(dir_name, traj_name_to_filename(name)),
-                 times=self.times, states=self.states,
+                 times=time_offset + self.times * scale_time, states=self.states * scale_length,
                  costates=self.costates if self.costates is not None else np.array(((), ())),
                  controls=self.controls if self.controls is not None else np.array(((), ())),
-                 cost=self.cost if self.cost is not None else np.array(()))
+                 cost=self.cost * scale_time if self.cost is not None else np.array(()))
         meta_data = {'coords': self.coords.value, 'events': {}}
         for e_name, times in self.events.items():
             meta_data['events'][e_name] = times.tolist()

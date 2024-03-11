@@ -81,8 +81,13 @@ if __name__ == '__main__':
     traj_ortho = pb.orthodromic()
     traj_htarget = pb.htarget()
 
-    pb.io.set_case_dir(os.path.join(os.path.abspath('.'), pb.name))
+    pb.io.set_case_dir(os.path.join(os.path.abspath('.'), pb_unscaled.name))
     pb.io.clean_output_dir()
-    solver.save_results()
-    pb.save_info()
+    _, _, _, _, _, scale_length, scale_time = pb_unscaled.scaling_params()
+    solver.save_results(scale_length=scale_length, scale_time=scale_time, time_offset=pb_unscaled.model.ff.t_start)
+    pb_unscaled.io.set_case_dir(os.path.join(os.path.abspath('.'), pb_unscaled.name))
+    pb_unscaled.io.save_ff(pb_unscaled.model.ff, bl=pb_unscaled.bl, tr=pb_unscaled.tr)
+    pb_unscaled.save_info()
+    pb_unscaled.io.save_traj(traj_ortho, 'orthodromic', scale_length=scale_length, scale_time=scale_time,
+                             time_offset=pb_unscaled.model.ff.t_start)
     print(f'Results saved to {pb.io.case_dir}')
