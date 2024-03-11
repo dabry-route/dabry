@@ -5,8 +5,12 @@ import numpy as np
 
 from dabry.flowfield import DiscreteFF
 from dabry.obstacle import CircleObs, FrameObs
-from dabry.solver_ef import SolverEFResampling, SolverEFTrimming
+from dabry.solver_ef import SolverEFResampling, SolverEFTrimming, SiteManager
 from dabry.trajectory import Trajectory
+
+
+class Style:
+    colors = ['blue', 'red', 'green', 'cyan', 'magenta', 'orange']
 
 
 def display(solver: Union[SolverEFResampling | SolverEFTrimming],
@@ -30,8 +34,6 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
                                values[::isub, ::isub, 0], values[::isub, ::isub, 1],
                                scaleratio=1., scale=0.1, line=dict(color='white' if theme_dark else 'black'),
                                hoverinfo='none', name='Flow field')
-    colors = ['blue', 'red', 'green', 'cyan', 'magenta', 'orange']
-    nx, ny = 100, 100
     cost_map = None
     if not no_value_func:
         cost_map = solver.get_cost_map()
@@ -78,7 +80,8 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
     if not no_trajectories:
         if not timeslider:
             fig.add_traces([go.Scatter(x=site.traj.states[:, 0], y=site.traj.states[:, 1],
-                                       line=dict(color=colors[site.depth % len(colors)]), name=site.name, mode='lines')
+                                       line=dict(color=Style.colors[site.depth % len(Style.colors)]),
+                                       name=site.name, mode='lines')
                             for site in sites_by_depth])
             if solver.solution_site is not None:
                 if solver.solution_site.traj_full is None:
@@ -105,7 +108,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
                         y=np.where((site.traj.times >= solver.times[i_major]) * (
                                 site.traj.times <= solver.times[min(i_major + substep, solver.n_time - 1)]),
                                    site.traj.states[:, 1], np.ones(site.traj.times.shape[0]) * np.nan),
-                        line=dict(color=colors[site.depth % len(colors)]), name=site.name, mode='lines',
+                        line=dict(color=Style.colors[site.depth % len(Style.colors)]), name=site.name, mode='lines',
                         visible=True)
                         for site in sites_by_depth]
                 )
@@ -178,7 +181,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
         fig_cost.update_coloraxes(showscale=False)
         if not no_trajectories:
             fig_cost.add_traces([go.Scatter3d(x=site.traj.states[:, 0], y=site.traj.states[:, 1], z=site.traj.cost,
-                                              line=dict(color=colors[site.depth % len(colors)]),
+                                              line=dict(color=Style.colors[site.depth % len(Style.colors)]),
                                               name=site.name,
                                               # legendgroup=depth, legendgrouptitle={'text': 'Depth %d' % depth},
                                               mode='lines')
@@ -190,3 +193,24 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
         if autoshow:
             fig_cost.show()
     return fig, fig_cost
+
+
+def solver_structure(solver: SolverEFResampling):
+    try:
+        import plotly.graph_objects as go
+    except ImportError:
+        raise ImportError('"plotly" package requirement for solver display')
+    fig = go.Figure()
+    fig.add_traces(
+        [go.Scatter(x=-np.cos(2 * np.pi * index / (solver.n_costate_sectors * 2 ** 5)) * np.arange(0, solver.n_time),
+                    y=-np.sin(2 * np.pi * index / (solver.n_costate_sectors * 2 ** 5)) * np.arange(0, solver.n_time),
+                    line=dict(color='grey'), name=index, mode='lines')
+         for index in np.arange(solver.n_costate_sectors * 2 ** 5)])
+    fig.add_traces([go.Scatter(x=site.costate_at_index(site.index_t_init)[0] * np.arange(site.index_t_init, solver.n_time) / np.linalg.norm(site.costate_at_index(site.index_t_init)),
+                               y=site.costate_at_index(site.index_t_init)[1] * np.arange(site.index_t_init, solver.n_time) / np.linalg.norm(site.costate_at_index(site.index_t_init)),
+                               line=dict(color=Style.colors[site.depth % len(Style.colors)]),
+                               name=site.name, mode='lines')
+                    for site in solver.sites.values()])
+
+    fig.update_layout(width=800, height=800)
+    return fig
