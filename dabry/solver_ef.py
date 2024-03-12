@@ -5,7 +5,9 @@ import sys
 import warnings
 from abc import ABC
 from enum import Enum
-from typing import Optional, Dict, Iterable
+from heapq import heappush, heappop
+from typing import Optional, Dict, Iterable, Any
+from dataclasses import dataclass, field
 
 import numpy as np
 import scipy.integrate as scitg
@@ -171,6 +173,9 @@ class Site:
 
     def state_at_index(self, index: int):
         return self.traj.states[index - self.index_t_init]
+
+    def state_slice(self, index1: int, index2: int):
+        return self.traj.states[index1 - self.index_t_init: index2 - self.index_t_init]
 
     def costate_at_index(self, index: int):
         return self.traj.costates[index - self.index_t_init]
@@ -947,6 +952,76 @@ class SolverEFTrimming(SolverEFResampling):
         self.check_solutions()
         for site in self.solution_sites:
             self.extrapolate_back_traj(site)
+
+
+@dataclass(order=True)
+class PrioritizedItem:
+    priority: int
+    item: Any = field(compare=False)
+
+
+class SolverEFAstar(SolverEFResampling):
+
+    def __init__(self, *args, **kwargs):
+        super(SolverEFAstar, self).__init__(*args, **kwargs)
+        if self._ff_max_norm is None:
+            nx, ny = 100, 100
+            self._ff_max_norm = np.max([[self.pb.model.ff.value(0, np.array((x, y)))
+                                         for y in np.linspace(self.pb.bl[1], self.pb.tr[1], ny)]
+                                        for x in np.linspace(self.pb.bl[0], self.pb.tr[0], nx)])
+
+    def setup(self):
+        super().setup()
+
+    def heuristic(self, state: ndarray):
+        return np.linalg.norm(state - self.pb.x_target) / (self.pb.srf_max + self._ff_max_norm)
+
+    def heur_cost(self, site: Site):
+        return site.traj.cost[-1] + self.heuristic(site.traj.states[-1])
+
+    def solve(self):
+        self.setup()
+        queue = []
+        for site in self._to_shoot_sites:
+            heappush(queue, PrioritizedItem(self.heur_cost(site), site))
+        count = 0
+        site_count = {}
+        with tqdm(total=self.n_costate_sectors*self.n_time, file=sys.stdout) as pbar:
+            while True:
+                if len(queue) == 0:
+                    break
+                count += 1
+                pbar.update(1)
+                site = heappop(queue).item
+                if site.name not in site_count.keys():
+                    site_count[site.name] = 0
+                else:
+                    site_count[site.name] += 1
+                prev_index = site.index_t
+                next_index = min(site.index_t + self.n_time // 10, self.n_time - 1)
+                #next_index = min(site.index_t + 1, self.n_time - 1)
+                self.integrate_site_to_target_index(site, next_index)
+                state_slice = site.state_slice(prev_index, next_index + 1)
+                if state_slice.size > 0:
+                    dist_sq = np.min(
+                        np.sum(np.square(state_slice - self.pb.x_target), axis=-1)
+                        - self._target_radius_sq)
+                    if dist_sq < 0:
+                        print('Found')
+                        break
+                if not site.closed and not site.index_t == self.n_time - 1:
+                    heappush(queue, PrioritizedItem(self.heur_cost(site), site))
+                new_sites = self.compute_new_sites()
+
+                for site in new_sites:
+                    self.integrate_site_to_target_index(site, next_index)
+                    if not site.closed and not site.index_t == self.n_time - 1:
+                        heappush(queue, PrioritizedItem(self.heur_cost(site), site))
+                    if site.traj is not None:
+                        if not site.is_root():
+                            self.connect_to_parents(site)
+
+                pbar.set_description(f"{np.sqrt(dist_sq):.3f}")
 
 
 class CostMap:
