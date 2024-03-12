@@ -181,7 +181,7 @@ class DiscreteFF(FlowField):
     """
 
     def __init__(self, values: ndarray, bounds: ndarray, coords: Coords, grad_values: Optional[ndarray] = None,
-                 force_no_diff=False):
+                 no_diff=False):
         super().__init__(nt_int=values.shape[0] if values.ndim == 4 else None)
 
         self.is_dumpable = 2
@@ -200,7 +200,7 @@ class DiscreteFF(FlowField):
 
         self.grad_values = grad_values
 
-        if not force_no_diff:
+        if not no_diff:
             if self.grad_values is None:
                 self.compute_derivatives()
 
@@ -220,9 +220,12 @@ class DiscreteFF(FlowField):
         return np.linspace(self.t_start, self.t_end, self.values.shape[0])
 
     @classmethod
-    def from_npz(cls, filepath):
+    def from_npz(cls, filepath, no_diff: Optional[bool] = None):
         ff = np.load(filepath, mmap_mode='r')
-        return cls(ff['values'], ff['bounds'], Coords.from_string(ff['coords']))
+        kwargs = {}
+        if no_diff is not None:
+            kwargs['no_diff'] = no_diff
+        return cls(ff['values'], ff['bounds'], Coords.from_string(ff['coords']), **kwargs)
 
     @classmethod
     def from_h5(cls, filepath, **kwargs):

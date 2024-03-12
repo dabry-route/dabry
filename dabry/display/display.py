@@ -5,7 +5,7 @@ import warnings
 from datetime import datetime
 from enum import Enum
 from math import floor
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 
 import h5py
 import matplotlib
@@ -17,12 +17,13 @@ from matplotlib.widgets import Slider
 from mpl_toolkits.basemap import Basemap
 from pyproj import Proj, Geod
 from scipy.interpolate import griddata
+from tqdm import tqdm
 
 from dabry.display.misc import *
 from dabry.flowfield import DiscreteFF
 from dabry.io_manager import IOManager
+from dabry.misc import Utils, Coords, Chrono
 from dabry.trajectory import Trajectory, traj_filepath_to_name
-from dabry.misc import Utils, Coords
 
 
 class ZOrder(Enum):
@@ -125,15 +126,13 @@ class Display:
         self.traj_filter = []
         # 0 for no aggregation (fronts), 1 for aggregation and time cursor, 2 for aggrgation and no time cursor
         self.mode_aggregated = False
-        self.mode_controls = False  # Whether to print ff in tiles (False) or by interpolation (True)
-        self.mode_ff = False  # Whether to display extremal field or not
+        self.mode_controls = False  # Whether to display controls
         self.mode_ef = True  # Whether to display zones where ff is equal to airspeed
-        self.mode_speed = True  # Whether to display trajectories annotation
-        self.mode_annot = False  # Whether to display ff colors
-        self.mode_ff_color = True  # Whether to display energy as colors
-        self.mode_energy = False  # Whether to draw extremal fields or not
-        self.mode_ef_display = True  # Whether to rescale ff
-        self.rescale_ff = False
+        self.mode_annot = False  # Whether to display trajectories annotation
+        self.mode_ff_color = True  # Whether to display ff colors
+        self.mode_energy = False  # Whether to display energy as colors
+        self.mode_ef_display = True  # Whether to draw extremal fields or not
+        self.rescale_ff = False  # Whether to rescale ff
 
         # True if ff norm colobar is displayed, False if energy colorbar is displayed
         self.active_ffcb = True
@@ -316,15 +315,15 @@ class Display:
             case_dir = Display.prompt_data_dir(path, latest=latest, last=last)
         return cls(os.path.basename(case_dir), case_dir=case_dir, mode_3d=mode_3d)
 
-    def configure(self):
+    def configure(self, flags: str):
+        self.set_mode(flags)
         self.set_title(os.path.basename(self.case_dir))
         self.load_all()
         self.setup()
 
     def run(self, noshow=False, movie=False, frames=None, fps=None,
             movie_format='apng', mini=False, flags=''):
-        self.configure()
-        self.set_mode(flags)
+        self.configure(flags)
         self.draw_all()
         if movie:
             kwargs = {}
@@ -402,34 +401,6 @@ class Display:
                     val = m
             self._tu_ef[ef_id] = val
         return self._tu_ef[ef_id]
-
-    def _index(self, mode):
-        """
-        Get nearest lowest index for time discrete grid
-        :param mode: 'ff', 'rff' or 'pen'
-        :return: Nearest lowest index for time, coefficient for the linear interpolation
-        """
-        ts = None
-        if mode == 'ff':
-            ts = self.ff.times
-        elif mode == 'rff':
-            ts = self.rff['ts']
-        elif mode == 'pen':
-            ts = self.penalty['ts']
-        else:
-            raise ValueError(f'Unknown mode "{mode}" for _index')
-        nt = ts.shape[0]
-        if self.tcur <= ts[0]:
-            return 0, 0.
-        if self.tcur > ts[-1]:
-            # Freeze ff to last frame
-            return nt - 2, 1.
-        tau = (self.tcur - ts[0]) / (ts[-1] - ts[0])
-        i, alpha = int(tau * (nt - 1)), tau * (nt - 1) - int(tau * (nt - 1))
-        if i == nt - 1:
-            i = nt - 2
-            alpha = 1.
-        return i, alpha
 
     def setup(self, debug=False):
 
@@ -683,17 +654,6 @@ class Display:
         if self.ff_colormesh is not None:
             self.ff_colormesh.remove()
             self.ff_colormesh = None
-        if self.ff_colorcontour is not None:
-            try:
-                self.ff_colorcontour.remove()
-            except AttributeError:
-                for coll in self.ff_colorcontour.collections:
-                    coll.remove()
-            self.ff_colorcontour = None
-        if self.ff_ceil is not None:
-            for coll in self.ff_ceil.collections:
-                coll.remove()
-            self.ff_ceil = None
         if self.ff_quiver is not None:
             self.ff_quiver.remove()
             self.ff_quiver = None
@@ -761,12 +721,20 @@ class Display:
             self.traj_filter = list(map(str.strip, f.readlines()))
 
     def load_ff(self):
-        self.ff = DiscreteFF.from_npz(self.io.ff_fpath)
+        self.ff = DiscreteFF.from_npz(self.io.ff_fpath, no_diff=True)
         norms = np.linalg.norm(self.ff.values, axis=-1)
         self.ff_norm_min, self.ff_norm_avg, self.ff_norm_max = np.min(norms), np.average(norms), np.max(norms)
         if self.ff.is_unsteady:
             self.tl_ff = self.ff.t_start
             self.tu_ff = self.ff.t_end
+        nt = 1000
+        times = np.linspace(self.ff.times[0], self.ff.times[-1], nt)
+        ut = 5 if self.rescale_ff else 1
+        values = np.zeros((nt, *self.ff.values[:, ::ut, ::ut, :].shape[1:]))
+        for it, t in enumerate(times):
+            k, p = index(t, self.ff.times)
+            values[it, ...] = (1 - p) * self.ff.values[k, ::ut, ::ut, :] + p * self.ff.values[k + 1, ::ut, ::ut, :]
+        self.ff_display = DiscreteFF(values, self.ff.bounds, self.ff.coords, no_diff=True)
 
     def load_trajs(self, filename=None):
         self.trajs.clear()
@@ -831,8 +799,9 @@ class Display:
             return
         with h5py.File(self.rff_fpath, 'r') as f:
             if self.coords != Coords.from_string(f.attrs['coords']):
-                warnings.warn(f'RFF coords "{f.attrs["coords"]}" does not match current display coords "{self.coords.value}"',
-                              category=UserWarning)
+                warnings.warn(
+                    f'RFF coords "{f.attrs["coords"]}" does not match current display coords "{self.coords.value}"',
+                    category=UserWarning)
 
             if self.coords == Coords.GCS:
                 self.rff_cntr_kwargs['latlon'] = True
@@ -1015,7 +984,7 @@ class Display:
                     ax.legend()
                     plt.show()
             else:
-                i, alpha = self._index('rff')
+                i, alpha = index(self.tcur, self.rff['ts'])
                 rff_values = (1 - alpha) * self.rff['data'][i, :, :] + alpha * self.rff['data'][i + 1, :, :]
                 zero_ceil = (1 - alpha) * self.rff_zero_ceils[i] + alpha * self.rff_zero_ceils[i + 1]
                 if self.coords == Coords.GCS:
@@ -1034,48 +1003,16 @@ class Display:
                 # ([-1000., 1000.],) if not debug else (np.linspace(-100000, 100000, 200),))
                 self.rff_contours.append(self.ax.contourf(*args, **self.rff_cntr_kwargs))
 
-    def draw_ff(self, showanchors=False):
-
-        # Erase previous drawings if existing
+    def draw_ff(self):
         self.clear_ff()
-
-        if self.ff.is_unsteady:
-            nt, nx, ny, _ = self.ff.values.shape
-        else:
-            nx, ny, _ = self.ff.values.shape
-            nt = 1
-        X = np.zeros((nx, ny))
-        Y = np.zeros((nx, ny))
-        if self.rescale_ff:
-            ur = 10 # max(1, nx // 18)
-        else:
-            ur = 1
+        it, _ = index(self.tcur, self.ff_display.times)
         factor = Utils.RAD_TO_DEG if self.coords == Coords.GCS else 1.
         grid = np.stack(
-            np.meshgrid(np.linspace(self.ff.bounds[-2, 0], self.ff.bounds[-2, 1], self.ff.values.shape[-3]),
-                        np.linspace(self.ff.bounds[-1, 0], self.ff.bounds[-1, 1], self.ff.values.shape[-2]),
+            np.meshgrid(np.linspace(self.ff_display.bounds[-2, 0], self.ff_display.bounds[-2, 1],
+                                    self.ff_display.values.shape[-3]),
+                        np.linspace(self.ff_display.bounds[-1, 0], self.ff_display.bounds[-1, 1],
+                                    self.ff_display.values.shape[-2]),
                         indexing='ij'), -1)
-        X[:] = factor * grid[:, :, 0]
-        Y[:] = factor * grid[:, :, 1]
-
-        alpha_bg = 0.7
-
-        U_grid = np.zeros((nx, ny))
-        V_grid = np.zeros((nx, ny))
-        if not self.ff.is_unsteady:
-            U_grid[:] = self.ff.values[:, :, 0]
-            V_grid[:] = self.ff.values[:, :, 1]
-        else:
-            k, p = self._index('ff')
-            U_grid[:] = (1 - p) * self.ff.values[k, :, :, 0] + p * self.ff.values[k + 1, :, :, 0]
-            V_grid[:] = (1 - p) * self.ff.values[k, :, :, 1] + p * self.ff.values[k + 1, :, :, 1]
-        U = U_grid.flatten()
-        V = V_grid.flatten()
-
-        norms3d = np.sqrt(U_grid ** 2 + V_grid ** 2)
-        norms = np.sqrt(U ** 2 + V ** 2)
-        eps = (np.max(norms) - np.min(norms)) * 1e-6
-        # norms += eps
 
         norm = mpl_colors.Normalize()
         self.cm = self.selected_cm
@@ -1113,59 +1050,22 @@ class Display:
             self.ff_colorbar.set_label('Energy [kWh]')
             self.active_ffcb = False
 
-        # ff norm plot
-        # znorms3d = scipy.ndimage.zoom(norms3d, 3)
-        # zX = scipy.ndimage.zoom(X, 3)
-        # zY = scipy.ndimage.zoom(Y, 3)
-        znorms3d = norms3d
-        zX = X
-        zY = Y
         kwargs = {
             'cmap': self.cm,
             'norm': norm,
-            'alpha': alpha_bg,
+            'alpha': 0.7,
             'zorder': ZOrder.WIND_NORM.value,
+            'shading': 'auto',
+            'antialiased': True,
         }
         if self.coords == Coords.GCS:
             kwargs['latlon'] = True
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.ff_colormesh = self.ax.pcolormesh(
+                factor * grid[:, :, 0],
+                factor * grid[:, :, 1], np.linalg.norm(self.ff_display.values[it, ...], axis=-1), **kwargs)
 
-        if not self.mode_ff:
-            if self.mode_3d:
-                colors = self.cm(norm(znorms3d))
-                self.ff_colormesh = self.ax.plot_surface(zX, zY, np.zeros(zX.shape), facecolors=colors,
-                                                         zorder=ZOrder.WIND_NORM.value)  # , **kwargs)
-            else:
-                kwargs['shading'] = 'auto'
-                kwargs['antialiased'] = True
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    self.ff_colormesh = self.ax.pcolormesh(zX, zY, znorms3d, **kwargs)
-        else:
-            znorms3d = scipy.ndimage.zoom(norms3d, 3)
-            zX = scipy.ndimage.zoom(X, 3)
-            zY = scipy.ndimage.zoom(Y, 3)
-            kwargs['antialiased'] = True
-            kwargs['levels'] = 30
-            self.ff_colorcontour = self.ax.contourf(zX, zY, znorms3d, **kwargs)
-
-        # ff ceil
-        if self.airspeed is not None and self.mode_speed:
-            if 'shading' in kwargs.keys():
-                del kwargs['shading']
-            # znorms3d = scipy.ndimage.zoom(norms3d, 3)
-            # zX = scipy.ndimage.zoom(X, 3)
-            # zY = scipy.ndimage.zoom(Y, 3)
-            kwargs['antialiased'] = True
-            ceil = (self.cm_norm_max - self.cm_norm_min) / 100.
-            kwargs['levels'] = (self.airspeed - ceil, self.airspeed + ceil)
-            self.ff_ceil = self.ax.contourf(X, Y, norms3d, **kwargs)
-
-        # Quiver plot
-        qX = X[::ur, ::ur]
-        qY = Y[::ur, ::ur]
-        qU = U_grid[::ur, ::ur].flatten()
-        qV = V_grid[::ur, ::ur].flatten()
-        qnorms = 1e-6 + np.sqrt(qU ** 2 + qV ** 2)
         kwargs = {
             'color': (0.2, 0.2, 0.2, 1.0),
             # 'width': 1,  # 0.001,
@@ -1177,16 +1077,9 @@ class Display:
         }
         if self.coords == Coords.GCS:
             kwargs['latlon'] = True
-        if np.any(qnorms > self.cm_norm_min + 0.01 * (self.cm_norm_max - self.cm_norm_min)):
-            if not self.mode_3d:
-                self.ff_quiver = self.ax.quiver(qX, qY, qU, qV, **kwargs)  # color=color)
-            else:
-                U, V = U_grid[::ur, ::ur], V_grid[::ur, ::ur]
-                qZ = np.zeros(qX.shape)
-                W = np.zeros(U.shape)
-                del kwargs['units']
-                del kwargs['minshaft']
-                self.ff_quiver = self.ax.quiver(qX, qY, qZ, U, V, W, **kwargs)  # color=color)
+        # if np.any(qnorms > self.cm_norm_min + 0.01 * (self.cm_norm_max - self.cm_norm_min)):
+        self.ff_quiver = self.ax.quiver(factor * grid[:, :, 0], factor * grid[:, :, 1],
+                                self.ff_display.values[it, :, :, 0], self.ff_display.values[it, :, :, 1], **kwargs)
 
     def draw_trajs(self):
         self.clear_trajs()
@@ -1414,7 +1307,7 @@ class Display:
             kwargs = {'latlon': True}
             factor = Utils.RAD_TO_DEG
         matplotlib.rcParams['hatch.color'] = (.2, .2, .2, 1.)
-        i, a = self._index('pen')
+        i, a = index(self.tcur, self.penalty['ts'])
         data = (1 - a) * self.penalty['data'][i] + a * self.penalty['data'][i + 1]
         self.pen_contours.append(ax.contourf(factor * self.penalty['grid'][..., 0],
                                              factor * self.penalty['grid'][..., 1],
@@ -1531,16 +1424,8 @@ class Display:
             self.clear_rff()
         self.draw_all()
 
-    def toggle_ff(self):
-        self.mode_ff = not self.mode_ff
-        self.draw_all()
-
     def toggle_ef(self):
         self.mode_ef = not self.mode_ef
-        self.draw_all()
-
-    def toggle_speed(self):
-        self.mode_speed = not self.mode_speed
         self.draw_all()
 
     def toggle_annot(self):
@@ -1581,12 +1466,8 @@ class Display:
             self.toggle_rff()
         elif event.key == 'c':
             self.toggle_controls()
-        elif event.key == 'w':
-            self.toggle_ff()
         elif event.key == 'h':
             self.toggle_ef()
-        elif event.key == 'z':
-            self.toggle_speed()
         elif event.key == 'right':
             self.increment_time()
         elif event.key == 'left':
@@ -1613,8 +1494,6 @@ class Display:
             self.switch_agg()
         if 'a' in flags:
             self.mode_aggregated = True
-        if 'w' in flags:
-            self.mode_ff = True
         if 't' in flags:
             self.toggle_rff()
         if 'h' in flags:
@@ -1678,3 +1557,25 @@ class Display:
     @property
     def coords(self):
         return self.io.coords
+
+def index(t, t_list) -> tuple[int, float]:
+    """
+    Get nearest lowest index for time discrete grid and interpolation coefficient.
+    If some data f is known on the increasing grid t_list, then its interpolated value at t is
+    (1 - alpha) * f[index] + alpha * f[index + 1]
+    :param t: Time for interpolation
+    :param t_list: Time grid
+    :return: index: Nearest lowest index for time, alpha: coefficient for the linear interpolation
+    """
+    nt = t_list.shape[0]
+    if t <= t_list[0]:
+        return 0, 0.
+    if t > t_list[-1]:
+        # Freeze ff to last frame
+        return nt - 2, 1.
+    tau = (t - t_list[0]) / (t_list[-1] - t_list[0])
+    i, alpha = int(tau * (nt - 1)), tau * (nt - 1) - int(tau * (nt - 1))
+    if i == nt - 1:
+        i = nt - 2
+        alpha = 1.
+    return i, alpha
