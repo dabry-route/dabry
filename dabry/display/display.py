@@ -80,10 +80,11 @@ class Display:
         self.selected_cm = windy_cm  # custom_cm  # windy_cm
         self.cm_norm_min = 0.
         self.cm_norm_max = 24  # 46.
+        self.cm_norm_min_mag = 5
         self.airspeed = None
         self.title = ''
         self.axes_equal = True
-        self.projection = 'ortho'
+        self.projection = 'merc'
         self.sm_ff = None
         self.sm_engy = None
         self.leg = None
@@ -132,7 +133,7 @@ class Display:
         self.mode_ff_color = True  # Whether to display energy as colors
         self.mode_energy = False  # Whether to draw extremal fields or not
         self.mode_ef_display = True  # Whether to rescale ff
-        self.rescale_ff = True
+        self.rescale_ff = False
 
         # True if ff norm colobar is displayed, False if energy colorbar is displayed
         self.active_ffcb = True
@@ -141,6 +142,7 @@ class Display:
 
         self.ff = None
         self.ff_norm_min = None
+        self.ff_norm_avg = None
         self.ff_norm_max = None
         self.trajs: Dict[str, Trajectory] = {}
         self.trajs_regular: Dict[str, Trajectory] = {}
@@ -429,8 +431,7 @@ class Display:
             alpha = 1.
         return i, alpha
 
-    def setup(self, projection='ortho', debug=False):
-        self.projection = projection
+    def setup(self, debug=False):
 
         # if self.opti_ceil is None:
         #     self.opti_ceil = 0.0005 * 0.5 * (self.tr[0] - self.bl[0] + self.tr[1] - self.bl[1])
@@ -528,7 +529,7 @@ class Display:
 
         if gcs:
             kwargs = {
-                'resolution': 'c',
+                'resolution': 'l',
                 'projection': self.projection,
                 'ax': self.main_ax
             }
@@ -762,7 +763,7 @@ class Display:
     def load_ff(self):
         self.ff = DiscreteFF.from_npz(self.io.ff_fpath)
         norms = np.linalg.norm(self.ff.values, axis=-1)
-        self.ff_norm_min, self.ff_norm_max = np.min(norms), np.max(norms)
+        self.ff_norm_min, self.ff_norm_avg, self.ff_norm_max = np.min(norms), np.average(norms), np.max(norms)
         if self.ff.is_unsteady:
             self.tl_ff = self.ff.t_start
             self.tu_ff = self.ff.t_end
@@ -1046,7 +1047,7 @@ class Display:
         X = np.zeros((nx, ny))
         Y = np.zeros((nx, ny))
         if self.rescale_ff:
-            ur = 1  # max(1, nx // 18)
+            ur = 10 # max(1, nx // 18)
         else:
             ur = 1
         factor = Utils.RAD_TO_DEG if self.coords == Coords.GCS else 1.
@@ -1078,7 +1079,8 @@ class Display:
 
         norm = mpl_colors.Normalize()
         self.cm = self.selected_cm
-        if self.coords == Coords.GCS and self.ff_norm_max < 1.5 * self.cm_norm_max:
+        if self.coords == Coords.GCS and self.ff_norm_max < 1.5 * self.cm_norm_max and \
+                self.ff_norm_avg > self.cm_norm_min_mag:
             self.cm = windy_cm
             norm.autoscale(np.array([self.cm_norm_min, self.cm_norm_max]))
         else:
@@ -1618,7 +1620,7 @@ class Display:
         if 'h' in flags:
             self.mode_ef = False
         if 'u' in flags:
-            self.rescale_ff = False
+            self.rescale_ff = True
         if 'e' not in flags:
             self.mode_energy = False
 

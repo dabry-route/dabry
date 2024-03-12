@@ -221,7 +221,7 @@ class DiscreteFF(FlowField):
 
     @classmethod
     def from_npz(cls, filepath):
-        ff = np.load(filepath)
+        ff = np.load(filepath, mmap_mode='r')
         return cls(ff['values'], ff['bounds'], Coords.from_string(ff['coords']))
 
     @classmethod
@@ -548,8 +548,8 @@ class WrapperFF(FlowField):
             return self._scaler_speed * self.ff.values
         if item == 'bounds':
             space_bounds = np.vstack((
-                (0., (self.ff.bounds[-2, 1] - self.bl[0]) / self.scale_length),
-                (0., (self.ff.bounds[-1, 1] - self.bl[1]) / self.scale_length),
+                (self.ff.bounds[-2, 0] - self.bl[0], (self.ff.bounds[-2, 1] - self.bl[0]) / self.scale_length),
+                (self.ff.bounds[-1, 0] - self.bl[1], (self.ff.bounds[-1, 1] - self.bl[1]) / self.scale_length),
             ))
             if self.ff.t_end is not None:
                 time_bounds = (
