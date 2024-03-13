@@ -163,12 +163,13 @@ class Trajectory:
                           costates=self.costates.copy(), cost=self.cost.copy(), events=self.events.copy())
 
     def save(self, name, dir_name, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
-             time_offset: Optional[float] = None):
+             bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
         scale_length = 1 if scale_length is None else scale_length
         scale_time = 1 if scale_time is None else scale_time
         time_offset = 0 if time_offset is None else time_offset
+        bl = np.array((0, 0)) if bl is None else bl.copy()
         np.savez(os.path.join(dir_name, traj_name_to_filename(name)),
-                 times=time_offset + self.times * scale_time, states=self.states * scale_length,
+                 times=time_offset + self.times * scale_time, states=bl + self.states * scale_length,
                  costates=self.costates if self.costates is not None else np.array(((), ())),
                  controls=self.controls if self.controls is not None else np.array(((), ())),
                  cost=self.cost * scale_time if self.cost is not None else np.array(()))

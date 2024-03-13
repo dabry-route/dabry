@@ -1,5 +1,7 @@
+import json
 import math
 import math
+import os
 import signal
 import sys
 import warnings
@@ -13,7 +15,7 @@ from numpy import ndarray
 from tqdm import tqdm
 
 from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha, \
-    is_possible_direction, diadic_valuation, alpha_to_int, Coords
+    is_possible_direction, diadic_valuation, alpha_to_int, Coords, Chrono
 from dabry.misc import terminal
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
@@ -324,7 +326,7 @@ class SolverEF(ABC):
                  target_radius: Optional[float] = None,
                  abs_max_step: Optional[float] = None,
                  rel_max_step: Optional[float] = 0.01,
-                 free_max_step: bool = False,
+                 free_max_step: bool = True,
                  cost_map_shape: Optional[tuple[int, int]] = (100, 100)):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
@@ -375,8 +377,10 @@ class SolverEF(ABC):
 
         self.dyn_augsys = self.dyn_augsys_cartesian if self.pb.coords == Coords.CARTESIAN else self.dyn_augsys_gcs
         self._cost_map = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
+        self.computation_duration = 0
 
     def setup(self):
+        self.computation_duration = 0
         self.traj_groups = []
 
     @property
@@ -437,9 +441,18 @@ class SolverEF(ABC):
         return res
 
     def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
-                     time_offset: Optional[float] = None):
+                     bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
         self.pb.io.save_trajs(self.trajs, group_name='ef_01', scale_length=scale_length, scale_time=scale_time,
-                              time_offset=time_offset)
+                              bl=bl, time_offset=time_offset)
+        self.save_info()
+
+    def save_info(self):
+        pb_info = {
+            'solver': self.__class__.__name__,
+            'computation_duration': self.computation_duration,
+        }
+        with open(os.path.join(self.pb.io.solver_info_fpath), 'w') as f:
+            json.dump(pb_info, f, indent=4)
 
 
 class SolverEFSimple(SolverEF):
@@ -650,7 +663,7 @@ class SolverEFResampling(SolverEF):
         self._to_shoot_sites = []
         new_sites = self.compute_new_sites()
         self._to_shoot_sites.extend(new_sites)
-        self.trim_distance()
+        # self.trim_distance()
         print("Cost guarantee: {val:.3f}/{total:.3f} ({ratio:.1f}%) {candsol}".format(
             val=self.times[self.validity_index],
             total=self.times[-1],
@@ -661,10 +674,9 @@ class SolverEFResampling(SolverEF):
         self.depth += 1
 
     def trim_distance(self):
-        if self._ff_max_norm is None or np.isclose(self._ff_max_norm, 0):
-            return
         for site in self.sites.values():
-            sup_time = np.linalg.norm(site.state_at_index(site.index_t) - self.pb.x_target) / self._ff_max_norm
+            sup_time = np.linalg.norm(site.state_at_index(site.index_t) - self.pb.x_target) / (self.pb.srf_max +
+                                                                                               self._ff_max_norm)
             if self.times[-1] - self.times[site.index_t] > sup_time:
                 site.close(ClosureReason.SUBOPTIMAL)
 
@@ -841,11 +853,11 @@ class SolverEFResampling(SolverEF):
                                     events=site.traj.events)
 
     def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
-                     time_offset: Optional[float] = None):
-        super(SolverEFResampling, self).save_results(scale_length, scale_time, time_offset)
+                     bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
+        super(SolverEFResampling, self).save_results(scale_length, scale_time, bl, time_offset)
         if self.solution_site is not None and self.solution_site.traj_full is not None:
             self.pb.io.save_traj(self.solution_site.traj_full, name='solution',
-                                 scale_length=scale_length, scale_time=scale_time, time_offset=time_offset)
+                                 scale_length=scale_length, scale_time=scale_time, bl=bl, time_offset=time_offset)
 
 
 class SolverEFBisection(SolverEFResampling):
@@ -934,6 +946,8 @@ class SolverEFTrimming(SolverEFResampling):
 
     def solve(self):
         self.setup()
+        chrono = Chrono('Solving problem')
+        chrono.start()
         for _ in range(self.n_subframes):
             s = 'Subframe {i_subframe}/{n_subframe}, Act: {n_active: >4}, Cls: {n_closed: >4} (Tot: {n_total: >4})'
             print(s.format(
@@ -947,6 +961,8 @@ class SolverEFTrimming(SolverEFResampling):
         self.check_solutions()
         for site in self.solution_sites:
             self.extrapolate_back_traj(site)
+        chrono.stop()
+        self.computation_duration = chrono.duration
 
 
 class CostMap:

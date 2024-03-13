@@ -79,15 +79,17 @@ if __name__ == '__main__':
     print(solver.success)
 
     traj_ortho = pb.orthodromic()
-    traj_htarget = pb.htarget()
+    traj_radial = pb.radial()
 
     pb.io.set_case_dir(os.path.join(os.path.abspath('.'), pb_unscaled.name))
     pb.io.clean_output_dir()
     _, _, _, _, _, scale_length, scale_time = pb_unscaled.scaling_params()
-    solver.save_results(scale_length=scale_length, scale_time=scale_time, time_offset=pb_unscaled.model.ff.t_start)
+    scaling_params = dict(scale_length=scale_length, scale_time=scale_time, bl=pb_unscaled.bl,
+                          time_offset=pb_unscaled.model.ff.t_start)
+    solver.save_results(**scaling_params)
     pb_unscaled.io.set_case_dir(os.path.join(os.path.abspath('.'), pb_unscaled.name))
     pb_unscaled.io.save_ff(pb_unscaled.model.ff, bl=pb_unscaled.bl, tr=pb_unscaled.tr)
     pb_unscaled.save_info()
-    pb_unscaled.io.save_traj(traj_ortho, 'orthodromic', scale_length=scale_length, scale_time=scale_time,
-                             time_offset=pb_unscaled.model.ff.t_start)
+    pb_unscaled.io.save_traj(traj_ortho, 'orthodromic', **scaling_params)
+    pb_unscaled.io.save_traj(traj_radial, 'radial', **scaling_params)
     print(f'Results saved to {pb.io.case_dir}')

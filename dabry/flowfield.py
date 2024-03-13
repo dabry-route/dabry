@@ -290,7 +290,7 @@ class DiscreteFF(FlowField):
         spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(shape) - np.ones(bounds.shape[0]))
         _nt = nt if t_end is not None else 1
         values = np.zeros(shape + (2,))
-        grad_values = np.zeros(shape + (2, 2)) if not kwargs.get('force_no_diff') else None
+        grad_values = np.zeros(shape + (2, 2)) if not kwargs.get('no_diff') else None
         for k in range(_nt):
             t = bounds[0, 0] + k * spacings[0] if t_end is not None else t_start
             for i in range(nx):
@@ -300,7 +300,7 @@ class DiscreteFF(FlowField):
                         values[i, j, :] = ff.value(t, state)
                     else:
                         values[k, i, j, :] = ff.value(t, state)
-                    if not kwargs.get('force_no_diff'):
+                    if not kwargs.get('no_diff'):
                         if t_end is None:
                             grad_values[i, j, ...] = ff.d_value(t, state)
                         else:
@@ -1149,7 +1149,7 @@ def discretize_ff(ff: FlowField,
         nt = 25 if nt is None else nt
         if bl is None or tr is None:
             raise Exception(f'Missing bounding box (bl, tr) to sample unbounded {ff}')
-        return DiscreteFF.from_ff(ff, np.array((bl, tr)).transpose(), nx=nx, ny=ny, nt=nt, force_no_diff=True)
+        return DiscreteFF.from_ff(ff, np.array((bl, tr)).transpose(), nx=nx, ny=ny, nt=nt, no_diff=True)
     else:
         if nx is not None or ny is not None or nt is not None:
             warnings.warn('Grid shape (nt, nx, ny) provided but resampling of DiscreteFF not implemented yet. '

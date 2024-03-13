@@ -78,7 +78,12 @@ class IOManager:
 
     @property
     def pb_data_fpath(self):
-        return os.path.join(self.case_dir, self.case_name + '.json')
+        return os.path.join(self.case_dir, 'problem_info.json')
+
+    @property
+    def solver_info_fpath(self):
+        return os.path.join(self.case_dir, 'solver_info.json')
+
 
     @property
     def coords(self) -> Coords:
@@ -136,14 +141,14 @@ class IOManager:
 
     def save_traj(self, traj: Trajectory, name: str, target_dir: Optional[str] = None,
                   scale_length: Optional[float] = None, scale_time: Optional[float] = None,
-                  time_offset: Optional[float] = None):
+                  bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
         if target_dir is None:
             target_dir = self.trajs_dir
-        traj.save(name, target_dir, scale_length, scale_time, time_offset)
+        traj.save(name, target_dir, scale_length, scale_time, bl, time_offset)
 
     def save_trajs(self, trajs: List[Trajectory], group_name: Optional[str] = None,
                    scale_length: Optional[float] = None, scale_time: Optional[float] = None,
-                   time_offset: Optional[float] = None):
+                   bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
         if len(trajs) == 0:
             return
         self.setup_trajs()
@@ -155,7 +160,7 @@ class IOManager:
             target_dir = self.trajs_dir
         for i_traj, traj in enumerate(trajs):
             name = str(i_traj).rjust(1 + int(np.log10(len(trajs) - 1)), '0')
-            self.save_traj(traj, name, target_dir, scale_length, scale_time, time_offset)
+            self.save_traj(traj, name, target_dir, scale_length, scale_time, bl, time_offset)
 
     # def dump_obs(self, nx=100, ny=100):
     #     filepath = os.path.join(self.case_dir, self.obs_filename)
