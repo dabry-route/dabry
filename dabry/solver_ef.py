@@ -1002,6 +1002,8 @@ class SolverEFAstar(SolverEFResampling):
             heappush(queue, PrioritizedItem(self.heur_cost(site), site))
         count = 0
         site_count = {}
+        chrono = Chrono()
+        chrono.start()
         with tqdm(total=self.n_costate_sectors*self.n_time, file=sys.stdout) as pbar:
             while True:
                 if len(queue) == 0:
@@ -1038,6 +1040,8 @@ class SolverEFAstar(SolverEFResampling):
                             self.connect_to_parents(site)
 
                 pbar.set_description(f"{np.sqrt(dist_sq):.3f}")
+        chrono.stop()
+        self.computation_duration = chrono.duration
 
 
 class CostMap:
