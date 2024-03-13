@@ -10,19 +10,17 @@ from typing import Optional, Dict
 import h5py
 import matplotlib
 import matplotlib.cm as mpl_cm
-import scipy.ndimage
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.widgets import Slider
 from mpl_toolkits.basemap import Basemap
 from pyproj import Proj, Geod
 from scipy.interpolate import griddata
-from tqdm import tqdm
 
 from dabry.display.misc import *
 from dabry.flowfield import DiscreteFF
 from dabry.io_manager import IOManager
-from dabry.misc import Utils, Coords, Chrono
+from dabry.misc import Utils, Coords
 from dabry.trajectory import Trajectory, traj_filepath_to_name
 
 
@@ -132,7 +130,7 @@ class Display:
         self.mode_ff_color = True  # Whether to display ff colors
         self.mode_energy = False  # Whether to display energy as colors
         self.mode_ef_display = True  # Whether to draw extremal fields or not
-        self.rescale_ff = False  # Whether to rescale ff
+        self.rescale_ff = True  # Whether to rescale ff
 
         # True if ff norm colobar is displayed, False if energy colorbar is displayed
         self.active_ffcb = True
@@ -727,14 +725,25 @@ class Display:
         if self.ff.is_unsteady:
             self.tl_ff = self.ff.t_start
             self.tu_ff = self.ff.t_end
-        nt = 1000
-        times = np.linspace(self.ff.times[0], self.ff.times[-1], nt)
-        ut = 5 if self.rescale_ff else 1
-        values = np.zeros((nt, *self.ff.values[:, ::ut, ::ut, :].shape[1:]))
-        for it, t in enumerate(times):
-            k, p = index(t, self.ff.times)
-            values[it, ...] = (1 - p) * self.ff.values[k, ::ut, ::ut, :] + p * self.ff.values[k + 1, ::ut, ::ut, :]
-        self.ff_display = DiscreteFF(values, self.ff.bounds, self.ff.coords, no_diff=True)
+            ut = 1
+            if self.rescale_ff:
+                nt, nx, ny, _ = self.ff.values.shape
+                nxp, nyp = nx, ny
+                while nt * nxp * nyp * 2 > 100000:
+                    ut += 1
+                    nxp = 1 + (nx - 1) // ut
+                    nyp = 1 + (ny - 1) // ut
+            nt = 1000
+            times = np.linspace(self.ff.times[0], self.ff.times[-1], nt)
+            values = np.zeros((nt, *self.ff.values[:, ::ut, ::ut, :].shape[1:]))
+            for it, t in enumerate(times):
+                k, p = index(t, self.ff.times)
+                values[it, ...] = (1 - p) * self.ff.values[k, ::ut, ::ut, :] + p * self.ff.values[k + 1, ::ut, ::ut, :]
+            self.ff_display = DiscreteFF(values, self.ff.bounds, self.ff.coords, no_diff=True)
+        else:
+            values = np.expand_dims(self.ff.values, 0)
+            bounds = np.vstack((np.array((0, 0)), self.ff.bounds))
+            self.ff_display = DiscreteFF(values, bounds, self.ff.coords, no_diff=True)
 
     def load_trajs(self, filename=None):
         self.trajs.clear()
@@ -1005,7 +1014,11 @@ class Display:
 
     def draw_ff(self):
         self.clear_ff()
-        it, _ = index(self.tcur, self.ff_display.times)
+        if self.ff_display.is_unsteady:
+            it, _ = index(self.tcur, self.ff_display.times)
+            ff_values = self.ff_display.values[it, ...]
+        else:
+            ff_values = self.ff_display.values
         factor = Utils.RAD_TO_DEG if self.coords == Coords.GCS else 1.
         grid = np.stack(
             np.meshgrid(np.linspace(self.ff_display.bounds[-2, 0], self.ff_display.bounds[-2, 1],
@@ -1064,7 +1077,7 @@ class Display:
             warnings.simplefilter("ignore")
             self.ff_colormesh = self.ax.pcolormesh(
                 factor * grid[:, :, 0],
-                factor * grid[:, :, 1], np.linalg.norm(self.ff_display.values[it, ...], axis=-1), **kwargs)
+                factor * grid[:, :, 1], np.linalg.norm(ff_values, axis=-1), **kwargs)
 
         kwargs = {
             'color': (0.2, 0.2, 0.2, 1.0),
@@ -1079,7 +1092,7 @@ class Display:
             kwargs['latlon'] = True
         # if np.any(qnorms > self.cm_norm_min + 0.01 * (self.cm_norm_max - self.cm_norm_min)):
         self.ff_quiver = self.ax.quiver(factor * grid[:, :, 0], factor * grid[:, :, 1],
-                                self.ff_display.values[it, :, :, 0], self.ff_display.values[it, :, :, 1], **kwargs)
+                                        ff_values[..., 0], ff_values[..., 1], **kwargs)
 
     def draw_trajs(self):
         self.clear_trajs()
@@ -1255,13 +1268,21 @@ class Display:
             kwargs['color'] = 'black'
             kwargs['marker'] = '*'
             kwargs['zorder'] = ZOrder.ANNOT.value
-            self.scatter_target = scatterax.scatter(*(factor * self.x_target), **kwargs)
+            # self.scatter_target = scatterax.scatter(*(factor * self.x_target), **kwargs)
 
             # if labeling:
             #     self.mainax.annotate('Target', c, (10, 10), textcoords='offset pixels', ha='center')
             if self.coords == Coords.CARTESIAN:
-                self.circle_target = scatterax.add_patch(plt.Circle(factor * self.x_target, self.target_radius,
-                                                                    facecolor='none', edgecolor='black'))
+                ax_circle = scatterax
+                pos_center = self.x_target
+                radius = self.target_radius
+            else:
+                ax_circle = self.main_ax
+                pos_center = self.map(*(factor * self.x_target))
+                radius = self.map(*(factor * (self.x_target + self.target_radius * np.array((1, 0)))))[0] - pos_center[
+                    0]
+            self.circle_target = ax_circle.add_patch(plt.Circle(pos_center, radius,
+                                                                facecolor='none', edgecolor='black'))
 
     def draw_obs(self):
         self.clear_obs()
@@ -1499,7 +1520,7 @@ class Display:
         if 'h' in flags:
             self.mode_ef = False
         if 'u' in flags:
-            self.rescale_ff = True
+            self.rescale_ff = False
         if 'e' not in flags:
             self.mode_energy = False
 
@@ -1557,6 +1578,7 @@ class Display:
     @property
     def coords(self):
         return self.io.coords
+
 
 def index(t, t_list) -> tuple[int, float]:
     """
