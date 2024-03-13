@@ -181,7 +181,7 @@ class DiscreteFF(FlowField):
     """
 
     def __init__(self, values: ndarray, bounds: ndarray, coords: Coords, grad_values: Optional[ndarray] = None,
-                 force_no_diff=False):
+                 no_diff=False):
         super().__init__(nt_int=values.shape[0] if values.ndim == 4 else None)
 
         self.is_dumpable = 2
@@ -200,7 +200,7 @@ class DiscreteFF(FlowField):
 
         self.grad_values = grad_values
 
-        if not force_no_diff:
+        if not no_diff:
             if self.grad_values is None:
                 self.compute_derivatives()
 
@@ -220,9 +220,12 @@ class DiscreteFF(FlowField):
         return np.linspace(self.t_start, self.t_end, self.values.shape[0])
 
     @classmethod
-    def from_npz(cls, filepath):
-        ff = np.load(filepath)
-        return cls(ff['values'], ff['bounds'], Coords.from_string(ff['coords']))
+    def from_npz(cls, filepath, no_diff: Optional[bool] = None):
+        ff = np.load(filepath, mmap_mode='r')
+        kwargs = {}
+        if no_diff is not None:
+            kwargs['no_diff'] = no_diff
+        return cls(ff['values'], ff['bounds'], Coords.from_string(ff['coords']), **kwargs)
 
     @classmethod
     def from_h5(cls, filepath, **kwargs):
@@ -548,8 +551,8 @@ class WrapperFF(FlowField):
             return self._scaler_speed * self.ff.values
         if item == 'bounds':
             space_bounds = np.vstack((
-                (0., (self.ff.bounds[-2, 1] - self.bl[0]) / self.scale_length),
-                (0., (self.ff.bounds[-1, 1] - self.bl[1]) / self.scale_length),
+                (self.ff.bounds[-2, 0] - self.bl[0], (self.ff.bounds[-2, 1] - self.bl[0]) / self.scale_length),
+                (self.ff.bounds[-1, 0] - self.bl[1], (self.ff.bounds[-1, 1] - self.bl[1]) / self.scale_length),
             ))
             if self.ff.t_end is not None:
                 time_bounds = (

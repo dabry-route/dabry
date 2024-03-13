@@ -590,7 +590,8 @@ class Utils:
 
 
 class Chrono:
-    def __init__(self, no_verbose=False):
+    def __init__(self, name: str = "", no_verbose=False):
+        self.name = name
         self.t_start = 0.
         self.t_end = 0.
         self.verbose = not no_verbose
@@ -602,9 +603,9 @@ class Chrono:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
 
-    def start(self, msg=''):
+    def start(self):
         if self.verbose:
-            print(f'[*] {msg}')
+            print(f'[*] {self.name}')
         self.t_start = time.time()
 
     def stop(self):

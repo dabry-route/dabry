@@ -128,6 +128,67 @@ class FrameObs(Obstacle):
                                           g4)))
 
 
+class DiscreteObs(Obstacle):
+    def __init__(self, values: ndarray, bounds: ndarray):
+        super().__init__()
+
+        if bounds.shape[0] != values.ndim:
+            raise Exception(f'Incompatible shape for values and bounds: '
+                            f'values has {len(values.shape)} dimensions '
+                            f'so bounds must be of shape ({len(values.shape)}, 2) ({bounds.shape} given)')
+
+        self.values = values.copy()
+        self.bounds = bounds.copy()
+
+        self.spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(self.values.shape) -
+                                                         np.ones(self.values.ndim))
+
+        self.grad_values = None
+
+        self.compute_derivatives()
+
+    @classmethod
+    def from_npz(cls, filepath):
+        obs = np.load(filepath, mmap_mode='r')
+        return cls(obs['values'], obs['bounds'])
+
+    def value(self, x: ndarray) -> ndarray:
+        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, x)
+
+    def d_value(self, x: ndarray) -> ndarray:
+        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, x)
+
+    def compute_derivatives(self):
+        """
+        Computes the derivatives of the flow field with a central difference scheme
+        on the flow field native grid
+        """
+        grad_shape = self.values.shape + (2,)
+        self.grad_values = np.zeros(grad_shape)
+        inside_shape = np.array(grad_shape, dtype=int)
+        inside_shape[0] -= 2  # x-axis
+        inside_shape[1] -= 2  # y-axis
+        inside_shape = tuple(inside_shape)
+
+        # Use order 2 precision derivative
+        self.grad_values[1:-1, 1:-1, :] = \
+            np.stack(((self.values[2:, 1:-1] - self.values[:-2, 1:-1]) / (2 * self.spacings[-2]),
+                      (self.values[1:-1, 2:] - self.values[1:-1, :-2]) / (2 * self.spacings[-1])),
+                     axis=-1
+                     ).reshape(inside_shape)
+        # Padding to full grid
+        # Borders
+        self.grad_values[0, 1:-1, :] = self.grad_values[1, 1:-1, :]
+        self.grad_values[-1, 1:-1, :] = self.grad_values[-2, 1:-1, :]
+        self.grad_values[1:-1, 0, :] = self.grad_values[1:-1, 1, :]
+        self.grad_values[1:-1, -1, :] = self.grad_values[1:-1, -2, :]
+        # Corners
+        self.grad_values[0, 0, :] = self.grad_values[1, 1, :]
+        self.grad_values[0, -1, :] = self.grad_values[1, -2, :]
+        self.grad_values[-1, 0, :] = self.grad_values[-2, 1, :]
+        self.grad_values[-1, -1, :] = self.grad_values[-2, -2, :]
+
+
 class GreatCircleObs(Obstacle):
 
     # TODO: validate this class
