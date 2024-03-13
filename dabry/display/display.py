@@ -106,8 +106,6 @@ class Display:
             'dpi': 300,
             'format': 'png'
         }
-        self.params_fname = 'pb_info.json'
-        self.params_fname_formatted = 'params.html'
 
         self.ff_fname = 'ff.h5'
         self.rff_fname = 'rff.h5'
@@ -274,7 +272,7 @@ class Display:
         if name == latest_tag:
             print('Opening latest file')
             all_subdirs = list(map(lambda n: os.path.join(output_dir, n), case_dirs))
-            all_param_files = [os.path.join(dir_path, os.path.basename(dir_path) + '.json')
+            all_param_files = [os.path.join(dir_path, 'problem_info.json')
                                for dir_path in all_subdirs if Display.is_readable(dir_path)]
 
             latest_subdir = os.path.dirname(max(all_param_files, key=os.path.getmtime))
@@ -294,8 +292,7 @@ class Display:
 
     @classmethod
     def is_readable(cls, dir_path: str):
-        basename = os.path.basename(dir_path)
-        params_path = os.path.join(dir_path, '%s.json' % basename)
+        params_path = os.path.join(dir_path, 'problem_info.json')
         if os.path.exists(params_path):
             return True
         return False
@@ -729,7 +726,7 @@ class Display:
             if self.rescale_ff:
                 nt, nx, ny, _ = self.ff.values.shape
                 nxp, nyp = nx, ny
-                while nt * nxp * nyp * 2 > 100000:
+                while nt * nxp * nyp * 2 > 500000:
                     ut += 1
                     nxp = 1 + (nx - 1) // ut
                     nyp = 1 + (ny - 1) // ut
@@ -1268,7 +1265,7 @@ class Display:
             kwargs['color'] = 'black'
             kwargs['marker'] = '*'
             kwargs['zorder'] = ZOrder.ANNOT.value
-            # self.scatter_target = scatterax.scatter(*(factor * self.x_target), **kwargs)
+            self.scatter_target = scatterax.scatter(*(factor * self.x_target), **kwargs)
 
             # if labeling:
             #     self.mainax.annotate('Target', c, (10, 10), textcoords='offset pixels', ha='center')
@@ -1374,8 +1371,7 @@ class Display:
 
     @property
     def img_fpath(self):
-        basename = os.path.basename(self.case_dir)
-        return os.path.join(self.case_dir, basename + f'.{self.img_params["format"]}')
+        return os.path.join(self.case_dir, f'thumbnail.{self.img_params["format"]}')
 
     def set_title(self, title):
         self.title = title

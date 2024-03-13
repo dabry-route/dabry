@@ -10,7 +10,7 @@ import scipy.integrate as scitg
 from numpy import ndarray
 
 from dabry.aero import MermozAero, Aero
-from dabry.feedback import GSTargetFB, Feedback, HTargetFB
+from dabry.feedback import GSTargetFB, Feedback, RadialFB
 from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearFF, RadialGaussFF, GyreFF, \
     PointSymFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
     FlowField, VortexFF, ZeroFF, WrapperFF, GyreMSEASFF
@@ -129,9 +129,9 @@ class NavigationProblem:
             'bl': self.bl.tolist(),
             'tr': self.tr.tolist(),
             'time_orthodromic': self.time_orthodromic(),
-            'time_htarget': self.time_htarget()
+            'time_radial': self.time_radial()
         }
-        with open(os.path.join(self.io.case_dir, f'{self.name}.json'), 'w') as f:
+        with open(os.path.join(self.io.case_dir, f'problem_info.json'), 'w') as f:
             json.dump(pb_info, f, indent=4)
 
     @property
@@ -183,10 +183,6 @@ class NavigationProblem:
     def hamiltonian(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
         return costate @ (control + self.model.ff.value(t, state)) + 1
 
-    def hamiltonian_reduced(self, t: float, state: ndarray, costate: ndarray):
-        # TODO : adapt to gcs
-        return self.hamiltonian(t, state, costate, self.timeopt_control_cartesian(costate))
-
     def in_obs(self, state):
         return [obs for obs in self.obstacles if obs.value(state) < 0.]
 
@@ -214,7 +210,7 @@ class NavigationProblem:
         return Trajectory(res.t, res.y.transpose(), self.model.coords, events={'target': res.t_events[0]})
 
     def auto_time_upper_bound(self):
-        return min(self.time_orthodromic(), self.time_htarget())
+        return min(self.time_orthodromic(), self.time_radial())
 
     def orthodromic(self):
         """
@@ -224,8 +220,8 @@ class NavigationProblem:
         fb = GSTargetFB(self.model.ff, self.srf_max, self.x_target)
         return self.apply_feedback(fb)
 
-    def htarget(self):
-        fb = HTargetFB(self.x_target, self.model.coords)
+    def radial(self):
+        fb = RadialFB(self.x_target, self.model.coords)
         return self.apply_feedback(fb)
 
     def time_orthodromic(self):
@@ -233,10 +229,10 @@ class NavigationProblem:
         reached = traj_ortho.events['target'].size > 0
         return traj_ortho.events['target'][0] if reached else np.infty
 
-    def time_htarget(self):
-        traj_htarget = self.htarget()
-        reached = traj_htarget.events['target'].size > 0
-        return traj_htarget.events['target'][0] if reached else np.infty
+    def time_radial(self):
+        traj_radial = self.radial()
+        reached = traj_radial.events['target'].size > 0
+        return traj_radial.events['target'][0] if reached else np.infty
 
     def scaling_params(self):
         if self.coords == Coords.CARTESIAN:

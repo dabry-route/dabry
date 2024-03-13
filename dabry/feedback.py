@@ -89,7 +89,7 @@ class GSTargetFB(Feedback):
         return directional_timeopt_control(self.ff.value(t, x), e_target, self.srf)
 
 
-class HTargetFB(Feedback):
+class RadialFB(Feedback):
     """
     Control law heading towards target
     """

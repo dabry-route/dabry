@@ -24,7 +24,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
     trajectories = [] if trajectories is None else trajectories
     template = 'plotly_dark' if theme_dark else 'plotly'
     ff_disc = DiscreteFF.from_ff(solver.pb.model.ff, (solver.pb.bl, solver.pb.tr),
-                                 nt=10, force_no_diff=True)
+                                 nt=10, no_diff=True)
 
     values = ff_disc.values if ff_disc.values.ndim == 3 else ff_disc.values[0]
     fig = figfac.create_quiver(*np.meshgrid(

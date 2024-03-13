@@ -615,6 +615,10 @@ class Chrono:
             print(f'[*] Done ({self})')
         return diff
 
+    @property
+    def duration(self):
+        return self.t_end - self.t_start
+
     def __str__(self):
         return Utils.time_fmt(self.t_end - self.t_start)
 
