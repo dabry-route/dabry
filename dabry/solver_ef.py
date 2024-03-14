@@ -738,10 +738,14 @@ class SolverEFResampling(SolverEF):
                     site.neuter(i, NeuteringReason.SELF_AND_NB_IN_OBS)
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
                     # Sample from start between free points which are fully defined from origin
+                    # Also resample between two points in obstacle if they have the same trigo
                     # else propagate approximation
-                    index = 0 if self.mode_origin and \
+                    index = 0 if (self.mode_origin and \
                                  not site.in_obs_at(i) and not site_nb.in_obs_at(i) and \
-                                 site.index_t_init == 0 and site_nb.index_t_init == 0 else i
+                                 site.index_t_init == 0 and site_nb.index_t_init == 0) or \
+                                 (self.mode_origin and site.in_obs_at(i) and site_nb.in_obs_at(i)
+                                  and site.index_t_init == 0 and site_nb.index_t_init == 0
+                                  and site.obs_trigo == site_nb.obs_trigo) else i
                     if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
                         new_site = self.site_mngr.site_from_parents(site, site_nb, index)
                         if len(self.pb.in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
