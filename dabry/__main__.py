@@ -3,6 +3,8 @@ import os.path
 import sys
 from datetime import datetime
 
+import numpy as np
+
 from dabry.io_manager import IOManager
 from dabry.misc import Utils, Chrono, Coords
 from dabry.problem import NavigationProblem
@@ -34,8 +36,9 @@ if __name__ == '__main__':
     subparsers = parser.add_subparsers(dest='dest')
 
     parser_idpb = subparsers.add_parser('case', help='Solve a given case from reference problems')
-    parser_idpb.add_argument('name', help='Problem name')
-    parser_idpb.add_argument('--airspeed', nargs='?', help='Vehicle speed relative to the flow in m/s', default=None)
+    parser_idpb.add_argument('name', nargs='?', help='Problem name')
+    parser_idpb.add_argument('--list', help='Displays available problems',
+                             action='store_const', const=True, default=False)
 
     parser_real = subparsers.add_parser('real', help='Solve a given case from real data')
     parser_real.add_argument('x_init_lon', help='Initial point longitude in degrees')
@@ -50,6 +53,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args(sys.argv[1:])
     if args.dest == 'case':
+        if args.list:
+            li = sorted(list(NavigationProblem.ALL.keys()))
+            for a, b, c in zip(li[::3], li[1::3], li[2::3]):
+                print('{:<30}{:<30}{:<}'.format(a, b, c))
+            exit(0)
         pb_unscaled = NavigationProblem.from_name(args.name)
 
     else:

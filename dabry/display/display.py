@@ -867,7 +867,11 @@ class Display:
         if not os.path.exists(self.io.obs_dir):
             return
         for obs_fpath in list(map(lambda path: os.path.join(self.io.obs_dir, path), os.listdir(self.io.obs_dir))):
+            if os.path.basename(obs_fpath).startswith('frame'):
+                continue
             self.obstacles.append(DiscreteObs.from_npz(obs_fpath, no_diff=True))
+        if len(self.obstacles) == 0:
+            return
         self.obs_total_values = np.min(np.stack([obs.values for obs in self.obstacles], -1), axis=-1)
         obs = self.obstacles[0]
         self.obs_grid = np.stack(np.meshgrid(

@@ -45,11 +45,7 @@ class IOManager:
     This class handles the writing and reading of files from or to disk
     """
 
-    def __init__(self, name: str, case_dir: Optional[str] = None, cache_ff=False, cache_rff=False):
-        self.obs_filename = 'obs.h5'
-        self.pen_filename = 'penalty.h5'
-        self.cache_ff = cache_ff
-        self.cache_rff = cache_rff
+    def __init__(self, name: str, case_dir: Optional[str] = None):
         self._dabry_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         self.case_dir = case_dir if case_dir is not None else os.path.join(self._dabry_root_dir, 'output', name)
         self.case_name = name
@@ -136,10 +132,6 @@ class IOManager:
         if not os.path.exists(self.case_dir):
             return
         for filename in os.listdir(self.case_dir):
-            if filename.endswith('ff.npz') and self.cache_ff:
-                continue
-            if filename.endswith('rff.h5') and self.cache_rff:
-                continue
             path = os.path.join(self.case_dir, filename)
             if os.path.isdir(path):
                 shutil.rmtree(path)
@@ -196,22 +188,8 @@ class IOManager:
                 nt: Optional[int] = None,
                 bl: Optional[ndarray] = None,
                 tr: Optional[ndarray] = None):
-        if os.path.exists(self.ff_fpath) and self.cache_ff:
-            return
         self.setup_dir()
         save_ff(ff, self.ff_fpath, nx=nx, ny=ny, nt=nt, bl=bl, tr=tr)
-
-    def dump_penalty(self, penalty: DiscretePenalty):
-        filepath = os.path.join(self.case_dir, self.pen_filename)
-        with h5py.File(filepath, 'w') as f:
-            f.attrs['coords'] = Coords.GCS.value
-            f.attrs['units_grid'] = Units.RADIANS.value
-            dset = f.create_dataset('data', penalty.data.shape, dtype='f8')
-            dset[:] = penalty.data
-            dset = f.create_dataset('ts', penalty.ts.shape, dtype='f8')
-            dset[:] = penalty.ts
-            dset = f.create_dataset('grid', penalty.grid.shape, dtype='f8')
-            dset[:] = penalty.grid
 
     def dump_ff_from_grib2(self, srcfiles, bl, tr, dstname=None, coords=Coords.GCS):
         if coords == Coords.CARTESIAN:

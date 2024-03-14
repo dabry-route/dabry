@@ -17,7 +17,8 @@ from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearF
 from dabry.io_manager import IOManager
 from dabry.misc import Utils, csv_to_dict, Coords
 from dabry.model import Model
-from dabry.obstacle import CircleObs, FrameObs, Obstacle, WrapperObs, DiscreteObs, is_discrete_obstacle
+from dabry.obstacle import CircleObs, FrameObs, Obstacle, WrapperObs, DiscreteObs, is_discrete_obstacle, \
+    is_frame_obstacle
 from dabry.penalty import Penalty, NullPenalty, WrapperPen
 from dabry.trajectory import Trajectory
 
@@ -133,7 +134,11 @@ class NavigationProblem:
         if shape is None:
             shape = (50, 50)
         for i, obs in enumerate(self.obstacles):
-            self.io.save_obs(obs, f'obstacle_{i}', shape, bl=self.bl, tr=self.tr)
+            if is_frame_obstacle(obs):
+                name = 'frame'
+            else:
+                name = f'obstacle_{i}'
+            self.io.save_obs(obs, name, shape, bl=self.bl, tr=self.tr)
 
     def save_info(self):
         pb_info = {

@@ -300,3 +300,7 @@ def save_obs(obs: Obstacle, filepath: str,
 
 def is_discrete_obstacle(obs: Obstacle):
     return isinstance(obs, DiscreteObs) or (isinstance(obs, WrapperObs) and isinstance(obs.obs, DiscreteObs))
+
+
+def is_frame_obstacle(obs: Obstacle):
+    return isinstance(obs, FrameObs) or (isinstance(obs, WrapperObs) and isinstance(obs.obs, FrameObs))
