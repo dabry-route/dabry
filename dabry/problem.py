@@ -17,7 +17,7 @@ from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearF
 from dabry.io_manager import IOManager
 from dabry.misc import Utils, csv_to_dict, Coords
 from dabry.model import Model
-from dabry.obstacle import CircleObs, FrameObs, Obstacle, WrapperObs
+from dabry.obstacle import CircleObs, FrameObs, Obstacle, WrapperObs, DiscreteObs, is_discrete_obstacle
 from dabry.penalty import Penalty, NullPenalty, WrapperPen
 from dabry.trajectory import Trajectory
 
@@ -54,7 +54,8 @@ class NavigationProblem:
                  target_radius: Optional[float] = None,
                  aero: Optional[Aero] = None,
                  penalty: Optional[Penalty] = None,
-                 autoframe=True):
+                 autoframe=True,
+                 scaled=False):
         self.model = Model.zermelo(ff)
         self.x_init: ndarray = x_init.copy()
         self.x_target: ndarray = x_target.copy()
@@ -102,7 +103,8 @@ class NavigationProblem:
             tr_frame = self.tr - (self.tr - self.bl) * frame_offset / 2.
             self.obs_frame = FrameObs(bl_frame, tr_frame)
             self.obstacles.append(self.obs_frame)
-        # self.obstacles.extend(NavigationProblem.spherical_frame(bl, tr, offset_rel=0))
+
+        self.scaled = scaled
 
     def get_grid_params(self, nx: int, ny: int) -> tuple[ndarray, ndarray]:
         """
@@ -120,6 +122,19 @@ class NavigationProblem:
     def save_ff(self):
         self.io.save_ff(self.model.ff, bl=self.bl, tr=self.tr)
 
+    def save_obs(self):
+        shape = None
+        for i, obs in enumerate(self.obstacles):
+            if is_discrete_obstacle(obs):
+                if shape is None:
+                    shape = obs.values.shape
+                else:
+                    warnings.warn("Multiple DiscreteObs will confuse display")
+        if shape is None:
+            shape = (50, 50)
+        for i, obs in enumerate(self.obstacles):
+            self.io.save_obs(obs, f'obstacle_{i}', shape, bl=self.bl, tr=self.tr)
+
     def save_info(self):
         pb_info = {
             'x_init': tuple(self.x_init),
@@ -129,7 +144,8 @@ class NavigationProblem:
             'bl': self.bl.tolist(),
             'tr': self.tr.tolist(),
             'time_orthodromic': self.time_orthodromic(),
-            'time_radial': self.time_radial()
+            'time_radial': self.time_radial(),
+            'scaled': self.scaled
         }
         with open(os.path.join(self.io.case_dir, f'problem_info.json'), 'w') as f:
             json.dump(pb_info, f, indent=4)
@@ -278,7 +294,7 @@ class NavigationProblem:
         penalty = WrapperPen(self.penalty, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
         return NavigationProblem(wrapper_ff, x_init, x_target, srf_max,
                                  bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty,
-                                 name=self.name + ' (scaled)')
+                                 name=self.name, scaled=True)
 
     @classmethod
     def from_database(cls, x_init: ndarray, x_target: ndarray, srf: float,

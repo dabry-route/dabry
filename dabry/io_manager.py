@@ -13,6 +13,7 @@ from numpy import ndarray
 
 from dabry.flowfield import FlowField, save_ff
 from dabry.misc import Utils, Units, Coords
+from dabry.obstacle import Obstacle, save_obs
 from dabry.penalty import DiscretePenalty
 from dabry.trajectory import Trajectory
 
@@ -73,6 +74,10 @@ class IOManager:
         return os.path.join(self.case_dir, 'trajs')
 
     @property
+    def obs_dir(self):
+        return os.path.join(self.case_dir, 'obstacles')
+
+    @property
     def ff_fpath(self):
         return os.path.join(self.case_dir, 'ff.npz')
 
@@ -122,6 +127,11 @@ class IOManager:
         if not os.path.exists(self.trajs_dir):
             os.mkdir(self.trajs_dir)
 
+    def setup_obs(self):
+        self.setup_dir()
+        if not os.path.exists(self.obs_dir):
+            os.mkdir(self.obs_dir)
+
     def clean_output_dir(self):
         if not os.path.exists(self.case_dir):
             return
@@ -162,30 +172,12 @@ class IOManager:
             name = str(i_traj).rjust(1 + int(np.log10(len(trajs) - 1)), '0')
             self.save_traj(traj, name, target_dir, scale_length, scale_time, bl, time_offset)
 
-    # def dump_obs(self, nx=100, ny=100):
-    #     filepath = os.path.join(self.case_dir, self.obs_filename)
-    #     with h5py.File(os.path.join(filepath), 'w') as f:
-    #         f.attrs['coords'] = pb.coords
-    #         delta_x = (pb.tr[0] - pb.bl[0]) / (nx - 1)
-    #         delta_y = (pb.tr[1] - pb.bl[1]) / (ny - 1)
-    #         dset = f.create_dataset('grid', (nx, ny, 2), dtype='f8')
-    #         X, Y = np.meshgrid(pb.bl[0] + delta_x * np.arange(nx),
-    #                            pb.bl[1] + delta_y * np.arange(ny), indexing='ij')
-    #         dset[:, :, 0] = X
-    #         dset[:, :, 1] = Y
-    #
-    #         obs_val = np.infty * np.ones((nx, ny))
-    #         obs_id = -1 * np.ones((nx, ny))
-    #         for k, obs in enumerate(pb.obstacles):
-    #             for i in range(nx):
-    #                 for j in range(ny):
-    #                     point = np.array((pb.bl[0] + delta_x * i, pb.bl[1] + delta_y * j))
-    #                     val = obs.value(point)
-    #                     if val < 0. and val < obs_val[i, j]:
-    #                         obs_val[i, j] = val
-    #                         obs_id[i, j] = k
-    #         dset = f.create_dataset('data', (nx, ny), dtype='f8')
-    #         dset[:, :] = obs_id
+    def save_obs(self, obs: Obstacle, name: str,
+                shape: tuple[int, int],
+                bl: Optional[ndarray] = None,
+                tr: Optional[ndarray] = None):
+        self.setup_obs()
+        save_obs(obs, os.path.join(self.obs_dir, name), shape, bl=bl, tr=tr)
 
     @staticmethod
     def grib_date_to_unix(grib_filename):
