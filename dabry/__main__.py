@@ -36,9 +36,11 @@ if __name__ == '__main__':
     subparsers = parser.add_subparsers(dest='dest')
 
     parser_idpb = subparsers.add_parser('case', help='Solve a given case from reference problems')
-    parser_idpb.add_argument('name', nargs='?', help='Problem name')
+    parser_idpb.add_argument('name', nargs='?', help='Problem name', default=None)
     parser_idpb.add_argument('--list', help='Displays available problems',
                              action='store_const', const=True, default=False)
+    parser_idpb.add_argument('-o', '--output', nargs='?',
+                             help='Output directory where the results directory will be created', default=None)
 
     parser_real = subparsers.add_parser('real', help='Solve a given case from real data')
     parser_real.add_argument('x_init_lon', help='Initial point longitude in degrees')
@@ -50,17 +52,20 @@ if __name__ == '__main__':
     parser_real.add_argument('pressure_level', help='Pressure level in hPa')
     parser_real.add_argument('--rft', help='Perform front tracking', action='store_const', const=True,
                              default=False)
+    parser_real.add_argument('-o', '--output', nargs='?',
+                             help='Output directory where the results directory will be created', default=None)
 
     args = parser.parse_args(sys.argv[1:])
     if args.dest == 'case':
-        if args.list:
+        if args.list or args.name is None:
             li = sorted(list(NavigationProblem.ALL.keys()))
+            print('Available cases\n')
             for a, b, c in zip(li[::3], li[1::3], li[2::3]):
                 print('{:<30}{:<30}{:<}'.format(a, b, c))
             exit(0)
         pb_unscaled = NavigationProblem.from_name(args.name)
 
-    else:
+    elif args.dest == 'real':
         x_init_deg, x_target_deg, start_date, airspeed, pressure_level = \
             Utils.process_pb_params(args.x_init_lon, args.x_init_lat, args.x_target_lon, args.x_target_lat,
                                     args.start_date, args.airspeed, args.pressure_level)
@@ -76,6 +81,9 @@ if __name__ == '__main__':
         pb_unscaled = NavigationProblem.from_database(x_init, x_target, airspeed, start_date.timestamp(),
                                                       stop_date.timestamp(), resolution=resolution,
                                                       pressure_level=pressure_level, data_path=cds_dir)
+    else:
+        parser.print_help()
+        exit(0)
 
     pb = pb_unscaled.rescale()
 
@@ -89,15 +97,16 @@ if __name__ == '__main__':
     traj_ortho = pb.orthodromic()
     traj_radial = pb.radial()
 
-    pb.io.set_case_dir(os.path.join(os.path.abspath('.'), pb_unscaled.name))
-    pb.io.clean_output_dir()
+    output_dir = args.output if args.output is not None else os.path.abspath('.')
+    pb_unscaled.io.set_case_dir(os.path.join(output_dir, pb_unscaled.name))
+    pb_unscaled.io.clean_output_dir()
     _, _, _, _, _, scale_length, scale_time = pb_unscaled.scaling_params()
     scaling_params = dict(scale_length=scale_length, scale_time=scale_time, bl=pb_unscaled.bl,
                           time_offset=pb_unscaled.model.ff.t_start)
     solver.save_results(**scaling_params)
-    pb_unscaled.io.set_case_dir(os.path.join(os.path.abspath('.'), pb_unscaled.name))
     pb_unscaled.io.save_ff(pb_unscaled.model.ff, bl=pb_unscaled.bl, tr=pb_unscaled.tr)
     pb_unscaled.save_info()
+    pb_unscaled.save_obs()
     pb_unscaled.io.save_traj(traj_ortho, 'orthodromic', **scaling_params)
     pb_unscaled.io.save_traj(traj_radial, 'radial', **scaling_params)
     print(f'Results saved to {pb.io.case_dir}')

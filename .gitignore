@@ -177,3 +177,4 @@ env-test
 .~lock*
 
 !/data/demo
+/output_std/

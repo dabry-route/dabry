@@ -1,6 +1,5 @@
 import json
 import math
-import math
 import os
 import signal
 import sys
@@ -73,9 +72,9 @@ class ClosureReason(Enum):
 
 
 class NeuteringReason(Enum):
-    # Self and neighbour site lying in an obstacle
-    SELF_AND_NB_IN_OBS = 0
-    CHILD_IN_OBS = 1
+    # When two neighbours enter obstacle and have different directions
+    OBSTACLE_SPLITTING = 0
+    INDEFINITE_CHILD_CREATION = 1
 
 
 class Site:
@@ -294,8 +293,8 @@ class SiteManager:
     def site_from_parents(self, site_prev, site_next, index_t) -> Site:
         if not np.isclose(site_prev.time_at_index(index_t), site_next.time_at_index(index_t)):
             raise ValueError('Sites not sync in time for child creation')
-        if site_prev.in_obs_at(index_t) and site_next.in_obs_at(index_t):
-            raise ValueError('Illegal child creation between two obstacle-captured sites')
+        # if site_prev.in_obs_at(index_t) and site_next.in_obs_at(index_t):
+        #     raise ValueError('Illegal child creation between two obstacle-captured sites')
         costate_prev = site_prev.costate_at_index(index_t)
         costate_next = site_next.costate_at_index(index_t)
         if site_prev.in_obs_at(index_t):
@@ -377,10 +376,13 @@ class SolverEF(ABC):
 
         self.dyn_augsys = self.dyn_augsys_cartesian if self.pb.coords == Coords.CARTESIAN else self.dyn_augsys_gcs
         self._cost_map = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
-        self.computation_duration = 0
+        self.chrono = Chrono(f'Solving problem "{self.pb.name}"')
+
+    @property
+    def computation_duration(self):
+        return self.chrono.t_end - self.chrono.t_start
 
     def setup(self):
-        self.computation_duration = 0
         self.traj_groups = []
 
     @property
@@ -442,9 +444,13 @@ class SolverEF(ABC):
 
     def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
                      bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
+        self.pb.io.clean_output_dir()
         self.pb.io.save_trajs(self.trajs, group_name='ef_01', scale_length=scale_length, scale_time=scale_time,
                               bl=bl, time_offset=time_offset)
         self.save_info()
+        self.pb.save_ff()
+        self.pb.save_obs()
+        self.pb.save_info()
 
     def save_info(self):
         pb_info = {
@@ -453,6 +459,12 @@ class SolverEF(ABC):
         }
         with open(os.path.join(self.pb.io.solver_info_fpath), 'w') as f:
             json.dump(pb_info, f, indent=4)
+
+    def pre_solve(self):
+        self.chrono.start()
+
+    def post_solve(self):
+        self.chrono.stop()
 
 
 class SolverEFSimple(SolverEF):
@@ -635,16 +647,15 @@ class SolverEFResampling(SolverEF):
     @property
     def validity_index(self):
         validity_list = \
-        [
-            site.index_t_check_next for site in
-            set(self.sites.values()).difference(
-                set(site for site in self.sites.values() if len(site.traj) == 1)
-            )
-            if not site._index_neutered == site.index_t_check_next + 1 and
-               not (site.neutered and site.index_t_check_next >= site._index_neutered) and
-               not (site.closed and site.index_t_check_next == site.index_t) and
-               not site.next_nb[site.index_t_check_next].closed
-        ]
+            [
+                site.index_t_check_next for site in
+                set(self.sites.values()).difference(
+                    set(site for site in self.sites.values() if len(site.traj) == 1)
+                )
+                if not (site.neutered and site.index_t_check_next + 1 >= site._index_neutered) and
+                   not (site.closed and site.index_t_check_next == site.index_t) and
+                   not site.next_nb[site.index_t_check_next].closed
+            ]
         return 0 if len(validity_list) == 0 else min(validity_list)
 
     def missed_obstacles(self):
@@ -682,6 +693,7 @@ class SolverEFResampling(SolverEF):
 
     def solve(self):
         self.setup()
+        self.pre_solve()
         dki = DelayedKeyboardInterrupt()
         with dki:
             for _ in range(self.max_depth):
@@ -693,10 +705,11 @@ class SolverEFResampling(SolverEF):
                     break
         for site in self.solution_sites:
             self.extrapolate_back_traj(site)
-        missed_obs = self.missed_obstacles()
+        # missed_obs = self.missed_obstacles()
         # TODO: find a way to avoid near zero obstacle detection
         # if len(missed_obs) > 0:
         #     warnings.warn("Missed obstacles in trajectory collection. Consider lowering integration max step size.")
+        self.post_solve()
 
     def get_cost_map(self):
         self._cost_map.update_from_sites(self.sites.values(), 0, self.validity_index)
@@ -734,24 +747,27 @@ class SolverEFResampling(SolverEF):
             for i in range(site.index_t_check_next, upper_index):
                 state = site.state_at_index(i)
                 state_nb = site_nb.state_at_index(i)
-                if site.in_obs_at(i) and site_nb.in_obs_at(i):
-                    site.neuter(i, NeuteringReason.SELF_AND_NB_IN_OBS)
+                # if site.in_obs_at(i) and site_nb.in_obs_at(i):
+                #     site.neuter(i, NeuteringReason.SELF_AND_NB_IN_OBS)
+                if site.in_obs_at(i) and site_nb.in_obs_at(i) and (site.obs_trigo != site_nb.obs_trigo):
+                    site.neuter(i, NeuteringReason.OBSTACLE_SPLITTING)
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
                     # Sample from start between free points which are fully defined from origin
                     # Also resample between two points in obstacle if they have the same trigo
                     # else propagate approximation
-                    index = 0 if (self.mode_origin and \
-                                 not site.in_obs_at(i) and not site_nb.in_obs_at(i) and \
-                                 site.index_t_init == 0 and site_nb.index_t_init == 0) or \
-                                 (self.mode_origin and site.in_obs_at(i) and site_nb.in_obs_at(i)
-                                  and site.index_t_init == 0 and site_nb.index_t_init == 0
-                                  and site.obs_trigo == site_nb.obs_trigo) else i
+                    index = 0 if self.mode_origin and \
+                                 (not site.in_obs_at(i) and not site_nb.in_obs_at(i) and
+                                  site.index_t_init == 0 and site_nb.index_t_init == 0) or \
+                                 (site.in_obs_at(i) and site_nb.in_obs_at(i)
+                                  and site.index_t_init == 0 and site_nb.index_t_init == 0) else i
                     if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
-                        new_site = self.site_mngr.site_from_parents(site, site_nb, index)
-                        if len(self.pb.in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
-                            # Choose not to resample points lying within obstacles
-                            site.neuter(i, NeuteringReason.CHILD_IN_OBS)
-                            new_site = None
+                        # TODO: costate value in obstacle would prevent this neutering
+                        try:
+                            new_site = self.site_mngr.site_from_parents(site, site_nb, index)
+                        except ValueError as e:
+                            if not e.args[0].startswith('Costate'):
+                                raise e
+                            site.neuter(i, NeuteringReason.INDEFINITE_CHILD_CREATION)
                     break
                 new_id_check_next = i
             # Update the neighbouring property
@@ -950,8 +966,7 @@ class SolverEFTrimming(SolverEFResampling):
 
     def solve(self):
         self.setup()
-        chrono = Chrono('Solving problem')
-        chrono.start()
+        self.pre_solve()
         for _ in range(self.n_subframes):
             s = 'Subframe {i_subframe}/{n_subframe}, Act: {n_active: >4}, Cls: {n_closed: >4} (Tot: {n_total: >4})'
             print(s.format(
@@ -965,8 +980,7 @@ class SolverEFTrimming(SolverEFResampling):
         self.check_solutions()
         for site in self.solution_sites:
             self.extrapolate_back_traj(site)
-        chrono.stop()
-        self.computation_duration = chrono.duration
+        self.post_solve()
 
 
 class CostMap:

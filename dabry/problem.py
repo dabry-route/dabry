@@ -150,7 +150,8 @@ class NavigationProblem:
             'tr': self.tr.tolist(),
             'time_orthodromic': self.time_orthodromic(),
             'time_radial': self.time_radial(),
-            'scaled': self.scaled
+            'scaled': self.scaled,
+            'name': self.name
         }
         with open(os.path.join(self.io.case_dir, f'problem_info.json'), 'w') as f:
             json.dump(pb_info, f, indent=4)
@@ -207,7 +208,7 @@ class NavigationProblem:
     def in_obs(self, state):
         return [obs for obs in self.obstacles if obs.value(state) < 0.]
 
-    def apply_feedback(self, fb: Feedback, rel_timeout=10, n_time=1000) -> Trajectory:
+    def apply_feedback(self, fb: Feedback, rel_timeout=3, n_time=1000) -> Trajectory:
         """
         Integrate a trajectory applying feedback control
         :param fb: The feedback control law
@@ -584,7 +585,7 @@ class NavigationProblem:
             tr = np.array((1., 0.5))
 
             ff = GyreFF(0, -0.5, 2, 2, 2)
-            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr)
+            return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "atlantic":
             ff = DiscreteFF.from_npz(

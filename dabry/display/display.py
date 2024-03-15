@@ -138,6 +138,7 @@ class Display:
         self.has_display_rff = True
 
         self.ff = None
+        self.ff_display = None
         self.ff_norm_min = None
         self.ff_norm_avg = None
         self.ff_norm_max = None
@@ -741,9 +742,9 @@ class Display:
                 values[it, ...] = (1 - p) * self.ff.values[k, ::ut, ::ut, :] + p * self.ff.values[k + 1, ::ut, ::ut, :]
             self.ff_display = DiscreteFF(values, self.ff.bounds, self.ff.coords, no_diff=True)
         else:
-            values = np.expand_dims(self.ff.values, 0)
-            bounds = np.vstack((np.array((0, 0)), self.ff.bounds))
-            self.ff_display = DiscreteFF(values, bounds, self.ff.coords, no_diff=True)
+            # values = np.expand_dims(self.ff.values, 0)
+            # bounds = np.vstack((np.array((0, 1)), self.ff.bounds))
+            self.ff_display = self.ff  # DiscreteFF(values, bounds, self.ff.coords, no_diff=True)
 
     def load_trajs(self, filename=None):
         self.trajs.clear()
