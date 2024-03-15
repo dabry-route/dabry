@@ -134,27 +134,12 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
                 sliders=sliders
             )
 
-    # TODO: debug
-    # index = [
-    #     site.index_t_check_next for site in
-    #     set(solver.sites.values()).difference(
-    #         set(site for site in solver.sites.values() if len(site.traj) == 1)
-    #     )
-    #     if not site._index_neutered == site.index_t_check_next + 1 and
-    #        not (site.closed and site.index_t_check_next == site.index_t)
-    # ].index(solver.validity_index)
-    # site_pb = [
-    #     site for site in
-    #     set(solver.sites.values()).difference(
-    #         set(site for site in solver.sites.values() if len(site.traj) == 1)
-    #     )
-    #     if not site._index_neutered == site.index_t_check_next + 1 and
-    #        not (site.closed and site.index_t_check_next == site.index_t)
-    # ][index]
-    # print(site_pb)
-    # fig.add_trace(go.Scatter(x=[site_pb.state_at_index(solver.validity_index)[0]],
-    #                          y=[site_pb.state_at_index(solver.validity_index)[1]], name='Pb',
-    #                          marker=dict(size=15, color='white' if theme_dark else 'black')))
+    site_pb = solver.nemesis
+    if site_pb is not None:
+        fig.add_trace(go.Scatter(x=[site_pb.state_at_index(solver.validity_index)[0]],
+                                 y=[site_pb.state_at_index(solver.validity_index)[1]],
+                                 name=f'Pb: {site_pb.name} {solver.validity_index}',
+                                 marker=dict(size=15, color='white' if theme_dark else 'black')))
 
     if autoshow:
         fig.show()

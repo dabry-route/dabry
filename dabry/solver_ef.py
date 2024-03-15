@@ -64,11 +64,8 @@ class DelayedKeyboardInterrupt:
 
 
 class ClosureReason(Enum):
-    # Integration cannot proceed further in time
-    TERMINAL_INTEGRATION = 0
-    # Point created within obstacle
-    SUBOPTIMAL = 1
-    IMPOSSIBLE_OBS_TRACKING = 2
+    SUBOPTIMAL = 0
+    IMPOSSIBLE_OBS_TRACKING = 1
 
 
 class NeuteringReason(Enum):
@@ -118,8 +115,10 @@ class Site:
     def closed(self):
         return self.closure_reason is not None
 
-    def close(self, reason: ClosureReason):
+    def close(self, reason: ClosureReason, index=None):
         self.closure_reason = reason
+        self._index_closed = index if index is not None else self.n_time - 1
+
 
     @property
     def neutered(self):
@@ -605,10 +604,10 @@ class SolverEFResampling(SolverEF):
 
                     traj_singleton = Trajectory.cartesian(times, states, cost=cost, controls=controls)
                     if len(traj_singleton) == 0:
-                        site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+                        site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING, index=site.index_t + len(traj_free))
                 else:
                     traj_singleton = Trajectory.empty()
-                    site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+                    site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING, index=site.index_t + len(traj_free))
             else:
                 traj_singleton = Trajectory.empty()
         else:
@@ -616,6 +615,8 @@ class SolverEFResampling(SolverEF):
             traj_singleton = Trajectory.empty()
         traj = traj_free + traj_singleton
         site.extend_traj(traj)
+        if len(traj_free) > 0 and len(traj_singleton) == 0:
+            return
 
         # Here, either site.index_t == index_t or site.index_t < index_t and obstacle mode is on
         if site.index_t < index_t and len(site.obstacle_name) > 0:
@@ -634,7 +635,7 @@ class SolverEFResampling(SolverEF):
             traj_constr = Trajectory.cartesian(times, states, cost=cost, controls=controls)
             if res.t_events[0].size > 0:
                 # The trajectory was unable to follow obstacle
-                site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+                site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING, index=site.index_t + len(traj_constr))
         else:
             traj_constr = Trajectory.empty()
 
@@ -645,18 +646,31 @@ class SolverEFResampling(SolverEF):
         #     self.solution_sites.add(site)
 
     @property
-    def validity_index(self):
-        validity_list = \
+    def validity_list(self):
+        return \
             [
-                site.index_t_check_next for site in
+                (site.index_t_check_next, site) for site in
                 set(self.sites.values()).difference(
                     set(site for site in self.sites.values() if len(site.traj) == 1)
                 )
                 if not (site.neutered and site.index_t_check_next + 1 >= site._index_neutered) and
                    not (site.closed and site.index_t_check_next == site.index_t) and
-                   not site.next_nb[site.index_t_check_next].closed
+                   not (site.next_nb[site.index_t_check_next].closed and site.index_t_check_next + 1 >=
+                        site.next_nb[site.index_t_check_next]._index_closed)
             ]
-        return 0 if len(validity_list) == 0 else min(validity_list)
+
+    @property
+    def validity_index(self):
+        vlist = self.validity_list
+        return 0 if len(vlist) == 0 else min(vlist, key=lambda x: x[0])[0]
+
+    @property
+    def nemesis(self):
+        vlist = self.validity_list
+        if len(vlist) == 0:
+            return None
+        else:
+            return vlist[[a[0] for a in vlist].index(self.validity_index)][1]
 
     def missed_obstacles(self):
         res = []
@@ -958,7 +972,7 @@ class SolverEFTrimming(SolverEFResampling):
                 new_valid_sites.append(site)
                 continue
             if site.cost_at_index(self.index_t_next_subframe - 1) > 1.02 * value_opti:
-                site.close(ClosureReason.SUBOPTIMAL)
+                site.close(ClosureReason.SUBOPTIMAL, index=self.index_t_next_subframe - 1)
             else:
                 new_valid_sites.append(site)
         # TODO: Add distance trimming here
