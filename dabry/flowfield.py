@@ -97,6 +97,13 @@ class FlowField(ABC):
     def _d_value(self, t, x):
         pass
 
+    def _d_value_finite_differences(self, t, x):
+        eps = 1e-6
+        dx1 = eps * np.array((1, 0))
+        dx2 = eps * np.array((0, 1))
+        return np.column_stack(((self.value(t, x + dx1) - self.value(t, x - dx1)) / (2 * eps),
+                                (self.value(t, x + dx2) - self.value(t, x - dx2)) / (2 * eps)))
+
     def dualize(self):
         a = -1.
         if self.t_end is not None:
@@ -996,10 +1003,8 @@ class BandGaussFF(FlowField):
         return self.vect * intensity
 
     def d_value(self, t, x):
-        # TODO : write analytical formula
-        dx = 1e-6
-        return np.column_stack((1 / dx * (self.value(t, x + np.array((dx, 0.))) - self.value(t, x)),
-                                1 / dx * (self.value(t, x + np.array((0., dx))) - self.value(t, x))))
+        # TODO: implement formula
+        return self._d_value_finite_differences(t, x)
 
 
 class BandFF(FlowField):
@@ -1028,11 +1033,7 @@ class BandFF(FlowField):
 
     def d_value(self, t, x):
         # TODO: implement formula
-        eps = 1e-6
-        dx1 = eps * np.array((1, 0))
-        dx2 = eps * np.array((0, 1))
-        return np.column_stack(((self.value(t, x + dx1) - self.value(t, x - dx1))/(2 * eps),
-                          (self.value(t, x + dx2) - self.value(t, x - dx2))/(2 * eps)))
+        return self._d_value_finite_differences(t, x)
 
 
 class TrapFF(FlowField):
@@ -1130,11 +1131,22 @@ class GyreMSEASFF(FlowField):
 
     def d_value(self, t, x):
         # TODO: implement formula
-        eps = 1e-6
-        dx1 = eps * np.array((1, 0))
-        dx2 = eps * np.array((0, 1))
-        return np.column_stack(((self.value(t, x + dx1) - self.value(t, x - dx1)) / (2 * eps),
-                                (self.value(t, x + dx2) - self.value(t, x - dx2)) / (2 * eps)))
+        return self._d_value_finite_differences(t, x)
+
+
+class GradientFF(FlowField):
+
+    def __init__(self, speed: float, delta: float):
+        super().__init__()
+        self.speed = speed
+        self.delta = delta
+
+    def value(self, t, x):
+        return np.array((self.speed * (x[..., 0] / self.delta) / (x[..., 0] / self.delta + 1), 0))
+
+    def d_value(self, t, x):
+        # TODO: implement formula
+        return self._d_value_finite_differences(t, x)
 
 
 def discretize_ff(ff: FlowField,
