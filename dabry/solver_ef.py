@@ -690,10 +690,12 @@ class SolverEFResampling(SolverEF):
         new_sites = self.compute_new_sites()
         self._to_shoot_sites.extend(new_sites)
         # self.trim_distance()
-        print("Cost guarantee: {val:.3f}/{total:.3f} ({ratio:.1f}%) {candsol}".format(
+        print("Cost guarantee: {val:.3f}/{total:.3f} ({ratio:.1f}%, {valindex}/{totindex}) {candsol}".format(
             val=self.times[self.validity_index],
             total=self.times[-1],
             ratio=100 * self.times[self.validity_index] / self.times[-1],
+            valindex=self.validity_index,
+            totindex=len(self.times),
             candsol=f"Cand. sol. {self.solution_site.cost_at_index(self.solution_site_min_cost_index):.3f}"
             if self.solution_site is not None else ""
         ))
@@ -942,6 +944,7 @@ class SolverEFTrimming(SolverEFResampling):
     def step(self):
         self._to_shoot_sites.extend(self.sites_valid[self.i_subframe])
         while len(self._to_shoot_sites) > 0:
+            print(self.validity_index)
             while len(self._to_shoot_sites) > 0:
                 site = self._to_shoot_sites.pop()
                 self.integrate_site_to_target_index(site, self.index_t_next_subframe - 1)
