@@ -1,6 +1,5 @@
 import json
 import math
-import math
 import os
 import signal
 import sys
@@ -65,17 +64,14 @@ class DelayedKeyboardInterrupt:
 
 
 class ClosureReason(Enum):
-    # Integration cannot proceed further in time
-    TERMINAL_INTEGRATION = 0
-    # Point created within obstacle
-    SUBOPTIMAL = 1
-    IMPOSSIBLE_OBS_TRACKING = 2
+    SUBOPTIMAL = 0
+    IMPOSSIBLE_OBS_TRACKING = 1
 
 
 class NeuteringReason(Enum):
-    # Self and neighbour site lying in an obstacle
-    SELF_AND_NB_IN_OBS = 0
-    CHILD_IN_OBS = 1
+    # When two neighbours enter obstacle and have different directions
+    OBSTACLE_SPLITTING = 0
+    INDEFINITE_CHILD_CREATION = 1
 
 
 class Site:
@@ -119,8 +115,10 @@ class Site:
     def closed(self):
         return self.closure_reason is not None
 
-    def close(self, reason: ClosureReason):
+    def close(self, reason: ClosureReason, index=None):
         self.closure_reason = reason
+        self._index_closed = index if index is not None else self.n_time - 1
+
 
     @property
     def neutered(self):
@@ -294,8 +292,8 @@ class SiteManager:
     def site_from_parents(self, site_prev, site_next, index_t) -> Site:
         if not np.isclose(site_prev.time_at_index(index_t), site_next.time_at_index(index_t)):
             raise ValueError('Sites not sync in time for child creation')
-        if site_prev.in_obs_at(index_t) and site_next.in_obs_at(index_t):
-            raise ValueError('Illegal child creation between two obstacle-captured sites')
+        # if site_prev.in_obs_at(index_t) and site_next.in_obs_at(index_t):
+        #     raise ValueError('Illegal child creation between two obstacle-captured sites')
         costate_prev = site_prev.costate_at_index(index_t)
         costate_next = site_next.costate_at_index(index_t)
         if site_prev.in_obs_at(index_t):
@@ -327,7 +325,8 @@ class SolverEF(ABC):
                  abs_max_step: Optional[float] = None,
                  rel_max_step: Optional[float] = 0.01,
                  free_max_step: bool = True,
-                 cost_map_shape: Optional[tuple[int, int]] = (100, 100)):
+                 cost_map_shape: Optional[tuple[int, int]] = (100, 100),
+                 ivp_solver: str = 'RK45'):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
         if mode == 'energy':
@@ -371,16 +370,19 @@ class SolverEF(ABC):
         self.max_int_step: Optional[float] = None if free_max_step else abs_max_step if rel_max_step is None else \
             min(abs_max_step, rel_max_step * self.total_duration)
 
-        self._integrator_kwargs = {'method': 'LSODA'}
+        self._integrator_kwargs = {'method': ivp_solver}
         if self.max_int_step is not None:
             self._integrator_kwargs['max_step'] = self.max_int_step
 
         self.dyn_augsys = self.dyn_augsys_cartesian if self.pb.coords == Coords.CARTESIAN else self.dyn_augsys_gcs
         self._cost_map = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
-        self.computation_duration = 0
+        self.chrono = Chrono(f'Solving problem "{self.pb.name}"')
+
+    @property
+    def computation_duration(self):
+        return self.chrono.t_end - self.chrono.t_start
 
     def setup(self):
-        self.computation_duration = 0
         self.traj_groups = []
 
     @property
@@ -442,9 +444,13 @@ class SolverEF(ABC):
 
     def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
                      bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
+        self.pb.io.clean_output_dir()
         self.pb.io.save_trajs(self.trajs, group_name='ef_01', scale_length=scale_length, scale_time=scale_time,
                               bl=bl, time_offset=time_offset)
         self.save_info()
+        self.pb.save_ff()
+        self.pb.save_obs()
+        self.pb.save_info()
 
     def save_info(self):
         pb_info = {
@@ -453,6 +459,12 @@ class SolverEF(ABC):
         }
         with open(os.path.join(self.pb.io.solver_info_fpath), 'w') as f:
             json.dump(pb_info, f, indent=4)
+
+    def pre_solve(self):
+        self.chrono.start()
+
+    def post_solve(self):
+        self.chrono.stop()
 
 
 class SolverEFSimple(SolverEF):
@@ -593,10 +605,10 @@ class SolverEFResampling(SolverEF):
 
                     traj_singleton = Trajectory.cartesian(times, states, cost=cost, controls=controls)
                     if len(traj_singleton) == 0:
-                        site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+                        site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING, index=site.index_t + len(traj_free))
                 else:
                     traj_singleton = Trajectory.empty()
-                    site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+                    site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING, index=site.index_t + len(traj_free))
             else:
                 traj_singleton = Trajectory.empty()
         else:
@@ -604,6 +616,8 @@ class SolverEFResampling(SolverEF):
             traj_singleton = Trajectory.empty()
         traj = traj_free + traj_singleton
         site.extend_traj(traj)
+        if len(traj_free) > 0 and len(traj_singleton) == 0:
+            return
 
         # Here, either site.index_t == index_t or site.index_t < index_t and obstacle mode is on
         if site.index_t < index_t and len(site.obstacle_name) > 0:
@@ -622,7 +636,7 @@ class SolverEFResampling(SolverEF):
             traj_constr = Trajectory.cartesian(times, states, cost=cost, controls=controls)
             if res.t_events[0].size > 0:
                 # The trajectory was unable to follow obstacle
-                site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+                site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING, index=site.index_t + len(traj_constr))
         else:
             traj_constr = Trajectory.empty()
 
@@ -633,19 +647,31 @@ class SolverEFResampling(SolverEF):
         #     self.solution_sites.add(site)
 
     @property
+    def validity_list(self):
+        return \
+            [
+                (site.index_t_check_next, site) for site in
+                set(self.sites.values()).difference(
+                    set(site for site in self.sites.values() if len(site.traj) == 1)
+                )
+                if not (site.neutered and site.index_t_check_next + 1 >= site._index_neutered) and
+                   not (site.closed and site.index_t_check_next == site.index_t) and
+                   not (site.next_nb[site.index_t_check_next].closed and site.index_t_check_next + 1 >=
+                        site.next_nb[site.index_t_check_next]._index_closed)
+            ]
+
+    @property
     def validity_index(self):
-        validity_list = \
-        [
-            site.index_t_check_next for site in
-            set(self.sites.values()).difference(
-                set(site for site in self.sites.values() if len(site.traj) == 1)
-            )
-            if not site._index_neutered == site.index_t_check_next + 1 and
-               not (site.neutered and site.index_t_check_next >= site._index_neutered) and
-               not (site.closed and site.index_t_check_next == site.index_t) and
-               not site.next_nb[site.index_t_check_next].closed
-        ]
-        return 0 if len(validity_list) == 0 else min(validity_list)
+        vlist = self.validity_list
+        return 0 if len(vlist) == 0 else min(vlist, key=lambda x: x[0])[0]
+
+    @property
+    def nemesis(self):
+        vlist = self.validity_list
+        if len(vlist) == 0:
+            return None
+        else:
+            return vlist[[a[0] for a in vlist].index(self.validity_index)][1]
 
     def missed_obstacles(self):
         res = []
@@ -664,10 +690,12 @@ class SolverEFResampling(SolverEF):
         new_sites = self.compute_new_sites()
         self._to_shoot_sites.extend(new_sites)
         # self.trim_distance()
-        print("Cost guarantee: {val:.3f}/{total:.3f} ({ratio:.1f}%) {candsol}".format(
+        print("Cost guarantee: {val:.3f}/{total:.3f} ({ratio:.1f}%, {valindex}/{totindex}) {candsol}".format(
             val=self.times[self.validity_index],
             total=self.times[-1],
             ratio=100 * self.times[self.validity_index] / self.times[-1],
+            valindex=self.validity_index,
+            totindex=len(self.times),
             candsol=f"Cand. sol. {self.solution_site.cost_at_index(self.solution_site_min_cost_index):.3f}"
             if self.solution_site is not None else ""
         ))
@@ -682,6 +710,7 @@ class SolverEFResampling(SolverEF):
 
     def solve(self):
         self.setup()
+        self.pre_solve()
         dki = DelayedKeyboardInterrupt()
         with dki:
             for _ in range(self.max_depth):
@@ -693,10 +722,11 @@ class SolverEFResampling(SolverEF):
                     break
         for site in self.solution_sites:
             self.extrapolate_back_traj(site)
-        missed_obs = self.missed_obstacles()
+        # missed_obs = self.missed_obstacles()
         # TODO: find a way to avoid near zero obstacle detection
         # if len(missed_obs) > 0:
         #     warnings.warn("Missed obstacles in trajectory collection. Consider lowering integration max step size.")
+        self.post_solve()
 
     def get_cost_map(self):
         self._cost_map.update_from_sites(self.sites.values(), 0, self.validity_index)
@@ -734,20 +764,27 @@ class SolverEFResampling(SolverEF):
             for i in range(site.index_t_check_next, upper_index):
                 state = site.state_at_index(i)
                 state_nb = site_nb.state_at_index(i)
-                if site.in_obs_at(i) and site_nb.in_obs_at(i):
-                    site.neuter(i, NeuteringReason.SELF_AND_NB_IN_OBS)
+                # if site.in_obs_at(i) and site_nb.in_obs_at(i):
+                #     site.neuter(i, NeuteringReason.SELF_AND_NB_IN_OBS)
+                if site.in_obs_at(i) and site_nb.in_obs_at(i) and (site.obs_trigo != site_nb.obs_trigo):
+                    site.neuter(i, NeuteringReason.OBSTACLE_SPLITTING)
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
                     # Sample from start between free points which are fully defined from origin
+                    # Also resample between two points in obstacle if they have the same trigo
                     # else propagate approximation
                     index = 0 if self.mode_origin and \
-                                 not site.in_obs_at(i) and not site_nb.in_obs_at(i) and \
-                                 site.index_t_init == 0 and site_nb.index_t_init == 0 else i
+                                 (not site.in_obs_at(i) and not site_nb.in_obs_at(i) and
+                                  site.index_t_init == 0 and site_nb.index_t_init == 0) or \
+                                 (site.in_obs_at(i) and site_nb.in_obs_at(i)
+                                  and site.index_t_init == 0 and site_nb.index_t_init == 0) else i
                     if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
-                        new_site = self.site_mngr.site_from_parents(site, site_nb, index)
-                        if len(self.pb.in_obs(new_site.state_at_index(new_site.index_t_init))) > 0:
-                            # Choose not to resample points lying within obstacles
-                            site.neuter(i, NeuteringReason.CHILD_IN_OBS)
-                            new_site = None
+                        # TODO: costate value in obstacle would prevent this neutering
+                        try:
+                            new_site = self.site_mngr.site_from_parents(site, site_nb, index)
+                        except ValueError as e:
+                            if not e.args[0].startswith('Costate'):
+                                raise e
+                            site.neuter(i, NeuteringReason.INDEFINITE_CHILD_CREATION)
                     break
                 new_id_check_next = i
             # Update the neighbouring property
@@ -907,6 +944,7 @@ class SolverEFTrimming(SolverEFResampling):
     def step(self):
         self._to_shoot_sites.extend(self.sites_valid[self.i_subframe])
         while len(self._to_shoot_sites) > 0:
+            print(self.validity_index)
             while len(self._to_shoot_sites) > 0:
                 site = self._to_shoot_sites.pop()
                 self.integrate_site_to_target_index(site, self.index_t_next_subframe - 1)
@@ -938,7 +976,7 @@ class SolverEFTrimming(SolverEFResampling):
                 new_valid_sites.append(site)
                 continue
             if site.cost_at_index(self.index_t_next_subframe - 1) > 1.02 * value_opti:
-                site.close(ClosureReason.SUBOPTIMAL)
+                site.close(ClosureReason.SUBOPTIMAL, index=self.index_t_next_subframe - 1)
             else:
                 new_valid_sites.append(site)
         # TODO: Add distance trimming here
@@ -946,8 +984,7 @@ class SolverEFTrimming(SolverEFResampling):
 
     def solve(self):
         self.setup()
-        chrono = Chrono('Solving problem')
-        chrono.start()
+        self.pre_solve()
         for _ in range(self.n_subframes):
             s = 'Subframe {i_subframe}/{n_subframe}, Act: {n_active: >4}, Cls: {n_closed: >4} (Tot: {n_total: >4})'
             print(s.format(
@@ -961,8 +998,7 @@ class SolverEFTrimming(SolverEFResampling):
         self.check_solutions()
         for site in self.solution_sites:
             self.extrapolate_back_traj(site)
-        chrono.stop()
-        self.computation_duration = chrono.duration
+        self.post_solve()
 
 
 class CostMap:

@@ -1157,17 +1157,11 @@ def discretize_ff(ff: FlowField,
         return ff
 
 
-def save_ff(ff: FlowField, filepath: str, fmt='npz',
+def save_ff(ff: FlowField, filepath: str,
             nx: Optional[int] = None,
             ny: Optional[int] = None,
             nt: Optional[int] = None,
             bl: Optional[ndarray] = None,
             tr: Optional[ndarray] = None):
-    if fmt not in ['h5', 'npz']:
-        raise Exception(f'Unknown output format "{fmt}"')
     dff = discretize_ff(ff, nx, ny, nt, bl, tr)
-    if fmt == 'h5':
-        raise Exception('h5 not supported anymore for flow field save to disk')
-    else:
-        # fmt == 'npz'
-        np.savez(filepath, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords.value))
+    np.savez(filepath, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords.value))

@@ -10,6 +10,7 @@ from typing import Optional, Dict
 import h5py
 import matplotlib
 import matplotlib.cm as mpl_cm
+import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.widgets import Slider
@@ -21,6 +22,7 @@ from dabry.display.misc import *
 from dabry.flowfield import DiscreteFF
 from dabry.io_manager import IOManager
 from dabry.misc import Utils, Coords
+from dabry.obstacle import DiscreteObs
 from dabry.trajectory import Trajectory, traj_filepath_to_name
 
 
@@ -136,6 +138,7 @@ class Display:
         self.has_display_rff = True
 
         self.ff = None
+        self.ff_display = None
         self.ff_norm_min = None
         self.ff_norm_avg = None
         self.ff_norm_max = None
@@ -154,6 +157,7 @@ class Display:
         self.nt_rft = None
 
         self.obstacles = None
+        self.obs_total_values = None
         self.obs_grid = None
 
         self.penalty = None
@@ -738,9 +742,9 @@ class Display:
                 values[it, ...] = (1 - p) * self.ff.values[k, ::ut, ::ut, :] + p * self.ff.values[k + 1, ::ut, ::ut, :]
             self.ff_display = DiscreteFF(values, self.ff.bounds, self.ff.coords, no_diff=True)
         else:
-            values = np.expand_dims(self.ff.values, 0)
-            bounds = np.vstack((np.array((0, 0)), self.ff.bounds))
-            self.ff_display = DiscreteFF(values, bounds, self.ff.coords, no_diff=True)
+            # values = np.expand_dims(self.ff.values, 0)
+            # bounds = np.vstack((np.array((0, 1)), self.ff.bounds))
+            self.ff_display = self.ff  # DiscreteFF(values, bounds, self.ff.coords, no_diff=True)
 
     def load_trajs(self, filename=None):
         self.trajs.clear()
@@ -859,17 +863,21 @@ class Display:
             if len(failed_zeros) > 0:
                 warnings.warn(f'No RFF value in zero band for indexes {tuple(failed_zeros)}', category=UserWarning)
 
-    def load_obs(self, filename=None):
-        if self.obs_fpath is None:
-            filename = self.obs_fname if filename is None else filename
-            self.obs_fpath = os.path.join(self.case_dir, filename)
-        if not os.path.exists(self.obs_fpath):
+    def load_obs(self):
+        self.obstacles = []
+        if not os.path.exists(self.io.obs_dir):
             return
-        with h5py.File(self.obs_fpath, 'r') as f:
-            self.obstacles = np.zeros(f['data'].shape)
-            self.obstacles[:] = f['data']
-            self.obs_grid = np.zeros(f['grid'].shape)
-            self.obs_grid[:] = f['grid']
+        for obs_fpath in list(map(lambda path: os.path.join(self.io.obs_dir, path), os.listdir(self.io.obs_dir))):
+            if os.path.basename(obs_fpath).startswith('frame'):
+                continue
+            self.obstacles.append(DiscreteObs.from_npz(obs_fpath, no_diff=True))
+        if len(self.obstacles) == 0:
+            return
+        self.obs_total_values = np.min(np.stack([obs.values for obs in self.obstacles], -1), axis=-1)
+        obs = self.obstacles[0]
+        self.obs_grid = np.stack(np.meshgrid(
+            np.linspace(obs.bounds[0, 0], obs.bounds[0, 1], obs.values.shape[0]),
+            np.linspace(obs.bounds[1, 0], obs.bounds[1, 1], obs.values.shape[1]), indexing='ij'), -1)
 
     def load_pen(self, filename=None):
         if self.pen_fpath is None:
@@ -902,7 +910,9 @@ class Display:
         n_ef = len(self.extremal_fields.keys())
         n_eft = sum((len(tgv) for tgv in self.extremal_fields.values()))
         Display._info(
-            f'Loading completed. {n_trajs - n_eft} regular trajs, {n_ef} extremal fields of {n_eft} trajs, {n_rffs} RFFs.')
+            f'Loading completed. {n_trajs - n_eft} regular trajs, '
+            f'{n_ef} extremal fields of {n_eft} trajs, '
+            f'{len(self.obstacles)} obstacles.')
 
     def adapt_tw(self):
         """
@@ -1010,6 +1020,8 @@ class Display:
                 self.rff_contours.append(self.ax.contourf(*args, **self.rff_cntr_kwargs))
 
     def draw_ff(self):
+        if np.isclose(self.ff_norm_max, 0):
+            return
         self.clear_ff()
         if self.ff_display.is_unsteady:
             it, _ = index(self.tcur, self.ff_display.times)
@@ -1283,11 +1295,8 @@ class Display:
 
     def draw_obs(self):
         self.clear_obs()
-        if self.obstacles is None:
+        if len(self.obstacles) == 0:
             return
-        if np.all(self.obstacles < 0.):
-            return
-        ma = np.ma.masked_array(self.obstacles, mask=self.obstacles < -0.5)
         if self.coords == Coords.CARTESIAN:
             ax = self.main_ax
             kwargs = {}
@@ -1299,18 +1308,21 @@ class Display:
         matplotlib.rcParams['hatch.color'] = (.2, .2, .2, 1.)
         self.obs_contours.append(ax.contourf(factor * self.obs_grid[..., 0],
                                              factor * self.obs_grid[..., 1],
-                                             ma,
+                                             self.obs_total_values,
                                              alpha=0.,
+                                             levels=[-1, 0],
+                                             extend='min',
                                              # colors='grey',
                                              hatches=['//'],
                                              antialiased=True,
-                                             zorder=ZOrder.OBS,
+                                             zorder=ZOrder.OBS.value,
                                              **kwargs))
-
-        if self.coords == Coords.CARTESIAN:
+        # Contour behaves badly with warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
             self.obs_contours.append(ax.contour(factor * self.obs_grid[..., 0],
                                                 factor * self.obs_grid[..., 1],
-                                                self.obstacles, [-0.5]))
+                                                self.obs_total_values, [0]))
 
     def draw_pen(self):
         self.clear_pen()

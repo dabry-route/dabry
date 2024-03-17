@@ -1,5 +1,6 @@
+import warnings
 from abc import ABC, abstractmethod
-from typing import Union
+from typing import Union, Optional
 
 import numpy as np
 from numpy import ndarray
@@ -80,6 +81,14 @@ class WrapperObs(Obstacle):
     def d_value(self, x):
         return self.obs.d_value(self.bl + x * self.scale_length)
 
+    def __getattr__(self, item):
+        if isinstance(self.obs, DiscreteObs):
+            if item == 'values':
+                return self.obs.values / self.scale_length
+            if item == 'bounds':
+                return self.obs.bounds / self.scale_length
+        return self.obs.__getattribute__(item)
+
 
 class CircleObs(Obstacle):
     """
@@ -129,7 +138,7 @@ class FrameObs(Obstacle):
 
 
 class DiscreteObs(Obstacle):
-    def __init__(self, values: ndarray, bounds: ndarray):
+    def __init__(self, values: ndarray, bounds: ndarray, grad_values: Optional[ndarray] = None, no_diff=False):
         super().__init__()
 
         if bounds.shape[0] != values.ndim:
@@ -143,14 +152,47 @@ class DiscreteObs(Obstacle):
         self.spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(self.values.shape) -
                                                          np.ones(self.values.ndim))
 
-        self.grad_values = None
+        self.grad_values = grad_values.copy() if grad_values is not None else None
 
-        self.compute_derivatives()
+        if self.grad_values is None and not no_diff:
+            self.compute_derivatives()
 
     @classmethod
-    def from_npz(cls, filepath):
+    def from_npz(cls, filepath, no_diff: Optional[bool] = None):
         obs = np.load(filepath, mmap_mode='r')
-        return cls(obs['values'], obs['bounds'])
+        kwargs = {}
+        if no_diff is not None:
+            kwargs['no_diff'] = no_diff
+        return cls(obs['values'], obs['bounds'], **kwargs)
+
+    @classmethod
+    def from_obs(cls, obs: Obstacle, grid_bounds: Union[tuple[ndarray, ndarray], ndarray],
+                 nx=100, ny=100, **kwargs):
+        """
+        Create discrete obstacle from analytical obstacle.
+        Similar to "from_ff" of the "DiscreteFF" class
+        """
+        if isinstance(grid_bounds, tuple):
+            if len(grid_bounds) != 2:
+                raise ValueError('"grid_bounds" provided as a tuple must have two elements')
+            grid_bounds = np.array(grid_bounds).transpose()
+
+        if isinstance(grid_bounds, ndarray) and grid_bounds.shape != (2, 2):
+            raise ValueError('"grid_bounds" provided as an array must have shape (2, 2)')
+
+        bounds = grid_bounds.copy()
+        shape = (nx, ny)
+        spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(shape) - np.ones(bounds.shape[0]))
+        values = np.zeros(shape)
+        grad_values = np.zeros(shape + (2,)) if not kwargs.get('no_diff') else None
+        for i in range(nx):
+            for j in range(ny):
+                state = bounds[-2:, 0] + np.diag((i, j)) @ spacings[-2:]
+                values[i, j] = obs.value(state)
+                if not kwargs.get('no_diff'):
+                    grad_values[i, j, :] = obs.d_value(state)
+
+        return cls(values, bounds, grad_values=grad_values, **kwargs)
 
     def value(self, x: ndarray) -> ndarray:
         return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, x)
@@ -231,3 +273,34 @@ class GreatCircleObs(Obstacle):
         d_dphi = np.array((-np.sin(x[0]) * np.cos(x[1]), np.cos(x[0]) * np.cos(x[1]), 0))
         d_dlam = np.array((-np.cos(x[0]) * np.sin(x[1]), -np.sin(x[0]) * np.sin(x[1]), np.cos(x[1])))
         return np.array((self.dir_vect @ d_dphi, self.dir_vect @ d_dlam))
+
+
+def discretize_obs(obs: Obstacle,
+                   shape: tuple[int, int],
+                   bl: Optional[ndarray] = None,
+                   tr: Optional[ndarray] = None):
+    if not is_discrete_obstacle(obs):
+        if bl is None or tr is None:
+            raise Exception(f'Missing bounding box (bl, tr) to sample unbounded {obs}')
+        return DiscreteObs.from_obs(obs, np.array((bl, tr)).transpose(), nx=shape[0], ny=shape[1], no_diff=True)
+    else:
+        if shape[0] != obs.values.shape[0] or shape[1] != obs.values.shape[1]:
+            warnings.warn(f'Grid shape {shape} differs from DiscreteObs native grid. Resampling not implemented yet: '
+                          'Continuing with obstacle native grid')
+        return obs
+
+
+def save_obs(obs: Obstacle, filepath: str,
+             shape: tuple[int, int],
+             bl: Optional[ndarray] = None,
+             tr: Optional[ndarray] = None):
+    dobs = discretize_obs(obs, shape, bl, tr)
+    np.savez(filepath, values=dobs.values, bounds=dobs.bounds)
+
+
+def is_discrete_obstacle(obs: Obstacle):
+    return isinstance(obs, DiscreteObs) or (isinstance(obs, WrapperObs) and isinstance(obs.obs, DiscreteObs))
+
+
+def is_frame_obstacle(obs: Obstacle):
+    return isinstance(obs, FrameObs) or (isinstance(obs, WrapperObs) and isinstance(obs.obs, FrameObs))
