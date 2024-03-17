@@ -1142,7 +1142,7 @@ class GradientFF(FlowField):
         self.delta = delta
 
     def value(self, t, x):
-        return np.array((self.speed * (x[..., 0] / self.delta) / (x[..., 0] / self.delta + 1), 0))
+        return np.array((self.speed * (x[..., 1] / self.delta) / (x[..., 1] / self.delta + 1), 0))
 
     def d_value(self, t, x):
         # TODO: implement formula
