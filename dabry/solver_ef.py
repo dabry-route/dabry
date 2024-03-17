@@ -325,7 +325,8 @@ class SolverEF(ABC):
                  abs_max_step: Optional[float] = None,
                  rel_max_step: Optional[float] = 0.01,
                  free_max_step: bool = True,
-                 cost_map_shape: Optional[tuple[int, int]] = (100, 100)):
+                 cost_map_shape: Optional[tuple[int, int]] = (100, 100),
+                 ivp_solver: str = 'RK45'):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
         if mode == 'energy':
@@ -369,7 +370,7 @@ class SolverEF(ABC):
         self.max_int_step: Optional[float] = None if free_max_step else abs_max_step if rel_max_step is None else \
             min(abs_max_step, rel_max_step * self.total_duration)
 
-        self._integrator_kwargs = {'method': 'LSODA'}
+        self._integrator_kwargs = {'method': ivp_solver}
         if self.max_int_step is not None:
             self._integrator_kwargs['max_step'] = self.max_int_step
 
