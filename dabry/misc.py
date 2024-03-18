@@ -476,7 +476,7 @@ class Utils:
 
         points = np.array(list(map(lambda theta: analytic_traj(theta, theta_f), np.linspace(-theta_f, theta_f, 1000))))
         from dabry.trajectory import Trajectory
-        return Trajectory.cartesian(np.linspace(0, 1, points.shape[0]),  # Warning: Fictitious time parameterization !
+        return Trajectory(np.linspace(0, 1, points.shape[0]),  # Warning: Fictitious time parameterization !
                           points)
 
     @staticmethod

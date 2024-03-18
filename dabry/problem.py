@@ -229,7 +229,7 @@ class NavigationProblem:
 
         event_target.terminal = True
         res = scitg.solve_ivp(dyn_fb, (times[0], times[-1]), self.x_init, t_eval=times, events=[event_target])
-        return Trajectory(res.t, res.y.transpose(), self.model.coords, events={'target': res.t_events[0]})
+        return Trajectory(res.t, res.y.transpose(), events={'target': res.t_events[0]})
 
     def auto_time_upper_bound(self):
         return min(self.time_orthodromic(), self.time_radial())

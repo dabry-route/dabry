@@ -84,10 +84,9 @@ class Site:
         self.index_t_init = index_t_init
         if np.any(np.isnan(costate_origin)):
             raise ValueError('Costate initialization contains NaN')
-        self.traj = Trajectory.cartesian(np.array((t_init,)),
-                                         state_origin.reshape((1, 2)),
-                                         costates=costate_origin.reshape((1, 2)),
-                                         cost=np.array((cost_origin,)))
+        self.traj = Trajectory(np.array((t_init,)), state_origin.reshape((1, 2)),
+                               costates=costate_origin.reshape((1, 2)),
+                               cost=np.array((cost_origin,)))
         self.traj_full: Optional[Trajectory] = None
         self.index_t_check_next = index_t_init
         self.prev_index_t_check_next = index_t_init
@@ -491,8 +490,8 @@ class SolverEFSimple(SolverEF):
             res = scitg.solve_ivp(self.dyn_augsys, (self.t_init, self.t_upper_bound),
                                   np.array(tuple(self.pb.x_init) + tuple(costate)), t_eval=t_eval,
                                   events=list(self.events.values()), **self._integrator_kwargs)
-            traj = Trajectory.cartesian(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
-                                        events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
+            traj = Trajectory(res.t, res.y.transpose()[:, :2], costates=res.y.transpose()[:, 2:],
+                              events=self.t_events_to_dict(res.t_events), cost=res.t - self.t_init)
             if traj.events['target'].shape[0] > 0:
                 self.success = True
             traj_group.append(traj)
@@ -567,7 +566,7 @@ class SolverEFResampling(SolverEF):
             cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
             events = self.t_events_to_dict(res.t_events)
 
-            traj_free = Trajectory.cartesian(times, states, costates=costates, cost=cost, events=events)
+            traj_free = Trajectory(times, states, costates=costates, cost=cost, events=events)
 
             active_obstacles = [name for name, t_events in traj_free.events.items()
                                 if t_events.shape[0] > 0 and name != 'target']
@@ -603,7 +602,7 @@ class SolverEFResampling(SolverEF):
                         for t, x in zip(res.t, res.y.transpose())]) if len(res.t) > 0 else np.array(((), ()))
                     cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
 
-                    traj_singleton = Trajectory.cartesian(times, states, cost=cost, controls=controls)
+                    traj_singleton = Trajectory(times, states, cost=cost, controls=controls)
                     if len(traj_singleton) == 0:
                         site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING, index=site.index_t + len(traj_free))
                 else:
@@ -633,7 +632,7 @@ class SolverEFResampling(SolverEF):
                 for t, x in zip(res.t, res.y.transpose())]) if len(res.t) > 0 else np.array(((), ()))
             cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
 
-            traj_constr = Trajectory.cartesian(times, states, cost=cost, controls=controls)
+            traj_constr = Trajectory(times, states, cost=cost, controls=controls)
             if res.t_events[0].size > 0:
                 # The trajectory was unable to follow obstacle
                 site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING, index=site.index_t + len(traj_constr))
@@ -885,7 +884,7 @@ class SolverEFResampling(SolverEF):
                 name_next = self.site_mngr.parents_name_from_name(name_next)[1]
                 coeff_next = coeff_next / 2
                 coeff_prev = 1 - coeff_next
-        site.traj_full = Trajectory(times, states, site.traj.coords, controls=controls, costates=costates,
+        site.traj_full = Trajectory(times, states, controls=controls, costates=costates,
                                     cost=costs,
                                     events=site.traj.events)
 
