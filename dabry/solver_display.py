@@ -177,6 +177,15 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
                                scene=dict(aspectmode='data'))
         if autoshow:
             fig_cost.show()
+    fig_icontrol = go.Figure()
+    for site in solver.sites.values():
+        fig_icontrol.add_traces([go.Scatter(x=(site.traj.costates[i, 0],), y=(site.traj.costates[i, 1],),
+                                   line=dict(color=Style.colors[i % len(Style.colors)]),
+                                   name=site.name, mode='markers')
+                        for i in range(solver.n_time)])
+    fig_icontrol.update_layout(template=template, width=800, height=800)
+    fig_icontrol.show()
+
     return fig, fig_cost
 
 

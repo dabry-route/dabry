@@ -194,7 +194,8 @@ class NavigationProblem:
     def augsys_dyn_timeopt(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
         return np.hstack((self.model.dyn.value(t, state, control),
                           -self.model.dyn.d_value__d_state(t, state, control).transpose() @ costate
-                          - self.penalty.d_value(t, state)))
+                          - self.penalty.d_value(t, state),
+                          control))
 
     def augsys_dyn_timeopt_cartesian(self, t: float, state: ndarray, costate: ndarray):
         return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_cartesian(costate))

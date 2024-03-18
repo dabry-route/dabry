@@ -397,7 +397,7 @@ class SolverEF(ABC):
         pass
 
     def dyn_augsys_cartesian(self, t: float, y: ndarray):
-        return self.pb.augsys_dyn_timeopt_cartesian(t, y[:2], y[2:])
+        return self.pb.augsys_dyn_timeopt_cartesian(t, y[:2], y[2:4])
 
     def dyn_augsys_gcs(self, t: float, y: ndarray):
         return self.pb.augsys_dyn_timeopt_gcs(t, y[:2], y[2:])
@@ -554,7 +554,7 @@ class SolverEFResampling(SolverEF):
         t_eval = np.linspace(t_start, t_end, index_t - site.index_t + 1)
         if t_eval.shape[0] <= 1:
             return
-        y0 = np.hstack((state_start, costate_start))
+        y0 = np.hstack((state_start, costate_start, np.array((0, 0))))
         site_index_t_prev = site.index_t
         if not site.in_obs_at(site.index_t):
             res = scitg.solve_ivp(self.dyn_augsys, (t_eval[0], t_eval[-1]), y0,
@@ -563,11 +563,12 @@ class SolverEFResampling(SolverEF):
 
             times = res.t if len(res.t) > 0 else np.array(())
             states = res.y.transpose()[:, :2] if len(res.t) > 0 else np.array(((), ()))
-            costates = res.y.transpose()[:, 2:] if len(res.t) > 0 else np.array(((), ()))
+            costates = res.y.transpose()[:, 2:4] if len(res.t) > 0 else np.array(((), ()))
+            i_control = res.y.transpose()[:, 4:6] if len(res.t) > 0 else np.array(((), ()))
             cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
             events = self.t_events_to_dict(res.t_events)
 
-            traj_free = Trajectory.cartesian(times, states, costates=costates, cost=cost, events=events)
+            traj_free = Trajectory.cartesian(times, states, costates=costates, cost=cost, i_control=i_control, events=events)
 
             active_obstacles = [name for name, t_events in traj_free.events.items()
                                 if t_events.shape[0] > 0 and name != 'target']

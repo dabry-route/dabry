@@ -54,6 +54,7 @@ class Trajectory:
                  controls: Optional[ndarray] = None,
                  costates: Optional[ndarray] = None,
                  cost: Optional[ndarray] = None,
+                 i_control: Optional[ndarray] = None,
                  events: Optional[Dict[str, ndarray]] = None):
         """
         :param times: Time stamps shape (n,)
@@ -62,6 +63,7 @@ class Trajectory:
         :param controls: Controls (n-1, 2)
         :param costates: Costates (n, 2)
         :param cost: Instantaneous cost (n-1,)
+        :param i_control:
         :param events: Dictionary of event time stamps following scipy's solve_ivp behavior
         """
         self.times: ndarray = times.copy()
@@ -69,6 +71,7 @@ class Trajectory:
         self.controls = controls.copy() if controls is not None else None
         self.costates = costates.copy() if costates is not None else None
         self.cost = cost.copy() if cost is not None else None
+        self.i_control = i_control.copy() if i_control is not None else None
 
         self.events: Dict[str, ndarray] = events if events is not None else {}
 
@@ -77,7 +80,7 @@ class Trajectory:
     @classmethod
     def empty(cls):
         return cls(np.array(()), np.array(((), ())), Coords.CARTESIAN,
-                   np.array(((), ())), np.array(((), ())), np.array(()))
+                   np.array(((), ())), np.array(((), ())), np.array(()), np.array(((), ())))
 
     @classmethod
     def cartesian(cls,
@@ -86,9 +89,10 @@ class Trajectory:
                   controls: Optional[ndarray] = None,
                   costates: Optional[ndarray] = None,
                   cost: Optional[ndarray] = None,
+                  i_control: Optional[ndarray] = None,
                   events: Optional[Dict[str, ndarray]] = None):
         return cls(times, states, Coords.CARTESIAN,
-                   controls=controls, costates=costates, cost=cost, events=events)
+                   controls=controls, costates=costates, cost=cost, i_control=i_control, events=events)
 
     @classmethod
     def gcs(cls,
@@ -112,12 +116,14 @@ class Trajectory:
             controls = other.controls
             costates = other.costates
             cost = other.cost
+            i_control = other.i_control
         elif len(other) == 0:
             times = self.times
             states = self.states
             controls = self.controls
             costates = self.costates
             cost = self.cost
+            i_control = self.i_control
         else:
             times = np.concatenate((self.times, other.times))
             states = np.concatenate((self.states, other.states))
@@ -129,7 +135,10 @@ class Trajectory:
                 ((self.costates if self.costates is not None else np.ones((self.times.shape[0], 2)) * np.nan),
                  (other.costates if other.costates is not None else np.ones((other.times.shape[0], 2)) * np.nan))
             )
-
+            i_control = np.concatenate(
+                ((self.i_control if self.i_control is not None else np.ones((self.times.shape[0], 2)) * np.nan),
+                 (other.i_control if other.i_control is not None else np.ones((other.times.shape[0], 2)) * np.nan))
+            )
             cost = np.concatenate((self.cost if self.cost is not None else np.ones(self.times.shape[0]) * np.nan,
                                    other.cost if other.cost is not None else np.ones(other.times.shape[0]) * np.nan))
 
@@ -137,7 +146,7 @@ class Trajectory:
         events.update(other.events)
 
         return Trajectory(times, states, self.coords,
-                          controls=controls, costates=costates, cost=cost, events=events)
+                          controls=controls, costates=costates, cost=cost, events=events, i_control=i_control)
 
     # def fill_with(self, other):
     #     if not isinstance(other, Trajectory):
