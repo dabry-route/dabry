@@ -4,7 +4,7 @@ from typing import Union, Optional
 import numpy as np
 
 from dabry.flowfield import DiscreteFF
-from dabry.obstacle import CircleObs, FrameObs
+from dabry.obstacle import CircleObs, FrameObs, is_frame_obstacle, is_circle_obstacle
 from dabry.solver_ef import SolverEFResampling, SolverEFTrimming, SiteManager
 from dabry.trajectory import Trajectory
 
@@ -82,12 +82,12 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
             fig.add_traces([go.Scatter(x=site.traj.states[:, 0], y=site.traj.states[:, 1],
                                        line=dict(color=Style.colors[site.depth % len(Style.colors)]),
                                        name=site.name, mode='lines')
-                            for site in sites_by_depth])
+                            for site in sites_by_depth if site.traj is not None])
             if solver.solution_site is not None:
-                if solver.solution_site.traj_full is None:
+                if solver.solution_site.traj is None:
                     warnings.warn('Solver solutions have not been reconstructed over the full time window')
                 else:
-                    fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
+                    fig.add_traces([go.Scatter(x=site.traj.states[:, 0], y=site.traj.states[:, 1],
                                                line=dict(color='lightgreen', width=3), name=site.name, mode='lines')
                                     for site in [solver.solution_site] if site is not None])
                     fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],

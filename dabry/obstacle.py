@@ -37,7 +37,7 @@ class Obstacle(ABC):
 
     @terminal
     def event(self, time: float, state_aug: ndarray):
-        return self.value(state_aug[:2])
+        return self.value(state_aug[1:3])
 
     @abstractmethod
     def value(self, x: ndarray):
@@ -304,3 +304,7 @@ def is_discrete_obstacle(obs: Obstacle):
 
 def is_frame_obstacle(obs: Obstacle):
     return isinstance(obs, FrameObs) or (isinstance(obs, WrapperObs) and isinstance(obs.obs, FrameObs))
+
+
+def is_circle_obstacle(obs: Obstacle):
+    return isinstance(obs, CircleObs) or (isinstance(obs, WrapperObs) and isinstance(obs.obs, CircleObs))

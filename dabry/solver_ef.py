@@ -102,49 +102,61 @@ class ClosureReason(Enum):
 class NeuteringReason(Enum):
     # When two neighbours enter obstacle and have different directions
     OBSTACLE_SPLITTING = 0
+    # Two neighbors experience a different obstacle history: resampling undefined yet
+    DIFFERENT_OBS_HISTORY = 1
 
 
 class Site:
 
-    def __init__(self, t_init: float, index_t_init: int,
-                 state_origin: ndarray, costate_origin: ndarray, cost_origin: float, time_grid: ndarray,
-                 name, t_exit_manual: tuple[float] = (), init_next_nb=None):
+    def __init__(self, t_init: float, cost_init: float, state_init: ndarray, costate_init: ndarray,
+                 tau_exit: ndarray, time_grid: ndarray, name: str):
         self.t_init = t_init
-        self.index_t_init = index_t_init
-        if np.any(np.isnan(costate_origin)):
-            raise ValueError('Costate initialization contains NaN')
         self.ode_legs: List[OdeAugResult] = []
         self.status_int: IntStatus = IntStatus.FREE
-        self.state_init = state_origin.copy()
-        self.costate_init = costate_origin.copy()
-        self.cost_init = cost_origin
+
+        self.cost_init = cost_init
+        # TODO: are hard copies really required here ?
+        self.state_init = state_init.copy()
+        self.costate_init = costate_init.copy()
+        self.tau_exit = tau_exit.copy()
+
         self.traj: Optional[Trajectory] = None
-        self.index_t_check_next = index_t_init
-        self.prev_index_t_check_next = index_t_init
+        self.index_t_check_next = 0
+        self.prev_index_t_check_next = 0
         self.closure_reason: Optional[ClosureReason] = None
         self.neutering_reason: Optional[NeuteringReason] = None
         self.t_closed: Optional[float] = None
         self.t_neutered: Optional[float] = None
-        self.time_grid: ndarray = time_grid.copy()
+        self.time_grid: ndarray = time_grid
         self.next_nb: list[Optional[Site]] = [None] * time_grid.size
         self.name = name
-        self.t_exit_manual = t_exit_manual
-        if init_next_nb is not None:
-            self.init_next_nb(init_next_nb)
 
     def discretize(self):
-        pass
+        states = np.nan * np.ones((self.n_time, 2))
+        costates = np.nan * np.ones((self.n_time, 2))
+        cost = np.nan * np.ones(self.n_time)
+        for it, t in enumerate(self.time_grid):
+            if not self.ensure_time_bounds(t):
+                continue
+            else:
+                cost[it] = self.cost(t)
+                states[it, :] = self.state(t)
+                costates[it, :] = self.costate(t)
+        self.traj = Trajectory(self.time_grid, states, costates=costates, cost=cost)
+
+    def time_to_index(self, t: float):
+        return np.searchsorted(self.time_grid, t, side='right') - 1
 
     @property
     def index_neutered(self):
         if self.t_neutered is None:
             return -1
-        return np.searchsorted(self.time_grid, self.t_neutered, side='right') - 1
+        return self.time_to_index(self.t_neutered)
 
     def index_closed(self):
         if self.t_closed is None:
             return None
-        return np.searchsorted(self.time_grid, self.t_closed, side='right') - 1
+        return self.time_to_index(self.t_closed)
 
     @property
     def t_cur(self):
@@ -184,22 +196,18 @@ class Site:
 
     @property
     def index_t(self):
-        return self.index_t_init + (0 if self.traj is None else len(self.traj) - 1)
+        return self.time_to_index(self.t_cur)
 
     @property
     def n_time(self):
         return len(self.next_nb)
 
-    # @property
-    # def in_obs(self):
-    #     return len(self.obstacle_name) > 0
-
     def ensure_time_bounds(self, t: float):
         if len(self.ode_legs) == 0:
-            return
-        # TODO: sanitize inequalities with tolerance ?
+            return False
         if t < self.ode_legs[0].sol.t_min or t > self.ode_legs[-1].sol.t_max:
-            raise ValueError(f'Time out of bounds ({t})')
+            return False
+        return True
 
     def obs_at(self, t: float):
         if len(self.ode_legs) == 0:
@@ -207,8 +215,38 @@ class Site:
         ode_leg = self.find_leg(t)
         return ode_leg.obs_name
 
-    def in_obs_at(self, t: float):
-        return self.obs_at(t) is not None
+    def obs_at_index(self, index: int):
+        return self.obs_at(self.time_grid[index])
+
+    def in_obs_at_index(self, index: int):
+        return self.obs_at_index(index) is not None
+
+    def obs_history(self):
+        if len(self.ode_legs) == 0:
+            return []
+        res = []
+        for ode_leg in self.ode_legs:
+            if ode_leg.obs_name is not None:
+                res = res.append(ode_leg.obs_name)
+        return res
+
+    @property
+    def leg_prev_obs(self):
+        if len(self.ode_legs) == 0:
+            raise ValueError('No legs')
+        for ode_leg in self.ode_legs[::-1]:
+            if ode_leg.obs_name is not None:
+                return ode_leg
+        raise ValueError('No obstacle leg')
+
+    def trigo_at(self, t: float):
+        if len(self.ode_legs) == 0:
+            return None
+        ode_leg = self.find_leg(t)
+        return ode_leg.obs_trigo
+
+    def trigo_at_index(self, index: int):
+        return self.trigo_at(self.time_grid[index])
 
     def captive(self):
         if len(self.ode_legs) == 0:
@@ -236,81 +274,68 @@ class Site:
         return self.ode_legs[-1].obs_name
 
     @property
+    def count_obs_cur(self):
+        if len(self.ode_legs) == 0:
+            return 0
+        return sum([1 if ode_leg.obs_name is not None else 0 for ode_leg in self.ode_legs])
+
+    @property
     def trigo_cur(self):
         if len(self.ode_legs) == 0:
             return None
         return self.ode_legs[-1].obs_trigo
 
-    def extend_traj(self, traj: Trajectory):
-        if self.traj is None:
-            self.traj = traj
-        else:
-            self.traj = self.traj + traj
-            if self.traj.times.shape[0] >= 2:
-                cond = np.all(np.isclose(self.traj.times[1:] - self.traj.times[:-1],
-                                         self.traj.times[1] - self.traj.times[0]))
-                assert cond
+    def time_at_index(self, index: int):
+        return self.time_grid[index]
 
-    def init_next_nb(self, site):
-        self.next_nb[0] = site
+    def cost_at_index(self, index: int):
+        return self.cost(self.time_grid[index])
 
-    # def time_at_index(self, index: int):
-    #     return self.traj.times[index - self.index_t_init]
-    #
-    # def state_at_index(self, index: int):
-    #     return self.traj.states[index - self.index_t_init]
-    #
-    # def costate_at_index(self, index: int):
-    #     return self.traj.costates[index - self.index_t_init]
+    def state_at_index(self, index: int):
+        return self.state(self.time_grid[index])
+
+    def costate_at_index(self, index: int):
+        return self.costate(self.time_grid[index])
 
     def find_leg(self, t: float):
-        self.ensure_time_bounds(t)
+        if not self.ensure_time_bounds(t):
+            raise ValueError(f'Time out of bounds ({t})')
         if len(self.ode_legs) == 0:
             raise ValueError('Empty leg list')
         for ode_leg in self.ode_legs:
-            if ode_leg.sol.t_min < t <= ode_leg.sol.t_max:
+            if ode_leg.sol.t_min <= t <= ode_leg.sol.t_max:
                 return ode_leg
         raise ValueError(f'Time not in ODE legs ({t})')
 
+    def cost(self, t: float):
+        return self.find_leg(t).sol(t)[0]
+
     def state(self, t: float):
+        return self.find_leg(t).sol(t)[1:3]
+
+    def costate(self, t: float):
+        sol_t = self.find_leg(t).sol(t)
+        if sol_t.size <= 3:
+            return np.nan * np.ones(2)
+        return sol_t[3:5]
+
+    @property
+    def cost_cur(self):
         if len(self.ode_legs) == 0:
-            if np.isclose(t, self.t_init):
-                return self.state_init
-            else:
-                raise ValueError(f'Undefined state at requested time ({t})')
-        return self.find_leg(t).sol(t)[:2]
+            return self.cost_init
+        return self.ode_legs[-1].sol(self.ode_legs[-1].sol.t_max)[0]
 
     @property
     def state_cur(self):
         if len(self.ode_legs) == 0:
             return self.state_init
-        return self.ode_legs[-1].sol(self.ode_legs[-1].sol.t_max)[:2]
-
-    def costate(self, t: float):
-        if len(self.ode_legs) == 0:
-            if np.isclose(t, self.t_init):
-                return self.costate_init
-            else:
-                raise ValueError(f'Undefined costate at requested time ({t})')
-        sol_t = self.find_leg(t).sol(t)
-        if sol_t.size <= 2:
-            return np.nan * np.ones(2)
-        return sol_t[2:4]
+        return self.ode_legs[-1].sol(self.ode_legs[-1].sol.t_max)[1:3]
 
     @property
     def costate_cur(self):
         if len(self.ode_legs) == 0:
             return self.costate_init
-        return self.ode_legs[-1].sol(self.ode_legs[-1].sol.t_max)[2:4]
-
-    # def control_at_index(self, index: int):
-    #     return self.traj.controls[index - self.index_t_init]
-    #
-    # def cost_at_index(self, index: int):
-    #     return self.traj.cost[index - self.index_t_init]
-
-    def is_root(self):
-        return '-' not in self.name
+        return self.ode_legs[-1].sol(self.ode_legs[-1].sol.t_max)[3:5]
 
     def add_leg(self, ode_aug_res):
         self.ode_legs.append(ode_aug_res)
@@ -339,6 +364,9 @@ class Site:
             else:
                 self.status_int = IntStatus.OBSTACLE
 
+    def is_root(self):
+        return '-' not in self.name
+
     def __str__(self):
         return f"<Site {self.name}>"
 
@@ -348,9 +376,10 @@ class Site:
 
 class SiteManager:
 
-    def __init__(self, n_sectors: int, max_depth: int, looping_sectors=True):
+    def __init__(self, n_sectors: int, max_depth: int, time_grid: ndarray, looping_sectors=True):
         self.n_sectors = n_sectors
         self.max_depth = max_depth
+        self.time_grid: ndarray = time_grid
         self.looping_sectors = looping_sectors
 
         # Avoid recomputing several times this value
@@ -440,43 +469,20 @@ class SiteManager:
         return self.name_from_index(index - pow(2, self.max_depth - depth)), self.name_from_index(
             (index + pow(2, self.max_depth - depth)) % self.n_total_sites)
 
-    def site_from_parents(self, site_prev, site_next, index_t) -> Site:
-        if not np.isclose(site_prev.time_at_index(index_t), site_next.time_at_index(index_t)):
-            raise ValueError('Sites not sync in time for child creation')
-        # if site_prev.in_obs_at(index_t) and site_next.in_obs_at(index_t):
-        #     raise ValueError('Illegal child creation between two obstacle-captured sites')
-        costate_prev = site_prev.costate_at_index(index_t)
-        costate_next = site_next.costate_at_index(index_t)
-        if site_prev.in_obs_at(index_t):
-            costate_prev = -site_prev.control_at_index(index_t) * np.linalg.norm(costate_next)
-        if site_next.in_obs_at(index_t):
-            costate_next = -site_next.control_at_index(index_t) * np.linalg.norm(costate_prev)
+    def site_from_parents(self, site_prev, site_next, tau_exit: Optional[ndarray] = None,
+                          index_t_check_next: int = 0) -> Site:
         name = self.name_from_parents_name(site_prev.name, site_next.name)
-        return Site(site_prev.time_at_index(index_t), index_t,
-                    0.5 * (site_prev.state_at_index(index_t) + site_next.state_at_index(index_t)),
-                    0.5 * (costate_prev + costate_next),
-                    0.5 * (site_prev.cost_at_index(index_t) + site_next.cost_at_index(index_t)),
-                    site_prev.n_time, name)
-
-
-class ObstacleRecord:
-
-    def __init__(self, obs_name: str, index_t_enter_obs: int, t_enter_obs: float, trigo: bool,
-                 index_t_exit_obs: Optional[int] = None, t_exit_obs: np.float = np.inf):
-        """
-        :param obs_name: Name of obstacle
-        :param index_t_enter_obs: First index at which the site trajectory is IN obstacle mode
-        :param t_enter_obs: Continuous exact obstacle mode entry time
-        :param trigo: If border following is trigonometric-wise or not
-        :param index_t_exit_obs: First index at which the site trajectory is OUT of obstacle event
-        :param t_exit_obs: Continuous exact obstacle mode exit time
-        """
-        self.obs_name = obs_name
-        self.index_t_enter_obs = index_t_enter_obs
-        self.t_enter_obs = t_enter_obs
-        self.trigo = trigo
-        self.index_t_exit_obs = index_t_exit_obs
-        self.t_exit_obs = t_exit_obs
+        tau_exit = tau_exit if tau_exit is not None else \
+            0.5 * (site_prev.tau_exit + site_next.tau_exit)
+        site_child = Site(site_prev.t_init,
+                          0.5 * (site_prev.cost_init + site_next.cost_init),
+                          0.5 * (site_prev.state_init + site_next.state_init),
+                          0.5 * (site_prev.costate_init + site_next.costate_init),
+                          tau_exit, self.time_grid, name)
+        # Updating connection
+        site_prev.next_nb[:index_t_check_next + 1] = [site_child] * (index_t_check_next + 1)
+        site_child.next_nb[:index_t_check_next + 1] = [site_next] * (index_t_check_next + 1)
+        return site_child
 
 
 class SolverEF(ABC):
@@ -563,13 +569,13 @@ class SolverEF(ABC):
         return self.t_init + self.total_duration
 
     def dyn_augsys(self, t: float, y: ndarray):
-        self.pb.augsys_dyn_timeopt(t, y[:2], y[2:])
+        return np.hstack((1., self.pb.augsys_dyn_timeopt(t, y[1:3], y[3:5])))
 
     def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool):
         sign = (2. * trigo - 1.)
-        d = np.array(((0., -sign), (sign, 0.))) @ self.obstacles[obstacle].d_value(x)
-        ff_val = self.pb.model.ff.value(t, x)
-        return ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max)
+        d = np.array(((0., -sign), (sign, 0.))) @ self.obstacles[obstacle].d_value(x[1:3])
+        ff_val = self.pb.model.ff.value(t, x[1:3])
+        return np.hstack((1., ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max)))
 
     @non_terminal
     def _event_target(self, _, x):
@@ -577,9 +583,9 @@ class SolverEF(ABC):
 
     @terminal
     def _event_exit_obs(self, t, x, obstacle: str, _: bool):
-        d_value = self.obstacles[obstacle].d_value(x)
+        d_value = self.obstacles[obstacle].d_value(x[1:3])
         n = d_value / np.linalg.norm(d_value)
-        ff_val = self.pb.model.ff.value(t, x)
+        ff_val = self.pb.model.ff.value(t, x[1:3])
         ff_ortho = ff_val @ n
         return self.pb.srf_max - np.abs(ff_ortho)
 
@@ -684,19 +690,19 @@ class SolverEFResampling(SolverEF):
         self.solution_site: Optional[Site] = None
         self.solution_site_min_cost_index: Optional[int] = None
         self.mode_origin: bool = mode_origin
-        self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth)
+        self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth, self.times)
         self._ff_max_norm = np.max(np.linalg.norm(self.pb.model.ff.values, axis=-1)) if \
             hasattr(self.pb.model.ff, 'values') else None
 
-    def setup(self):
-        super().setup()
-        self._to_shoot_sites = [
-            Site(self.t_init, 0, self.pb.x_init, np.array((np.cos(theta), np.sin(theta))), 0., self.n_time,
+    def create_initial_sites(self):
+        sites = [
+            Site(self.t_init, 0, self.pb.x_init, np.array((np.cos(theta), np.sin(theta))), np.array(()), self.times,
                  self.site_mngr.name_from_pdl(i_theta, 0, 0))
             for i_theta, theta in enumerate(np.linspace(0, 2 * np.pi, self.n_costate_sectors, endpoint=False))]
-        for i_site, site in enumerate(self._to_shoot_sites):
-            site.init_next_nb(self._to_shoot_sites[(i_site + 1) % len(self._to_shoot_sites)])
-        self.sites = {site.name: site for site in self._to_shoot_sites}
+        for i_site, site in enumerate(sites):
+            site.next_nb[0] = sites[(i_site + 1) % len(sites)]
+        self.sites = {site.name: site for site in sites}
+        return sites
 
     @property
     def trajs(self):
@@ -705,9 +711,9 @@ class SolverEFResampling(SolverEF):
     def integrate_site_to_target_time(self, site: Site, t_target: float):
         if site.status_int == IntStatus.CLOSED:
             raise ValueError('Cannot integrate closed site')
-        while not np.close(site.t_cur, t_target):
+        while not np.isclose(site.t_cur, t_target):
             if site.status_int == IntStatus.FREE:
-                y0 = np.hstack((site.state_cur, site.costate_cur))
+                y0 = np.hstack((site.cost_cur, site.state_cur, site.costate_cur))
                 ode_aug_res = self.integrate_free(site.t_cur, t_target, y0)
                 site.add_leg(ode_aug_res)
             elif site.status_int == IntStatus.OBS_ENTRY:
@@ -722,21 +728,31 @@ class SolverEFResampling(SolverEF):
                                  self.pb.model.dyn.value(t_enter_obs, state_cur,
                                                          self.pb.timeopt_control(state_cur, costate_cur)))
                 trigo = cross >= 0.
-                dot = np.dot(grad_obs, self.dyn_constr(site.t_cur, state_cur, obs_name, trigo))
+                dot = np.dot(grad_obs, self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, state_cur)),
+                                                       obs_name, trigo)[1:3])
                 if not np.isclose(dot, 0):
                     # close site
                     break
-                ode_aug_res = self.integrate_captive(site.t_cur, t_target, state_cur, obs_name, trigo)
+                x0 = np.hstack((site.cost_cur, state_cur))
+                ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, obs_name, trigo)
                 site.add_leg(ode_aug_res)
             elif site.status_int == IntStatus.OBSTACLE:
-                ode_aug_res = self.integrate_captive(site.t_cur, t_target, site.state_cur, site.obs_cur, site.trigo_cur)
+                x0 = np.hstack((site.cost_cur, site.state_cur))
+                i_tau_exit = site.count_obs_cur - 1
+                if i_tau_exit < 0:
+                    t_exit = None
+                elif i_tau_exit >= site.tau_exit.size:
+                    t_exit = None
+                else:
+                    t_exit = site.t_cur + site.tau_exit[i_tau_exit]
+                ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, site.obs_cur, site.trigo_cur, t_exit)
                 site.add_leg(ode_aug_res)
             elif site.status_int == IntStatus.OBS_EXIT:
                 control_cur = self.dyn_constr(site.t_cur, site.state_cur, site.obs_cur, site.trigo_cur) - \
                               self.pb.model.ff.value(site.t_cur, site.state_cur)
                 # TODO: order 2 detection of obstacle penetration
                 costate_artificial = - control_cur
-                y0 = np.hstack((site.state_cur, costate_artificial))
+                y0 = np.hstack((site.cost_cur, site.state_cur, costate_artificial))
                 ode_aug_res = self.integrate_free(site.t_cur, t_target, y0)
                 site.add_leg(ode_aug_res)
 
@@ -747,9 +763,10 @@ class SolverEFResampling(SolverEF):
         return OdeAugResult(res, events_dict, None)
 
     def integrate_captive(self, t_start: float, t_end: float, x0: ndarray, obs_name: str, trigo: bool,
-                          t_exit: np.float = np.inf):
-        res: OdeResult = solve_ivp(self.dyn_constr, (t_start, np.min(t_exit, t_end)),
-                                   x0[:2], events=[self._event_exit_obs], args=[obs_name, trigo],
+                          t_exit: Optional[float] = None):
+        t_hi = min(t_exit, t_end) if t_exit is not None else t_end
+        res: OdeResult = solve_ivp(self.dyn_constr, (t_start, t_hi),
+                                   x0, events=[self._event_exit_obs], args=[obs_name, trigo],
                                    dense_output=True, **self._integrator_kwargs)
         events_dict = {
             "exit_forced": res.t_events[0],
@@ -764,7 +781,7 @@ class SolverEFResampling(SolverEF):
             [
                 (site.index_t_check_next, site) for site in
                 set(self.sites.values()).difference(
-                    set(site for site in self.sites.values() if len(site.traj) == 1)
+                    set(site for site in self.sites.values() if site.traj is None)
                 )
                 if not (site.neutered and site.index_t_check_next + 1 >= site.index_neutered) and
                    not (site.closed and site.index_t_check_next == site.index_t) and
@@ -793,15 +810,10 @@ class SolverEFResampling(SolverEF):
         return res
 
     def step(self):
+        self._to_shoot_sites = self.feed_new_sites()
         for site in tqdm(self._to_shoot_sites, desc='Depth %d' % self.depth, file=sys.stdout):
             self.integrate_site_to_target_time(site, self.t_upper_bound)
-            if site.traj is not None:
-                if not site.is_root():
-                    self.connect_to_parents(site)
         self._to_shoot_sites = []
-        new_sites = self.compute_new_sites()
-        self._to_shoot_sites.extend(new_sites)
-        # self.trim_distance()
         print("Cost guarantee: {val:.3f}/{total:.3f} ({ratio:.1f}%, {valindex}/{totindex}) {candsol}".format(
             val=self.times[self.validity_index],
             total=self.times[-1],
@@ -821,7 +833,6 @@ class SolverEFResampling(SolverEF):
                 site.close(ClosureReason.SUBOPTIMAL)
 
     def solve(self):
-        self.setup()
         self.pre_solve()
         dki = DelayedKeyboardInterrupt()
         with dki:
@@ -832,16 +843,16 @@ class SolverEFResampling(SolverEF):
                 self.check_solutions()
                 if self.found_guaranteed_solution:
                     break
-        for site in self.solution_sites:
-            self.extrapolate_back_traj(site)
-        # missed_obs = self.missed_obstacles()
-        # TODO: find a way to avoid near zero obstacle detection
-        # if len(missed_obs) > 0:
-        #     warnings.warn("Missed obstacles in trajectory collection. Consider lowering integration max step size.")
+        # TODO: experimental
+        for site in self.sites_non_void():
+            site.discretize()
         self.post_solve()
 
+    def sites_non_void(self):
+        return [site for site in self.sites.values() if len(site.ode_legs) > 0]
+
     def get_cost_map(self):
-        self._cost_map.update_from_sites(self.sites.values(), 0, self.validity_index)
+        self._cost_map.update_from_sites(self.sites_non_void(), 0, self.validity_index)
         return self._cost_map.values
 
     def site_front(self, index_t):
@@ -864,39 +875,38 @@ class SolverEFResampling(SolverEF):
     def suboptimal_sites(self):
         return self.solution_sites.difference({self.solution_site})
 
-    def compute_new_sites(self, index_t_hi: Optional[int] = None) -> list[Site]:
+    def feed_new_sites(self, index_t_hi: Optional[int] = None) -> list[Site]:
+        if self.depth == 0:
+            return self.create_initial_sites()
+        else:
+            return self.create_new_sites(index_t_hi)
+
+    def create_new_sites(self, index_t_hi: Optional[int] = None) -> list[Site]:
         index_t_hi = index_t_hi if index_t_hi is not None else self.n_time - 1
         prev_sites = [site for site in self.sites.values()]
         new_sites: list[Site] = []
         for i_s, site in enumerate(prev_sites):
             site_nb = site.next_nb[site.index_t_check_next]
-            new_id_check_next = prev_id_check_next = site.index_t_check_next
+            new_id_check_next = site.index_t_check_next
             new_site: Optional[Site] = None
             upper_index = min(site.index_t + 1, site_nb.index_t + 1, index_t_hi)
             for i in range(site.index_t_check_next, upper_index):
                 state = site.state_at_index(i)
                 state_nb = site_nb.state_at_index(i)
-                # if site.in_obs_at(i) and site_nb.in_obs_at(i):
-                #     site.neuter(i, NeuteringReason.SELF_AND_NB_IN_OBS)
-                if site.in_obs_at(i) and site_nb.in_obs_at(i) and (site.obs_trigo != site_nb.obs_trigo):
+                if site.in_obs_at_index(i) and site_nb.in_obs_at_index(i) and \
+                        site.obs_at_index(i) == site_nb.obs_at_index(i) and \
+                        (site.trigo_at_index(i) != site_nb.trigo_at_index(i)):
                     site.neuter(i, NeuteringReason.OBSTACLE_SPLITTING)
-                if np.sum(np.square(state - state_nb)) > self._max_dist_sq:
-                    # Sample from start between free points which are fully defined from origin
-                    # Also resample between two points in obstacle if they have the same trigo
-                    # else propagate approximation
-                    index = 0 if self.mode_origin and \
-                                 (not site.in_obs_at(i) and not site_nb.in_obs_at(i) and
-                                  site.index_t_init == 0 and site_nb.index_t_init == 0) or \
-                                 (site.in_obs_at(i) and site_nb.in_obs_at(i)
-                                  and site.index_t_init == 0 and site_nb.index_t_init == 0) else i
-                    if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
-                        # TODO: costate value in obstacle would prevent this neutering
-                        try:
-                            new_site = self.site_mngr.site_from_parents(site, site_nb, index)
-                        except ValueError as e:
-                            if not e.args[0].startswith('Costate'):
-                                raise e
-                            site.neuter(i, NeuteringReason.INDEFINITE_CHILD_CREATION)
+                    break
+                if np.sum(np.square(state - state_nb)) > self._max_dist_sq and \
+                        site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
+                    # Resampling
+                    if site.obs_history() != site_nb.obs_history():
+                        # TODO: experimental
+                        # site.neuter(i, NeuteringReason.DIFFERENT_OBS_HISTORY)
+                        # break
+                        pass
+                    new_site = self.binary_resample(site, site_nb, i)
                     break
                 new_id_check_next = i
             # Update the neighbouring property
@@ -909,8 +919,37 @@ class SolverEFResampling(SolverEF):
                 new_sites.append(new_site)
         return new_sites
 
+    def binary_resample(self, site_prev: Site, site_next: Site, index: int):
+        if site_prev.in_obs_at_index(index) == site_next.in_obs_at_index(index):
+            # Either free and free or obs and obs
+            # Assume same switching structure
+            # (shall be asymptotically true when the distance tolerance between extremals goes to zero)
+            cond = np.array_equal(site_prev.tau_exit, site_next.tau_exit)
+            assert cond
+            return self.site_mngr.site_from_parents(site_prev, site_next, index_t_check_next=index)
+        else:
+            site_in_obs, site_out_obs = (site_prev, site_next) if site_prev.in_obs_at_index(index) else \
+                (site_next, site_prev)
+            # Assume switching structure differs only by one between neighbours
+            # (shall be true asymptotically)
+            cond = len(site_out_obs.tau_exit) >= len(site_in_obs.tau_exit)
+            assert cond
+            cond = len(site_out_obs.tau_exit) - len(site_in_obs.tau_exit) <= 1
+            assert cond
+            if len(site_out_obs.tau_exit) == 0:
+                leg_prev_obs = site_in_obs.leg_prev_obs
+                duration_obs = (leg_prev_obs.sol.t_max - leg_prev_obs.sol.t_min)
+                tau_exit = np.array(duration_obs / 2)
+            else:
+                tau_exit = site_out_obs.tau_exit.copy()
+                leg_prev_obs = site_in_obs.leg_prev_obs
+                duration_obs = (leg_prev_obs.sol.t_max - leg_prev_obs.sol.t_min)
+                tau_exit[-1] = (tau_exit[-1] + duration_obs) / 2
+            self.site_mngr.site_from_parents(site_prev, site_next, tau_exit=tau_exit, index_t_check_next=index)
+
     def check_solutions(self):
-        to_check = set(self.sites.values()).difference(self._checked_for_solution)
+        to_check = set(self.sites.values()).difference(self._checked_for_solution).difference(
+            set(site for site in self.sites.values() if site.traj is None))
         for site in to_check:
             if np.any(np.sum(np.square(site.traj.states - self.pb.x_target), axis=-1) < self._target_radius_sq):
                 self.success = True
@@ -940,69 +979,13 @@ class SolverEFResampling(SolverEF):
             return False
         return self.validity_index >= self.solution_site_min_cost_index
 
-    def connect_to_parents(self, site: Site):
-        name_prev, name_next = self.site_mngr.parents_name_from_name(site.name)
-        site_prev, site_next = self.sites[name_prev], self.sites[name_next]
-        # assert (site_prev.index_t_check_next in [self.index_t_init - 1, self.index_t_init])
-        # Connection to parents
-        site_prev.next_nb[:site.index_t_check_next + 1] = [site] * site.index_t_check_next
-        site.next_nb[:site.index_t_check_next + 1] = [site_next] * site.index_t_check_next
-
-    def extrapolate_back_traj(self, site):
-        name_prev, name_next = self.site_mngr.parents_name_from_name(site.name)
-        coeff_prev, coeff_next = 0.5, 0.5
-        index_hi = site.index_t_init - 1
-        times = site.traj.times.copy()
-        states = site.traj.states.copy()
-        n = times.shape[0]
-        costates = site.traj.costates.copy() if site.traj.costates is not None else np.nan * np.ones((n, 2))
-        controls = site.traj.controls.copy() if site.traj.controls is not None else np.nan * np.ones((n, 2))
-        costs = site.traj.cost.copy()
-        while name_prev is not None and name_next is not None:
-            site_prev, site_next = self.sites[name_prev], self.sites[name_next]
-            index_lo = max(site_prev.index_t_init, site_next.index_t_init)
-            rec_prev = site_prev.index_t_init > site_next.index_t_init
-            s_prev = slice(index_lo - site_prev.index_t_init, index_hi - site_prev.index_t_init + 1)
-            s_next = slice(index_lo - site_next.index_t_init, index_hi - site_next.index_t_init + 1)
-            times = np.concatenate((site_prev.traj.times[s_prev], times))
-            states = np.concatenate((
-                coeff_prev * site_prev.traj.states[s_prev] + coeff_next * site_next.traj.states[s_next], states))
-            n = s_prev.stop - s_prev.start
-            costates_prev = np.nan * np.ones((n, 2)) if site_prev.traj.costates is None else \
-                site_prev.traj.costates[s_prev]
-            costates_next = np.nan * np.ones((n, 2)) if site_next.traj.costates is None else \
-                site_next.traj.costates[s_next]
-            costates = np.concatenate((coeff_prev * costates_prev + coeff_next * costates_next,
-                                       costates))
-            controls_prev = np.nan * np.ones((n, 2)) if site_prev.traj.controls is None else \
-                site_prev.traj.controls[s_prev]
-            controls_next = np.nan * np.ones((n, 2)) if site_next.traj.controls is None else \
-                site_next.traj.controls[s_next]
-            controls = np.concatenate((coeff_prev * controls_prev + coeff_next * controls_next,
-                                       controls))
-            costs = np.concatenate(
-                (coeff_prev * site_prev.traj.cost[s_prev] + coeff_next * site_next.traj.cost[s_next],
-                 costs))
-            if index_lo == 0:
-                break
-            index_hi = index_lo - 1
-            if rec_prev:
-                name_prev = self.site_mngr.parents_name_from_name(name_prev)[0]
-                coeff_prev = coeff_prev / 2
-                coeff_next = 1 - coeff_prev
-            else:
-                name_next = self.site_mngr.parents_name_from_name(name_next)[1]
-                coeff_next = coeff_next / 2
-                coeff_prev = 1 - coeff_next
-        site.traj_full = Trajectory(times, states, controls=controls, costates=costates,
-                                    cost=costs,
-                                    events=site.traj.events)
-
     def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
                      bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
         super(SolverEFResampling, self).save_results(scale_length, scale_time, bl, time_offset)
-        if self.solution_site is not None and self.solution_site.traj_full is not None:
-            self.pb.io.save_traj(self.solution_site.traj_full, name='solution',
+        if self.solution_site is not None:
+            if self.solution_site.traj is None:
+                self.solution_site.discretize()
+            self.pb.io.save_traj(self.solution_site.traj, name='solution',
                                  scale_length=scale_length, scale_time=scale_time, bl=bl, time_offset=time_offset)
 
 
@@ -1062,7 +1045,7 @@ class SolverEFTrimming(SolverEFResampling):
                         self.connect_to_parents(site)
                 cond = site.index_t == self.index_t_next_subframe - 1 or site.closed
                 assert cond
-            new_sites = self.compute_new_sites(index_t_hi=self.index_t_next_subframe - 1)
+            new_sites = self.feed_new_sites(index_t_hi=self.index_t_next_subframe - 1)
             self._to_shoot_sites.extend(new_sites)
             self._sites_created_at_subframe[self.i_subframe] |= set(new_sites)
         self.trim()
@@ -1122,10 +1105,7 @@ class CostMap:
 
     def update_from_sites(self, sites: Iterable[Site], index_t_lo: int, index_t_hi: int):
         for site in sites:
-            # TODO: more efficient screening here
-            # lower_index = max(index_t_lo, site.index_t_init, site.prev_index_t_check_next)
-            lower_index = max(index_t_lo, site.index_t_init)
-            for index_t in range(lower_index, min(index_t_hi + 1, site.index_t_check_next)):
+            for index_t in range(index_t_lo, min(index_t_hi + 1, site.index_t_check_next)):
                 site_nb = site.next_nb[index_t]
 
                 # site, index_t    1 o --------- o 3 site, index + 1
