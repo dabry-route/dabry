@@ -81,7 +81,10 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
         if not timeslider:
             fig.add_traces([go.Scatter(x=site.traj.states[:, 0], y=site.traj.states[:, 1],
                                        line=dict(color=Style.colors[site.depth % len(Style.colors)]),
-                                       name=site.name, mode='lines')
+                                       name=site.name, mode='lines',
+                                       hovertemplate='%{text}<br>(%{x}, %{y})',
+                                       text=['({index}, {cost})'.format(index=index, cost=cost)
+                                             for index, cost in zip(np.arange(len(site.traj)), site.traj.cost)])
                             for site in sites_by_depth if site.traj is not None])
             if solver.solution_site is not None:
                 if solver.solution_site.traj is None:

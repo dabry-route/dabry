@@ -166,6 +166,14 @@ class Site:
             return self.ode_legs[-1].sol.t_max
 
     @property
+    def t_exit_next(self):
+        i_tau_exit = self.count_obs_cur
+        if i_tau_exit >= self.tau_exit.size:
+            return None
+        else:
+            return self.t_cur + self.tau_exit[i_tau_exit]
+
+    @property
     def depth(self):
         if '-' not in self.name:
             return 0
@@ -358,7 +366,7 @@ class Site:
                 self.status_int = IntStatus.FREE
         else:
             # Last leg is a captive leg, see if it exits
-            exit_events = [name for name, t_events in last_leg.events_dict.items() if t_events.shape[0] > 0]
+            exit_events = [name for name, t_events in last_leg.events_dict.items() if t_events.size > 0]
             if len(exit_events) > 0:
                 self.status_int = IntStatus.OBS_EXIT
             else:
@@ -469,19 +477,18 @@ class SiteManager:
         return self.name_from_index(index - pow(2, self.max_depth - depth)), self.name_from_index(
             (index + pow(2, self.max_depth - depth)) % self.n_total_sites)
 
-    def site_from_parents(self, site_prev, site_next, tau_exit: Optional[ndarray] = None,
-                          index_t_check_next: int = 0) -> Site:
+    def site_from_parents(self, site_prev, site_next, costate_init: Optional[ndarray] = None,
+                          tau_exit: Optional[ndarray] = None) -> Site:
         name = self.name_from_parents_name(site_prev.name, site_next.name)
         tau_exit = tau_exit if tau_exit is not None else \
             0.5 * (site_prev.tau_exit + site_next.tau_exit)
+        costate_init = costate_init if costate_init is not None else \
+            0.5 * (site_prev.costate_init + site_next.costate_init)
         site_child = Site(site_prev.t_init,
                           0.5 * (site_prev.cost_init + site_next.cost_init),
                           0.5 * (site_prev.state_init + site_next.state_init),
-                          0.5 * (site_prev.costate_init + site_next.costate_init),
+                          costate_init,
                           tau_exit, self.time_grid, name)
-        # Updating connection
-        site_prev.next_nb[:index_t_check_next + 1] = [site_child] * (index_t_check_next + 1)
-        site_child.next_nb[:index_t_check_next + 1] = [site_next] * (index_t_check_next + 1)
         return site_child
 
 
@@ -572,7 +579,7 @@ class SolverEF(ABC):
         return np.hstack((1., self.pb.augsys_dyn_timeopt(t, y[1:3], y[3:5])))
 
     def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool):
-        sign = (2. * trigo - 1.)
+        sign = 2 * trigo - 1
         d = np.array(((0., -sign), (sign, 0.))) @ self.obstacles[obstacle].d_value(x[1:3])
         ff_val = self.pb.model.ff.value(t, x[1:3])
         return np.hstack((1., ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max)))
@@ -684,6 +691,7 @@ class SolverEFResampling(SolverEF):
         self.max_dist = max_dist if max_dist is not None else self.target_radius
         self._max_dist_sq = self.max_dist ** 2
         self.sites: dict[str, Site] = {}
+        self.initial_sites: list[Site] = []
         self._to_shoot_sites: list[Site] = []
         self._checked_for_solution: set[Site] = set()
         self.solution_sites: set[Site] = set()
@@ -695,14 +703,17 @@ class SolverEFResampling(SolverEF):
             hasattr(self.pb.model.ff, 'values') else None
 
     def create_initial_sites(self):
-        sites = [
+        self.initial_sites = [
             Site(self.t_init, 0, self.pb.x_init, np.array((np.cos(theta), np.sin(theta))), np.array(()), self.times,
                  self.site_mngr.name_from_pdl(i_theta, 0, 0))
-            for i_theta, theta in enumerate(np.linspace(0, 2 * np.pi, self.n_costate_sectors, endpoint=False))]
-        for i_site, site in enumerate(sites):
-            site.next_nb[0] = sites[(i_site + 1) % len(sites)]
-        self.sites = {site.name: site for site in sites}
-        return sites
+            for i_theta, theta in enumerate(np.linspace(0, 2 * np.pi, self.n_costate_sectors, endpoint=False))
+        ]
+        self.sites = {site.name: site for site in self.initial_sites}
+        return self.initial_sites
+
+    def connect_initial_sites(self):
+        for i_site, site in enumerate(self.initial_sites):
+            site.next_nb[0] = self.initial_sites[(i_site + 1) % len(self.initial_sites)]
 
     @property
     def trajs(self):
@@ -734,24 +745,19 @@ class SolverEFResampling(SolverEF):
                     # close site
                     break
                 x0 = np.hstack((site.cost_cur, state_cur))
-                ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, obs_name, trigo)
+                ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, obs_name, trigo, site.t_exit_next)
                 site.add_leg(ode_aug_res)
             elif site.status_int == IntStatus.OBSTACLE:
                 x0 = np.hstack((site.cost_cur, site.state_cur))
-                i_tau_exit = site.count_obs_cur - 1
-                if i_tau_exit < 0:
-                    t_exit = None
-                elif i_tau_exit >= site.tau_exit.size:
-                    t_exit = None
-                else:
-                    t_exit = site.t_cur + site.tau_exit[i_tau_exit]
-                ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, site.obs_cur, site.trigo_cur, t_exit)
+                ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, site.obs_cur, site.trigo_cur,
+                                                     site.t_exit_next)
                 site.add_leg(ode_aug_res)
             elif site.status_int == IntStatus.OBS_EXIT:
-                control_cur = self.dyn_constr(site.t_cur, site.state_cur, site.obs_cur, site.trigo_cur) - \
+                control_cur = self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, site.state_cur)),
+                                              site.obs_cur, site.trigo_cur)[1:3] - \
                               self.pb.model.ff.value(site.t_cur, site.state_cur)
                 # TODO: order 2 detection of obstacle penetration
-                costate_artificial = - control_cur
+                costate_artificial = - control_cur / np.linalg.norm(control_cur)
                 y0 = np.hstack((site.cost_cur, site.state_cur, costate_artificial))
                 ode_aug_res = self.integrate_free(site.t_cur, t_target, y0)
                 site.add_leg(ode_aug_res)
@@ -773,16 +779,13 @@ class SolverEFResampling(SolverEF):
             "exit_manual": np.array(t_exit) if res.t_events[0].size == 0 and not np.isclose(res.sol.t_max, t_end) else
             np.array(())
         }
-        return OdeAugResult(res, events_dict, obs_name)
+        return OdeAugResult(res, events_dict, obs_name, trigo)
 
     @property
     def validity_list(self):
         return \
             [
-                (site.index_t_check_next, site) for site in
-                set(self.sites.values()).difference(
-                    set(site for site in self.sites.values() if site.traj is None)
-                )
+                (site.index_t_check_next, site) for site in self.sites_non_void()
                 if not (site.neutered and site.index_t_check_next + 1 >= site.index_neutered) and
                    not (site.closed and site.index_t_check_next == site.index_t) and
                    not (site.next_nb[site.index_t_check_next].closed and site.index_t_check_next + 1 >=
@@ -877,9 +880,13 @@ class SolverEFResampling(SolverEF):
 
     def feed_new_sites(self, index_t_hi: Optional[int] = None) -> list[Site]:
         if self.depth == 0:
-            return self.create_initial_sites()
+            new_sites = self.create_initial_sites()
+            self.connect_initial_sites()
+            return new_sites
         else:
-            return self.create_new_sites(index_t_hi)
+            new_sites = self.create_new_sites(index_t_hi)
+            self.connect_sites(new_sites)
+            return new_sites
 
     def create_new_sites(self, index_t_hi: Optional[int] = None) -> list[Site]:
         index_t_hi = index_t_hi if index_t_hi is not None else self.n_time - 1
@@ -901,11 +908,11 @@ class SolverEFResampling(SolverEF):
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq and \
                         site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
                     # Resampling
-                    if site.obs_history() != site_nb.obs_history():
-                        # TODO: experimental
-                        # site.neuter(i, NeuteringReason.DIFFERENT_OBS_HISTORY)
-                        # break
-                        pass
+                    # if site.obs_history() != site_nb.obs_history():
+                    #     # TODO: experimental
+                    #     # site.neuter(i, NeuteringReason.DIFFERENT_OBS_HISTORY)
+                    #     # break
+                    #     pass
                     new_site = self.binary_resample(site, site_nb, i)
                     break
                 new_id_check_next = i
@@ -919,33 +926,43 @@ class SolverEFResampling(SolverEF):
                 new_sites.append(new_site)
         return new_sites
 
+    def connect_sites(self, sites: list[Site]):
+        for site in sites:
+            name_prev, name_next = self.site_mngr.parents_name_from_name(site.name)
+            site_prev, site_next = self.sites[name_prev], self.sites[name_next]
+            index_t_check_next = site_prev.index_t_check_next
+            site_prev.next_nb[:index_t_check_next + 1] = [site] * (index_t_check_next + 1)
+            site.next_nb[:index_t_check_next + 1] = [site_next] * (index_t_check_next + 1)
+
     def binary_resample(self, site_prev: Site, site_next: Site, index: int):
         if site_prev.in_obs_at_index(index) == site_next.in_obs_at_index(index):
             # Either free and free or obs and obs
             # Assume same switching structure
             # (shall be asymptotically true when the distance tolerance between extremals goes to zero)
             cond = np.array_equal(site_prev.tau_exit, site_next.tau_exit)
-            assert cond
-            return self.site_mngr.site_from_parents(site_prev, site_next, index_t_check_next=index)
+            # assert cond
+            return self.site_mngr.site_from_parents(site_prev, site_next)
         else:
             site_in_obs, site_out_obs = (site_prev, site_next) if site_prev.in_obs_at_index(index) else \
                 (site_next, site_prev)
             # Assume switching structure differs only by one between neighbours
             # (shall be true asymptotically)
-            cond = len(site_out_obs.tau_exit) >= len(site_in_obs.tau_exit)
+            cond = abs(site_out_obs.tau_exit.size - site_in_obs.tau_exit.size) <= 1
             assert cond
-            cond = len(site_out_obs.tau_exit) - len(site_in_obs.tau_exit) <= 1
-            assert cond
-            if len(site_out_obs.tau_exit) == 0:
+            if site_out_obs.tau_exit.size == 0:
                 leg_prev_obs = site_in_obs.leg_prev_obs
-                duration_obs = (leg_prev_obs.sol.t_max - leg_prev_obs.sol.t_min)
-                tau_exit = np.array(duration_obs / 2)
+                if site_in_obs.tau_exit.size > 0:
+                    duration_obs = site_in_obs.tau_exit[-1]
+                else:
+                    duration_obs = (leg_prev_obs.sol.t_max - leg_prev_obs.sol.t_min)
+                tau_exit = np.array((duration_obs / 2,))
             else:
                 tau_exit = site_out_obs.tau_exit.copy()
                 leg_prev_obs = site_in_obs.leg_prev_obs
                 duration_obs = (leg_prev_obs.sol.t_max - leg_prev_obs.sol.t_min)
                 tau_exit[-1] = (tau_exit[-1] + duration_obs) / 2
-            self.site_mngr.site_from_parents(site_prev, site_next, tau_exit=tau_exit, index_t_check_next=index)
+            return self.site_mngr.site_from_parents(site_prev, site_next, costate_init=site_in_obs.costate_init,
+                                                    tau_exit=tau_exit)
 
     def check_solutions(self):
         to_check = set(self.sites.values()).difference(self._checked_for_solution).difference(
