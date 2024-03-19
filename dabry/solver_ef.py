@@ -115,10 +115,9 @@ class Site:
         self.status_int: IntStatus = IntStatus.FREE
 
         self.cost_init = cost_init
-        # TODO: are hard copies really required here ?
-        self.state_init = state_init.copy()
-        self.costate_init = costate_init.copy()
-        self.tau_exit = tau_exit.copy()
+        self.state_init = state_init
+        self.costate_init = costate_init
+        self.tau_exit = tau_exit
 
         self.traj: Optional[Trajectory] = None
         self.index_t_check_next = 0
@@ -903,16 +902,14 @@ class SolverEFResampling(SolverEF):
                 if site.in_obs_at_index(i) and site_nb.in_obs_at_index(i) and \
                         site.obs_at_index(i) == site_nb.obs_at_index(i) and \
                         (site.trigo_at_index(i) != site_nb.trigo_at_index(i)):
-                    site.neuter(i, NeuteringReason.OBSTACLE_SPLITTING)
+                    site.neuter(self.times[i], NeuteringReason.OBSTACLE_SPLITTING)
                     break
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq and \
                         site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
-                    # Resampling
+                    # TODO: consider adding this neutering
                     # if site.obs_history() != site_nb.obs_history():
-                    #     # TODO: experimental
-                    #     # site.neuter(i, NeuteringReason.DIFFERENT_OBS_HISTORY)
-                    #     # break
-                    #     pass
+                    #     site.neuter(i, NeuteringReason.DIFFERENT_OBS_HISTORY)
+                    #     break
                     new_site = self.binary_resample(site, site_nb, i)
                     break
                 new_id_check_next = i
@@ -930,9 +927,9 @@ class SolverEFResampling(SolverEF):
         for site in sites:
             name_prev, name_next = self.site_mngr.parents_name_from_name(site.name)
             site_prev, site_next = self.sites[name_prev], self.sites[name_next]
-            index_t_check_next = site_prev.index_t_check_next
-            site_prev.next_nb[:index_t_check_next + 1] = [site] * (index_t_check_next + 1)
-            site.next_nb[:index_t_check_next + 1] = [site_next] * (index_t_check_next + 1)
+            site.index_t_check_next = site_prev.index_t_check_next
+            site_prev.next_nb[:site.index_t_check_next + 1] = [site] * (site.index_t_check_next + 1)
+            site.next_nb[:site.index_t_check_next + 1] = [site_next] * (site.index_t_check_next + 1)
 
     def binary_resample(self, site_prev: Site, site_next: Site, index: int):
         if site_prev.in_obs_at_index(index) == site_next.in_obs_at_index(index):
