@@ -6,7 +6,7 @@ import sys
 import warnings
 from abc import ABC
 from enum import Enum
-from typing import Optional, Dict, Iterable
+from typing import Optional, Dict, Iterable, List
 
 import numpy as np
 import scipy.integrate as scitg
@@ -78,8 +78,7 @@ class Site:
 
     def __init__(self, t_init: float, index_t_init: int,
                  state_origin: ndarray, costate_origin: ndarray, cost_origin: float, n_time: int,
-                 obstacle_name="", index_t_obs: int = 0, t_enter_obs: Optional[float] = None,
-                 obs_trigo: bool = True, name="", init_next_nb=None):
+                 name, t_exit_manual: Optional[tuple[float]] = (), init_next_nb=None):
         self.t_init = t_init
         self.index_t_init = index_t_init
         if np.any(np.isnan(costate_origin)):
@@ -90,16 +89,14 @@ class Site:
         self.traj_full: Optional[Trajectory] = None
         self.index_t_check_next = index_t_init
         self.prev_index_t_check_next = index_t_init
-        self.obstacle_name = obstacle_name
-        self.index_t_obs = index_t_obs
-        self.t_enter_obs: Optional[float] = t_enter_obs
-        self.obs_trigo = obs_trigo
+        self.obstacle_records: List[ObstacleRecord] = []
         self.closure_reason: Optional[ClosureReason] = None
         self.neutering_reason: Optional[NeuteringReason] = None
-        self._index_neutered = -1
-        self._index_closed = None
+        self.index_neutered = -1
+        self.index_closed = None
         self.next_nb: list[Optional[Site]] = [None] * n_time
         self.name = name
+        self.t_exit_manual = t_exit_manual
         if init_next_nb is not None:
             self.init_next_nb(init_next_nb)
 
@@ -116,7 +113,7 @@ class Site:
 
     def close(self, reason: ClosureReason, index=None):
         self.closure_reason = reason
-        self._index_closed = index if index is not None else self.n_time - 1
+        self.index_closed = index if index is not None else self.n_time - 1
 
 
     @property
@@ -126,7 +123,7 @@ class Site:
     def neuter(self, index: int, reason: NeuteringReason):
         if self.neutering_reason is not None:
             return
-        self._index_neutered = index
+        self.index_neutered = index
         self.neutering_reason = reason
 
     @property
@@ -151,6 +148,9 @@ class Site:
         if index >= self.index_t_obs:
             return True
         return False
+
+    def obs_at(self, index: int):
+        pass
 
     def extend_traj(self, traj: Trajectory):
         if self.traj is None:
@@ -304,8 +304,27 @@ class SiteManager:
                     0.5 * (site_prev.state_at_index(index_t) + site_next.state_at_index(index_t)),
                     0.5 * (costate_prev + costate_next),
                     0.5 * (site_prev.cost_at_index(index_t) + site_next.cost_at_index(index_t)),
-                    site_prev.n_time,
-                    name=name)
+                    site_prev.n_time, name)
+
+class ObstacleRecord:
+
+    def __init__(self, obs_name: str, index_t_enter_obs: int, t_enter_obs: float, trigo: bool,
+                 index_t_exit_obs: Optional[int] = None, t_exit_obs: np.float = np.inf):
+        """
+        :param obs_name: Name of obstacle
+        :param index_t_enter_obs: First index at which the site trajectory is IN obstacle mode
+        :param t_enter_obs: Continuous exact obstacle mode entry time
+        :param trigo: If border following is trigonometric-wise or not
+        :param index_t_exit_obs: First index at which the site trajectory is OUT of obstacle event
+        :param t_exit_obs: Continuous exact obstacle mode exit time
+        """
+        self.obs_name = obs_name
+        self.index_t_enter_obs = index_t_enter_obs
+        self.t_enter_obs = t_enter_obs
+        self.trigo = trigo
+        self.index_t_exit_obs = index_t_exit_obs
+        self.t_exit_obs = t_exit_obs
+
 
 
 class SolverEF(ABC):
@@ -373,7 +392,6 @@ class SolverEF(ABC):
         if self.max_int_step is not None:
             self._integrator_kwargs['max_step'] = self.max_int_step
 
-        self.dyn_augsys = self.dyn_augsys_cartesian if self.pb.coords == Coords.CARTESIAN else self.dyn_augsys_gcs
         self._cost_map = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
         self.chrono = Chrono(f'Solving problem "{self.pb.name}"')
 
@@ -393,13 +411,7 @@ class SolverEF(ABC):
         return self.t_init + self.total_duration
 
     def dyn_augsys(self, t: float, y: ndarray):
-        pass
-
-    def dyn_augsys_cartesian(self, t: float, y: ndarray):
-        return self.pb.augsys_dyn_timeopt_cartesian(t, y[:2], y[2:])
-
-    def dyn_augsys_gcs(self, t: float, y: ndarray):
-        return self.pb.augsys_dyn_timeopt_gcs(t, y[:2], y[2:])
+        self.pb.augsys_dyn_timeopt(t, y[:2], y[2:])
 
     def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool):
         sign = (2. * trigo - 1.)
@@ -412,7 +424,7 @@ class SolverEF(ABC):
         return np.sum(np.square(x[:2] - self.pb.x_target)) - self._target_radius_sq
 
     @terminal
-    def _event_quit_obs(self, t, x, obstacle: str, trigo: bool):
+    def _event_exit_obs(self, t, x, obstacle: str, trigo: bool):
         d_value = self.obstacles[obstacle].d_value(x)
         n = d_value / np.linalg.norm(d_value)
         ff_val = self.pb.model.ff.value(t, x)
@@ -528,7 +540,7 @@ class SolverEFResampling(SolverEF):
         super().setup()
         self._to_shoot_sites = [
             Site(self.t_init, 0, self.pb.x_init, 1000 * np.array((np.cos(theta), np.sin(theta))), 0., self.n_time,
-                 name=self.site_mngr.name_from_pdl(i_theta, 0, 0))
+                 self.site_mngr.name_from_pdl(i_theta, 0, 0))
             for i_theta, theta in enumerate(np.linspace(0, 2 * np.pi, self.n_costate_sectors, endpoint=False))]
         for i_site, site in enumerate(self._to_shoot_sites):
             site.init_next_nb(self._to_shoot_sites[(i_site + 1) % len(self._to_shoot_sites)])
@@ -540,6 +552,61 @@ class SolverEFResampling(SolverEF):
 
     def integrate_site_to_target_time(self, site: Site, t_target: float):
         self.integrate_site_to_target_index(site, self.times.searchsorted(t_target, side='right') - 1)
+
+    def _integrate_site_to_target_index(self, site: Site, index_t: int):
+        while site.index_t < index_t:
+            index_t_ref = site.index_t
+            t_eval = np.linspace(self.times[site.index_t + 1], self.times[index_t], index_t - site.index_t + 1)
+            y0 = np.hstack((site.state_at_index(site.index_t), site.costate_at_index(site.index_t)))
+            if not site.in_obs_at(site.index_t):
+                # FREE
+                traj, res = self.integrate_free(t_eval, y0)
+                site.extend_traj(traj)
+                events = self.t_events_to_dict(res.t_events)
+                active_obstacles = [name for name, t_events in events.items()
+                                    if t_events.shape[0] > 0 and name != 'target']
+                if len(active_obstacles) >= 2:
+                    warnings.warn("Multiple active obstacles", category=RuntimeWarning)
+                if len(active_obstacles) >= 1:
+                    obs_name = active_obstacles[0]
+                    t_enter_obs = traj.events[obs_name][0]
+                    t_next_grid = t_eval[site.index_t - index_t_ref + 1]
+                    state_aug_enter_obs = res.sol(t_enter_obs)
+                    traj_singleton, trigo = self.resolve_obs_entry(obs_name, t_enter_obs, state_aug_enter_obs,
+                                                                   t_next_grid)
+                    if len(traj_singleton) == 0:
+                        site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING, index=site.index_t)
+                        break
+
+                    site.extend_traj(traj_singleton)
+                    obs_record = ObstacleRecord(obs_name, site.index_t, t_enter_obs, trigo)
+                    site.obstacle_records.append(obs_record)
+            else:
+                # CAPTIVE
+                obs_record = site.obstacle_records[-1]
+                t_exit_manual = np.array(site.t_exit_manual)
+                considered = np.logical_and(obs_record.t_enter_obs < t_exit_manual,
+                                            t_exit_manual < obs_record.t_exit_obs)
+                if np.any(considered):
+                    t_exit = t_exit_manual[considered][0]
+                else:
+                    t_exit = np.inf
+                # TODO: this will fail when exit time is below lowest time grid point in obstacle mode
+                traj, res = self.integrate_captive(t_eval, y0, obs_record.obs_name, obs_record.trigo, t_exit)
+                site.extend_traj(traj)
+                exits = res.t_events[0].size > 0
+                t_exit_obs = res.t_events[0][0]
+                state_aug_exit_obs = res.sol(t_exit_obs)
+                traj_singleton = self.resolve_obs_exit(site.obs_at(index_cur), t_exit_obs, state_aug_exit_obs,
+                                                       t_eval[index_cur + 1])
+                if len(traj_singleton) == 0:
+                    # close & break
+                    pass
+                # update site and let loop continue
+
+
+
+
 
     def integrate_site_to_target_index(self, site: Site, index_t: int):
         # Assuming site received integration up to site.index_t included
@@ -622,7 +689,7 @@ class SolverEFResampling(SolverEF):
         if site.index_t < index_t and len(site.obstacle_name) > 0:
             res = scitg.solve_ivp(self.dyn_constr, (t_eval[site.index_t - site_index_t_prev], t_eval[-1]),
                                   site.state_at_index(site.index_t),
-                                  t_eval=t_eval[site.index_t - site_index_t_prev + 1:], events=[self._event_quit_obs],
+                                  t_eval=t_eval[site.index_t - site_index_t_prev + 1:], events=[self._event_exit_obs],
                                   args=[site.obstacle_name, site.obs_trigo],
                                   **self._integrator_kwargs)
             times = res.t if len(res.t) > 0 else np.array(())
@@ -645,6 +712,93 @@ class SolverEFResampling(SolverEF):
         #     self.success = True
         #     self.solution_sites.add(site)
 
+    def integrate_free(self, t_eval: ndarray, y0: ndarray):
+        res = scitg.solve_ivp(self.dyn_augsys, (t_eval[0], t_eval[-1]), y0,
+                              t_eval=t_eval[1:],  # Remove initial point which is redudant
+                              events=list(self.events.values()), dense_output=True, **self._integrator_kwargs)
+
+        times = res.t if len(res.t) > 0 else np.array(())
+        states = res.y.transpose()[:, :2] if len(res.t) > 0 else np.array(((), ()))
+        costates = res.y.transpose()[:, 2:] if len(res.t) > 0 else np.array(((), ()))
+        cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
+        events = self.t_events_to_dict(res.t_events)
+
+        traj_free = Trajectory(times, states, costates=costates, cost=cost, events=events)
+        return traj_free, res
+
+    def resolve_obs_entry(self, obs_name: str, t_enter_obs: float, state_aug_enter_obs: ndarray, t_next_grid: float):
+        traj_singleton = None
+        cross = np.cross(self.obstacles[obs_name].d_value(state_aug_enter_obs[:2]),
+                         self.pb.model.dyn.value(t_enter_obs, state_aug_enter_obs[:2],
+                                                 -state_aug_enter_obs[2:] / np.linalg.norm(
+                                                     state_aug_enter_obs[2:])))
+        trigo = cross >= 0
+        sign = 2 * cross - 1
+        direction = np.array(((0, -sign), (sign, 0))) @ self.obstacles[obs_name].d_value(state_aug_enter_obs[:2])
+        if is_possible_direction(self.pb.model.ff.value(t_enter_obs, state_aug_enter_obs[:2]),
+                                 direction, self.pb.srf_max):
+            res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, t_next_grid),
+                                  state_aug_enter_obs[:2],
+                                  t_eval=np.array((t_next_grid,)),
+                                  args=[obs_name, trigo], **self._integrator_kwargs)
+
+            times = res.t if len(res.t) > 0 else np.array(())
+            states = res.y.transpose() if len(res.t) > 0 else np.array(((), ()))
+            controls = np.array([
+                self.dyn_constr(t, x, obs_name, trigo) - self.pb.model.ff.value(t, x)
+                for t, x in zip(res.t, res.y.transpose())]) if len(res.t) > 0 else np.array(((), ()))
+            cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
+
+            traj_singleton = Trajectory(times, states, cost=cost, controls=controls)
+        return traj_singleton, trigo
+
+    def integrate_captive(self, t_eval: ndarray, y0: ndarray, obs_name: str, trigo: bool,
+                          t_exit: np.float = np.inf):
+        res = scitg.solve_ivp(self.dyn_constr, (t_eval[0], np.min(t_exit, t_eval[-1])),
+                              y0[:2],
+                              t_eval=t_eval[t_eval < t_exit], events=[self._event_exit_obs],
+                              args=[obs_name, trigo],
+                              dense_output=True,
+                              **self._integrator_kwargs)
+        times = res.t if len(res.t) > 0 else np.array(())
+        states = res.y.transpose() if len(res.t) > 0 else np.array(((), ()))
+        controls = np.array([
+            self.dyn_constr(t, x, obs_name, trigo) - self.pb.model.ff.value(t, x)
+            for t, x in zip(res.t, res.y.transpose())]) if len(res.t) > 0 else np.array(((), ()))
+        cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
+        events = {"exit_obs": res.t_events[0]}
+
+        traj_constr = Trajectory(times, states, cost=cost, controls=controls, events=events)
+
+        return traj_constr, res
+
+    def resolve_obs_exit(self, obs_name: str, t_exit_obs: float, state_aug_exit_obs: ndarray, t_next_grid: float):
+        traj_singleton = None
+        cross = np.dot(self.obstacles[obs_name].d_value(state_aug_exit_obs[:2]),
+                         self.pb.model.dyn.value(t_exit_obs, state_aug_exit_obs[:2],
+                                                 -state_aug_exit_obs[2:] / np.linalg.norm(
+                                                     state_aug_exit_obs[2:])))
+        trigo = cross >= 0
+        sign = 2 * cross - 1
+        direction = np.array(((0, -sign), (sign, 0))) @ self.obstacles[obs_name].d_value(state_aug_enter_obs[:2])
+        if is_possible_direction(self.pb.model.ff.value(t_enter_obs, state_aug_enter_obs[:2]),
+                                 direction, self.pb.srf_max):
+            res = scitg.solve_ivp(self.dyn_constr, (t_enter_obs, t_next_grid),
+                                  state_aug_enter_obs[:2],
+                                  t_eval=np.array((t_next_grid,)),
+                                  args=[obs_name, trigo], **self._integrator_kwargs)
+
+            times = res.t if len(res.t) > 0 else np.array(())
+            states = res.y.transpose() if len(res.t) > 0 else np.array(((), ()))
+            controls = np.array([
+                self.dyn_constr(t, x, obs_name, trigo) - self.pb.model.ff.value(t, x)
+                for t, x in zip(res.t, res.y.transpose())]) if len(res.t) > 0 else np.array(((), ()))
+            cost = res.t - self.t_init if len(res.t) > 0 else np.array(())
+
+            traj_singleton = Trajectory(times, states, cost=cost, controls=controls)
+        return traj_singleton, trigo
+
+
     @property
     def validity_list(self):
         return \
@@ -653,10 +807,10 @@ class SolverEFResampling(SolverEF):
                 set(self.sites.values()).difference(
                     set(site for site in self.sites.values() if len(site.traj) == 1)
                 )
-                if not (site.neutered and site.index_t_check_next + 1 >= site._index_neutered) and
+                if not (site.neutered and site.index_t_check_next + 1 >= site.index_neutered) and
                    not (site.closed and site.index_t_check_next == site.index_t) and
                    not (site.next_nb[site.index_t_check_next].closed and site.index_t_check_next + 1 >=
-                        site.next_nb[site.index_t_check_next]._index_closed)
+                        site.next_nb[site.index_t_check_next].index_closed)
             ]
 
     @property
