@@ -90,13 +90,12 @@ class IntStatus(Enum):
     OBSTACLE = 1
     OBS_ENTRY = 2
     OBS_EXIT = 3
-    CLOSED = 4
-    END = 5
 
 
 class ClosureReason(Enum):
     SUBOPTIMAL = 0
     IMPOSSIBLE_OBS_TRACKING = 1
+    FORCED_OBSTACLE_PENETRATION = 2
 
 
 class NeuteringReason(Enum):
@@ -152,9 +151,10 @@ class Site:
             return -1
         return self.time_to_index(self.t_neutered)
 
+    @property
     def index_closed(self):
         if self.t_closed is None:
-            return None
+            return len(self.time_grid)
         return self.time_to_index(self.t_closed)
 
     @property
@@ -228,14 +228,20 @@ class Site:
     def in_obs_at_index(self, index: int):
         return self.obs_at_index(index) is not None
 
-    def obs_history(self):
+    def obs_history_before_index(self, index: int):
+        return self.obs_history_before(self.time_grid[index])
+
+    def obs_history_before(self, t: float):
         if len(self.ode_legs) == 0:
             return []
         res = []
         for ode_leg in self.ode_legs:
-            if ode_leg.obs_name is not None:
-                res = res.append(ode_leg.obs_name)
+            if ode_leg.obs_name is not None and ode_leg.sol.t_min <= t:
+                res.append(ode_leg.obs_name)
         return res
+
+    def obs_history(self):
+        return self.obs_history_before(self.t_cur)
 
     @property
     def leg_prev_obs(self):
@@ -577,10 +583,10 @@ class SolverEF(ABC):
     def dyn_augsys(self, t: float, y: ndarray):
         return np.hstack((1., self.pb.augsys_dyn_timeopt(t, y[1:3], y[3:5])))
 
-    def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool):
+    def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool, ff_tweak=1.):
         sign = 2 * trigo - 1
         d = np.array(((0., -sign), (sign, 0.))) @ self.obstacles[obstacle].d_value(x[1:3])
-        ff_val = self.pb.model.ff.value(t, x[1:3])
+        ff_val = ff_tweak * self.pb.model.ff.value(t, x[1:3])
         return np.hstack((1., ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max)))
 
     @non_terminal
@@ -685,7 +691,7 @@ class SolverEFSimple(SolverEF):
 
 class SolverEFResampling(SolverEF):
 
-    def __init__(self, *args, max_dist: Optional[float] = None, mode_origin: bool = True, **kwargs):
+    def __init__(self, *args, max_dist: Optional[float] = None, tau_exit_tol: float = 1e-1, **kwargs):
         super().__init__(*args, **kwargs)
         self.max_dist = max_dist if max_dist is not None else self.target_radius
         self._max_dist_sq = self.max_dist ** 2
@@ -696,7 +702,7 @@ class SolverEFResampling(SolverEF):
         self.solution_sites: set[Site] = set()
         self.solution_site: Optional[Site] = None
         self.solution_site_min_cost_index: Optional[int] = None
-        self.mode_origin: bool = mode_origin
+        self.tau_exit_tol: float = tau_exit_tol
         self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth, self.times)
         self._ff_max_norm = np.max(np.linalg.norm(self.pb.model.ff.values, axis=-1)) if \
             hasattr(self.pb.model.ff, 'values') else None
@@ -719,7 +725,7 @@ class SolverEFResampling(SolverEF):
         return list(map(lambda x: x.traj, [site for site in self.sites.values() if site.traj is not None]))
 
     def integrate_site_to_target_time(self, site: Site, t_target: float):
-        if site.status_int == IntStatus.CLOSED:
+        if site.closed:
             raise ValueError('Cannot integrate closed site')
         while not np.isclose(site.t_cur, t_target):
             if site.status_int == IntStatus.FREE:
@@ -741,7 +747,7 @@ class SolverEFResampling(SolverEF):
                 dot = np.dot(grad_obs, self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, state_cur)),
                                                        obs_name, trigo)[1:3])
                 if not np.isclose(dot, 0):
-                    # close site
+                    site.close(site.t_cur, ClosureReason.IMPOSSIBLE_OBS_TRACKING)
                     break
                 x0 = np.hstack((site.cost_cur, state_cur))
                 ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, obs_name, trigo, site.t_exit_next)
@@ -752,10 +758,17 @@ class SolverEFResampling(SolverEF):
                                                      site.t_exit_next)
                 site.add_leg(ode_aug_res)
             elif site.status_int == IntStatus.OBS_EXIT:
-                control_cur = self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, site.state_cur)),
-                                              site.obs_cur, site.trigo_cur)[1:3] - \
-                              self.pb.model.ff.value(site.t_cur, site.state_cur)
-                # TODO: order 2 detection of obstacle penetration
+                gv = self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, site.state_cur)),
+                                              site.obs_cur, site.trigo_cur)[1:3]
+                control_cur = gv - self.pb.model.ff.value(site.t_cur, site.state_cur)
+                # If trajectory shall enter obstacle because of a flow field unbearable increase
+                # then at the given point the constr dyn where the flow field is scaled by a small
+                # factor shall have a small component inside the obstacle
+                gv_tweaked = self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, site.state_cur)),
+                                             site.obs_cur, site.trigo_cur, ff_tweak=1.01)[1:3]
+                if ls_float(np.dot(self.obstacles[site.obs_cur].d_value(site.state_cur), gv_tweaked), 0):
+                    site.close(site.t_cur, ClosureReason.FORCED_OBSTACLE_PENETRATION)
+                    break
                 costate_artificial = - control_cur / np.linalg.norm(control_cur)
                 y0 = np.hstack((site.cost_cur, site.state_cur, costate_artificial))
                 ode_aug_res = self.integrate_free(site.t_cur, t_target, y0)
@@ -932,7 +945,12 @@ class SolverEFResampling(SolverEF):
             site.next_nb[:site.index_t_check_next + 1] = [site_next] * (site.index_t_check_next + 1)
 
     def binary_resample(self, site_prev: Site, site_next: Site, index: int):
-        if site_prev.in_obs_at_index(index) == site_next.in_obs_at_index(index):
+        full_free = len(site_prev.obs_history_before_index(index)) == 0 and \
+                    len(site_next.obs_history_before_index(index)) == 0
+        # TODO: think more carefully about this condition
+        simultaneous_obs = site_prev.obs_at_index(index) == site_next.obs_at_index(index)
+        same_hist = site_prev.obs_history_before_index(index) == site_next.obs_history_before_index(index)
+        if full_free or (simultaneous_obs and same_hist):
             # Either free and free or obs and obs
             # Assume same switching structure
             # (shall be asymptotically true when the distance tolerance between extremals goes to zero)
@@ -940,8 +958,8 @@ class SolverEFResampling(SolverEF):
             # assert cond
             return self.site_mngr.site_from_parents(site_prev, site_next)
         else:
-            site_in_obs, site_out_obs = (site_prev, site_next) if site_prev.in_obs_at_index(index) else \
-                (site_next, site_prev)
+            site_in_obs, site_out_obs = (site_prev, site_next) if \
+                len(site_prev.obs_history_before_index(index)) > 0 else (site_next, site_prev)
             # Assume switching structure differs only by one between neighbours
             # (shall be true asymptotically)
             cond = abs(site_out_obs.tau_exit.size - site_in_obs.tau_exit.size) <= 1
@@ -958,8 +976,14 @@ class SolverEFResampling(SolverEF):
                 leg_prev_obs = site_in_obs.leg_prev_obs
                 duration_obs = (leg_prev_obs.sol.t_max - leg_prev_obs.sol.t_min)
                 tau_exit[-1] = (tau_exit[-1] + duration_obs) / 2
-            return self.site_mngr.site_from_parents(site_prev, site_next, costate_init=site_in_obs.costate_init,
-                                                    tau_exit=tau_exit)
+            # if tau_exit[-1] < self.tau_exit_tol:
+            #     # Resample from beginning if obstacle duration is too small
+            #     costate_init = None
+            #     tau_exit = tau_exit[:-1]
+            # else:
+            #     costate_init = site_in_obs.costate_init
+            costate_init = site_in_obs.costate_init
+            return self.site_mngr.site_from_parents(site_prev, site_next, costate_init=costate_init, tau_exit=tau_exit)
 
     def check_solutions(self):
         to_check = set(self.sites.values()).difference(self._checked_for_solution).difference(

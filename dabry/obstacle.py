@@ -54,14 +54,13 @@ class Obstacle(ABC):
         :param x: Position at which to get derivative (1D numpy array)
         :return: Gradient of obstacle function at point
         """
-        # Finite differencing, centered scheme
-        eps = 1e-8
-        n = x.shape[0]
-        emat = np.diag(n * (eps,))
-        grad = np.zeros(n)
-        for i in range(n):
-            grad[i] = (self.value(x + emat[i]) - self.value(x - emat[i])) / (2 * eps)
-        return grad
+        pass
+
+    def _d_value_finite_differences(self, x: ndarray, eps: float = 1e-6):
+        dx1 = eps * np.array((1, 0))
+        dx2 = eps * np.array((0, 1))
+        return np.column_stack(((self.value(x + dx1) - self.value(x - dx1)) / (2 * eps),
+                                (self.value(x + dx2) - self.value(x - dx2)) / (2 * eps)))
 
 
 class WrapperObs(Obstacle):
@@ -127,10 +126,10 @@ class FrameObs(Obstacle):
         xx = np.dot(x[..., :2] - self.center, self.scaler)
         c1 = np.dot(xx, np.array((1., 1.)))
         c2 = np.dot(xx, np.array((1., -1.)))
-        g1 = np.dot(np.ones(xx.shape), np.diag((1., 0.)))
-        g2 = np.dot(np.ones(xx.shape), np.diag((0., 1.)))
-        g3 = np.dot(np.ones(xx.shape), np.diag((-1., 0.)))
-        g4 = np.dot(np.ones(xx.shape), np.diag((0., -1.)))
+        g1 = np.dot(np.ones(xx.shape), np.diag((-self.scaler[0, 0], 0.)))
+        g2 = np.dot(np.ones(xx.shape), np.diag((0., -self.scaler[1, 1])))
+        g3 = np.dot(np.ones(xx.shape), np.diag((self.scaler[0, 0], 0.)))
+        g4 = np.dot(np.ones(xx.shape), np.diag((0., self.scaler[1, 1])))
         return np.where((c1 > 0) * (c2 > 0), g1,
                         np.where((c1 > 0) * (c2 < 0), g2,
                                  np.where((c1 < 0) * (c2 < 0), g3,

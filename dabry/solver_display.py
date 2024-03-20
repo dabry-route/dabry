@@ -23,6 +23,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
         raise ImportError('"plotly" package requirement for solver display')
     trajectories = [] if trajectories is None else trajectories
     template = 'plotly_dark' if theme_dark else 'plotly'
+    def_color = 'white' if theme_dark else 'black'
     ff_disc = DiscreteFF.from_ff(solver.pb.model.ff, (solver.pb.bl, solver.pb.tr),
                                  nt=10, no_diff=True)
 
@@ -32,7 +33,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
         np.linspace(ff_disc.bounds[-1, 0], ff_disc.bounds[-1, 1], values[..., ::isub, ::isub, :].shape[-2]),
         indexing='ij'),
                                values[::isub, ::isub, 0], values[::isub, ::isub, 1],
-                               scaleratio=1., scale=0.1, line=dict(color='white' if theme_dark else 'black'),
+                               scaleratio=1., scale=0.1, line=dict(color=def_color),
                                hoverinfo='none', name='Flow field')
     cost_map = None
     if not no_value_func:
@@ -48,13 +49,13 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
     #                          name='Cost contour', connectgaps=False, coloraxis='coloraxis'))
     fig.update_coloraxes(showscale=False)
     fig.add_trace(go.Scatter(x=[solver.pb.x_init[0]], y=[solver.pb.x_init[1]], name='Start',
-                             marker=dict(size=15, color='white' if theme_dark else 'black')))
+                             marker=dict(size=15, color=def_color)))
     fig.add_trace(go.Scatter(x=[solver.pb.x_target[0]], y=[solver.pb.x_target[1]], name='Target',
-                             marker=dict(size=20, color='white' if theme_dark else 'black', symbol='star')))
+                             marker=dict(size=20, color=def_color, symbol='star')))
     fig.add_shape(type="circle", x0=solver.pb.x_target[0] - solver.target_radius,
                   y0=solver.pb.x_target[1] - solver.target_radius,
                   x1=solver.pb.x_target[0] + solver.target_radius, y1=solver.pb.x_target[1] + solver.target_radius,
-                  xref="x", yref="y", fillcolor=None, line_color='white' if theme_dark else 'black')
+                  xref="x", yref="y", fillcolor=None, line_color=def_color)
 
     for obs in solver.pb.obstacles:
         # TODO: adapt to show wrapped obstacles
@@ -82,9 +83,19 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
             fig.add_traces([go.Scatter(x=site.traj.states[:, 0], y=site.traj.states[:, 1],
                                        line=dict(color=Style.colors[site.depth % len(Style.colors)]),
                                        name=site.name, mode='lines',
-                                       hovertemplate='%{text}<br>(%{x}, %{y})',
-                                       text=['({index}, {cost})'.format(index=index, cost=cost)
+                                       hovertemplate='(%{x}, %{y})<br>%{text}',
+                                       text=['({index}, {cost}){addinfo}'.format(
+                                           index=index, cost=cost,
+                                           addinfo=r'<br>CLS {clsr}'.format(clsr=site.closure_reason.value)
+                                           if site.index_closed <= index else '')
                                              for index, cost in zip(np.arange(len(site.traj)), site.traj.cost)])
+                            for site in sites_by_depth if site.traj is not None])
+            fig.add_traces([go.Scatter(x=[site.traj.states[site.index_t_check_next, 0]],
+                                       y=[site.traj.states[site.index_t_check_next, 1]],
+                                       line=dict(color=def_color),
+                                       name=f"{site.name} {site.index_t_check_next}", mode='markers',
+                                       marker=dict(symbol='diamond-open', line_color=def_color),
+                                       showlegend=False)
                             for site in sites_by_depth if site.traj is not None])
             if solver.solution_site is not None:
                 if solver.solution_site.traj is None:
@@ -142,7 +153,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
         fig.add_trace(go.Scatter(x=[site_pb.state_at_index(solver.validity_index)[0]],
                                  y=[site_pb.state_at_index(solver.validity_index)[1]],
                                  name=f'Pb: {site_pb.name} {solver.validity_index}',
-                                 marker=dict(size=15, color='white' if theme_dark else 'black')))
+                                 marker=dict(symbol='diamond', color=def_color)))
 
     if autoshow:
         fig.show()
@@ -189,13 +200,13 @@ def solver_structure(solver: SolverEFResampling):
     except ImportError:
         raise ImportError('"plotly" package requirement for solver display')
     fig = go.Figure()
-    fig.add_traces(
-        [go.Scatter(x=-np.cos(2 * np.pi * index / (solver.n_costate_sectors * 2 ** 5)) * np.arange(0, solver.n_time),
-                    y=-np.sin(2 * np.pi * index / (solver.n_costate_sectors * 2 ** 5)) * np.arange(0, solver.n_time),
-                    line=dict(color='grey'), name=index, mode='lines')
-         for index in np.arange(solver.n_costate_sectors * 2 ** 5)])
-    fig.add_traces([go.Scatter(x=site.costate_at_index(site.index_t_init)[0] * np.arange(site.index_t_init, solver.n_time) / np.linalg.norm(site.costate_at_index(site.index_t_init)),
-                               y=site.costate_at_index(site.index_t_init)[1] * np.arange(site.index_t_init, solver.n_time) / np.linalg.norm(site.costate_at_index(site.index_t_init)),
+    # fig.add_traces(
+    #     [go.Scatter(x=np.cos(2 * np.pi * index / (solver.n_costate_sectors * 2 ** 5)) * np.arange(0, solver.n_time),
+    #                 y=np.sin(2 * np.pi * index / (solver.n_costate_sectors * 2 ** 5)) * np.arange(0, solver.n_time),
+    #                 line=dict(color='grey'), hoverinfo='skip', mode='lines')
+    #      for index in np.arange(solver.n_costate_sectors * 2 ** 5)])
+    fig.add_traces([go.Scatter(x=-site.costate_init[0] * np.arange(0, solver.n_time) / np.linalg.norm(site.costate_init),
+                               y=-site.costate_init[1] * np.arange(0, solver.n_time) / np.linalg.norm(site.costate_init),
                                line=dict(color=Style.colors[site.depth % len(Style.colors)]),
                                name=site.name, mode='lines')
                     for site in solver.sites.values()])
