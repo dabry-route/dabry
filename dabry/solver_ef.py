@@ -96,6 +96,7 @@ class ClosureReason(Enum):
     SUBOPTIMAL = 0
     IMPOSSIBLE_OBS_TRACKING = 1
     FORCED_OBSTACLE_PENETRATION = 2
+    OBS_MODE_OFF = 3
 
 
 class NeuteringReason(Enum):
@@ -228,20 +229,20 @@ class Site:
     def in_obs_at_index(self, index: int):
         return self.obs_at_index(index) is not None
 
-    def obs_history_before_index(self, index: int):
-        return self.obs_history_before(self.time_grid[index])
+    def history_before_index(self, index: int):
+        return self.history_before(self.time_grid[index])
 
-    def obs_history_before(self, t: float):
+    def history(self):
+        return self.history_before(self.t_cur)
+
+    def history_before(self, t: float):
         if len(self.ode_legs) == 0:
             return []
         res = []
         for ode_leg in self.ode_legs:
-            if ode_leg.obs_name is not None and ode_leg.sol.t_min <= t:
+            if ode_leg.sol.t_min <= t:
                 res.append(ode_leg.obs_name)
         return res
-
-    def obs_history(self):
-        return self.obs_history_before(self.t_cur)
 
     @property
     def leg_prev_obs(self):
@@ -733,6 +734,10 @@ class SolverEFResampling(SolverEF):
                 ode_aug_res = self.integrate_free(site.t_cur, t_target, y0)
                 site.add_leg(ode_aug_res)
             elif site.status_int == IntStatus.OBS_ENTRY:
+                # TODO: experimental
+                site.close(site.t_cur, ClosureReason.OBS_MODE_OFF)
+                break
+
                 last_leg = site.ode_legs[-1]
                 active_obstacles = [name for name, t_events in last_leg.events_dict.items() if t_events.shape[0] > 0]
                 assert (len(active_obstacles) == 1)
@@ -919,10 +924,14 @@ class SolverEFResampling(SolverEF):
                     break
                 if np.sum(np.square(state - state_nb)) > self._max_dist_sq and \
                         site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
-                    # TODO: consider adding this neutering
-                    # if site.obs_history() != site_nb.obs_history():
-                    #     site.neuter(i, NeuteringReason.DIFFERENT_OBS_HISTORY)
-                    #     break
+                    site_hist = site.history_before_index(i)
+                    site_nb_hist = site_nb.history_before_index(i)
+                    hist_same = site_hist == site_nb_hist
+                    hist_one_diff = abs(len(site_hist) - len(site_nb_hist)) <= 1
+                    allow_resamp = hist_same or hist_one_diff
+                    if not allow_resamp:
+                        site.neuter(i, NeuteringReason.DIFFERENT_OBS_HISTORY)
+                        break
                     new_site = self.binary_resample(site, site_nb, i)
                     break
                 new_id_check_next = i
@@ -945,21 +954,23 @@ class SolverEFResampling(SolverEF):
             site.next_nb[:site.index_t_check_next + 1] = [site_next] * (site.index_t_check_next + 1)
 
     def binary_resample(self, site_prev: Site, site_next: Site, index: int):
-        full_free = len(site_prev.obs_history_before_index(index)) == 0 and \
-                    len(site_next.obs_history_before_index(index)) == 0
-        # TODO: think more carefully about this condition
-        simultaneous_obs = site_prev.obs_at_index(index) == site_next.obs_at_index(index)
-        same_hist = site_prev.obs_history_before_index(index) == site_next.obs_history_before_index(index)
-        if full_free or (simultaneous_obs and same_hist):
+        hist_prev = site_prev.history_before_index(index)
+        hist_next = site_next.history_before_index(index)
+        # Histories different only by one, ensured before calling this function
+        assert (abs(len(hist_prev) - len(hist_next)) <= 1)
+        n_hist_min = min(len(hist_prev), len(hist_next))
+
+        assert (hist_prev == hist_next or hist_prev[:n_hist_min] == hist_next[:n_hist_min])
+
+        if hist_prev == hist_next:
             # Either free and free or obs and obs
-            # Assume same switching structure
-            # (shall be asymptotically true when the distance tolerance between extremals goes to zero)
-            cond = np.array_equal(site_prev.tau_exit, site_next.tau_exit)
+            # cond = np.array_equal(site_prev.tau_exit, site_next.tau_exit)
             # assert cond
             return self.site_mngr.site_from_parents(site_prev, site_next)
         else:
+            # TODO: continue here
             site_in_obs, site_out_obs = (site_prev, site_next) if \
-                len(site_prev.obs_history_before_index(index)) > 0 else (site_next, site_prev)
+                hist_prev[-1] is not None else (site_next, site_prev)
             # Assume switching structure differs only by one between neighbours
             # (shall be true asymptotically)
             cond = abs(site_out_obs.tau_exit.size - site_in_obs.tau_exit.size) <= 1
