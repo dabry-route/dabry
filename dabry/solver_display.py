@@ -104,7 +104,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
                     fig.add_traces([go.Scatter(x=site.traj.states[:, 0], y=site.traj.states[:, 1],
                                                line=dict(color='lightgreen', width=3), name=site.name, mode='lines')
                                     for site in [solver.solution_site] if site is not None])
-                    fig.add_traces([go.Scatter(x=site.traj_full.states[:, 0], y=site.traj_full.states[:, 1],
+                    fig.add_traces([go.Scatter(x=site.traj.states[:, 0], y=site.traj.states[:, 1],
                                                line=dict(color='lightgreen', dash='dash'), name=site.name, mode='lines')
                                     for site in solver.suboptimal_sites])
             fig.add_traces([go.Scatter(x=traj.states[:, 0], y=traj.states[:, 1],
@@ -133,7 +133,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
                 step = dict(
                     method="update",
                     args=[
-                        {"visible": [True] * i * len(solver.trajs) + [False] * (len(fig.data) - i * len(solver.trajs))}]
+                        {"visible": [True] * i * len(solver.trajs) + [False] * (len(fig.data) - i * len(solver.sites))}]
                 )
                 steps.append(step)
 
