@@ -14,6 +14,7 @@ from scipy.integrate import solve_ivp, OdeSolution
 from scipy.integrate._ivp.ivp import OdeResult
 from tqdm import tqdm
 
+from dabry.flowfield import DiscreteFF
 from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha, \
     diadic_valuation, alpha_to_int, Chrono
 from dabry.misc import terminal
@@ -95,13 +96,15 @@ class IntStatus(Enum):
     OBSTACLE = 1
     OBS_ENTRY = 2
     OBS_EXIT = 3
+    FAILURE = 4
 
 
 class ClosureReason(Enum):
     SUBOPTIMAL = 0
-    IMPOSSIBLE_OBS_TRACKING = 1
-    FORCED_OBSTACLE_PENETRATION = 2
-    OBS_MODE_OFF = 3
+    SUBOPTI_DISTANCE = 1
+    IMPOSSIBLE_OBS_TRACKING = 2
+    FORCED_OBSTACLE_PENETRATION = 3
+    INTEGRATION_FAILED = 4
 
 
 class NeuteringReason(Enum):
@@ -346,6 +349,10 @@ class Site:
         return self.ode_legs[-1].sol(self.ode_legs[-1].sol.t_max)[3:5]
 
     def add_leg(self, ode_aug_res):
+        if ode_aug_res.status == -1:
+            self.close(ClosureReason.INTEGRATION_FAILED)
+            self.status_int = IntStatus.FAILURE
+            return
         self.ode_legs.append(ode_aug_res)
         i_min, i_max = self.time_to_index(ode_aug_res.t[0]), self.time_to_index(ode_aug_res.t[-1]) + 1
         if ode_aug_res.obs_name is None:
@@ -355,8 +362,6 @@ class Site:
         self.update_status()
 
     def update_status(self):
-        # costate_cur
-        # int_status
         if len(self.ode_legs) == 0:
             return
         last_leg = self.ode_legs[-1]
@@ -660,8 +665,9 @@ class SolverEFResampling(SolverEF):
         self.solution_site: Optional[Site] = None
         self.solution_site_min_cost_index: Optional[int] = None
         self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth, self.times)
-        self._ff_max_norm = np.max(np.linalg.norm(self.pb.model.ff.values, axis=-1)) if \
-            hasattr(self.pb.model.ff, 'values') else np.max(np.linalg.norm(self.pb.model.ff.value(), axis=-1))
+        ff_values = self.pb.model.ff.values if hasattr(self.pb.model.ff, 'values') else \
+            DiscreteFF.from_ff(self.pb.model.ff, (self.pb.bl, self.pb.tr)).values
+        self._ff_max_norm = np.max(np.linalg.norm(ff_values, axis=-1))
 
     def create_initial_sites(self):
         self.initial_sites = [
@@ -726,6 +732,8 @@ class SolverEFResampling(SolverEF):
                 y0 = np.hstack((site.cost_cur, site.state_cur, costate_artificial))
                 ode_aug_res = self.integrate_free(site.t_cur, t_target, y0)
                 site.add_leg(ode_aug_res)
+            elif site.status_int == IntStatus.FAILURE:
+                break
 
     def integrate_free(self, t_start: float, t_end: float, y0: ndarray):
         res: OdeResult = solve_ivp(self.dyn_augsys, (t_start, t_end), y0,
@@ -784,13 +792,6 @@ class SolverEFResampling(SolverEF):
             if self.solution_site is not None else ""
         ))
         self.depth += 1
-
-    def trim_distance(self, sites: list[Site]):
-        for site in sites:
-            sup_time = np.linalg.norm(site.state_at_index(site.index_t) - self.pb.x_target) / (self.pb.srf_max +
-                                                                                               self._ff_max_norm)
-            if self.times[-1] - self.times[site.index_t] > sup_time:
-                site.close(ClosureReason.SUBOPTIMAL)
 
     def solve(self):
         self.pre_solve()
@@ -891,9 +892,11 @@ class SolverEFResampling(SolverEF):
 
     def check_solutions(self):
         to_check = set(self.sites.values()).difference(self._checked_for_solution).difference(
-            set(site for site in self.sites.values()))
+            set(site for site in self.sites.values() if len(site.ode_legs) == 0))
         for site in to_check:
-            if np.any(np.sum(np.square(site.states[np.logical_not(np.isnan(site.states))] - self.pb.x_target), axis=-1)
+            if np.any(np.sum(np.square(site.states[np.logical_not(np.logical_or(np.isnan(site.states[:, 0]),
+                                                                   np.isnan(site.states[:, 1])))] - self.pb.x_target),
+                             axis=-1)
                       < self._target_radius_sq):
                 self.success = True
                 self.solution_sites.add(site)
@@ -901,9 +904,7 @@ class SolverEFResampling(SolverEF):
         solutions_sites_cost = {}
         for site in self.solution_sites:
             candidate_cost = np.min(
-                site.costs[
-                    np.sum(np.square(site.states[np.logical_not(np.isnan(site.states))] - self.pb.x_target), axis=-1)
-                    < self._target_radius_sq])
+                site.costs[np.sum(np.square(site.states - self.pb.x_target), axis=-1) < self._target_radius_sq])
             solutions_sites_cost[site] = candidate_cost
             if min_cost is None or candidate_cost < min_cost:
                 min_cost = candidate_cost
@@ -1012,6 +1013,10 @@ class SolverEFTrimming(SolverEFResampling):
         bl, spacings = self.pb.get_grid_params(nx, ny)
         new_valid_sites = []
         for site in [site for site in sites_considered if not site.closed]:
+            sup_time = np.linalg.norm(site.state_cur - self.pb.x_target) / (self.pb.srf_max + self._ff_max_norm)
+            if site.t_cur + sup_time > self.times[-1]:
+                site.close(ClosureReason.SUBOPTI_DISTANCE)
+                continue
             value_opti = Utils.interpolate(self._cost_map.values, bl, spacings,
                                            site.state_at_index(self.index_t_next_subframe - 1))
             if np.isnan(value_opti):
@@ -1021,7 +1026,6 @@ class SolverEFTrimming(SolverEFResampling):
                 site.close(ClosureReason.SUBOPTIMAL)
             else:
                 new_valid_sites.append(site)
-        self.trim_distance([site for site in sites_considered if not site.closed])
         self.sites_valid[self.i_subframe + 1] |= set(new_valid_sites)
 
     def solve(self):

@@ -693,8 +693,7 @@ class Display:
     def clear_obs(self):
         if len(self.obs_contours) != 0:
             for c in self.obs_contours:
-                for coll in c.collections:
-                    coll.remove()
+                del c
             self.obs_contours = []
 
     def clear_pen(self):
