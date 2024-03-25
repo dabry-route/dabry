@@ -65,7 +65,7 @@ class FlowField(ABC):
 
     def value(self, t, x):
         if self._lch is None:
-            return self._value(t, x)
+            raise ValueError('Bad flow field structure: missing children in tree')
         if self._op == '+':
             return self._lch.value(t, x) + self._rch.value(t, x)
         if self._op == '-':
@@ -79,7 +79,7 @@ class FlowField(ABC):
 
     def d_value(self, t, x):
         if self._lch is None or self._rch is None:
-            return self._d_value(t, x)
+            raise ValueError('Bad flow field structure: missing children in tree')
         if self._op == '+':
             return self._lch.d_value(t, x) + self._rch.d_value(t, x)
         if self._op == '-':
@@ -90,12 +90,6 @@ class FlowField(ABC):
             if isinstance(self._rch, float):
                 return self._lch.d_value(t, x) * self._rch
             raise Exception('Only scaling by float implemented for flow fields')
-
-    def _value(self, t, x):
-        pass
-
-    def _d_value(self, t, x):
-        pass
 
     def _d_value_finite_differences(self, t, x):
         eps = 1e-6
@@ -617,10 +611,10 @@ class UniformFF(FlowField):
         super().__init__()
         self.ff_val = ff_val.copy()
 
-    def _value(self, t, x):
+    def value(self, t, x):
         return self.ff_val
 
-    def _d_value(self, t, x):
+    def d_value(self, t, x):
         return np.array([[0., 0.],
                          [0., 0.]])
 
