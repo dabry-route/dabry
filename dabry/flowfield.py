@@ -65,7 +65,7 @@ class FlowField(ABC):
 
     def value(self, t, x):
         if self._lch is None:
-            return self._value(t, x)
+            raise ValueError('Bad flow field structure: missing children in tree')
         if self._op == '+':
             return self._lch.value(t, x) + self._rch.value(t, x)
         if self._op == '-':
@@ -79,7 +79,7 @@ class FlowField(ABC):
 
     def d_value(self, t, x):
         if self._lch is None or self._rch is None:
-            return self._d_value(t, x)
+            raise ValueError('Bad flow field structure: missing children in tree')
         if self._op == '+':
             return self._lch.d_value(t, x) + self._rch.d_value(t, x)
         if self._op == '-':
@@ -90,12 +90,6 @@ class FlowField(ABC):
             if isinstance(self._rch, float):
                 return self._lch.d_value(t, x) * self._rch
             raise Exception('Only scaling by float implemented for flow fields')
-
-    def _value(self, t, x):
-        pass
-
-    def _d_value(self, t, x):
-        pass
 
     def _d_value_finite_differences(self, t, x):
         eps = 1e-6
@@ -529,6 +523,7 @@ class WrapperFF(FlowField):
     """
     Wrap a flow field to work with appropriate units
     """
+
     def __init__(self, ff: FlowField, scale_length: float, bl: ndarray,
                  scale_time: float, time_origin: float):
         self.ff: FlowField = ff
@@ -542,8 +537,8 @@ class WrapperFF(FlowField):
         # Multiplication will be quicker than division
         self._scaler_speed = 1 / self.scale_speed
         self._scaler_dspeed = self.scale_length / self.scale_speed
-        super().__init__(coords=ff.coords, t_start=(ff.t_start - self.time_origin)/self.scale_time,
-                         t_end=None if ff.t_end is None else (ff.t_end - self.time_origin)/self.scale_time)
+        super().__init__(coords=ff.coords, t_start=(ff.t_start - self.time_origin) / self.scale_time,
+                         t_end=None if ff.t_end is None else (ff.t_end - self.time_origin) / self.scale_time)
 
     def value(self, t, x):
         return self._scaler_speed * self.ff.value(self.time_origin + t * self.scale_time,
@@ -563,8 +558,8 @@ class WrapperFF(FlowField):
             ))
             if self.ff.t_end is not None:
                 time_bounds = (
-                    (self.ff.t_start - self.time_origin)/self.scale_time,
-                    (self.ff.t_end - self.time_origin)/self.scale_time
+                    (self.ff.t_start - self.time_origin) / self.scale_time,
+                    (self.ff.t_end - self.time_origin) / self.scale_time
                 )
                 return np.vstack((time_bounds, space_bounds))
             else:
@@ -617,10 +612,10 @@ class UniformFF(FlowField):
         super().__init__()
         self.ff_val = ff_val.copy()
 
-    def _value(self, t, x):
+    def value(self, t, x):
         return self.ff_val
 
-    def _d_value(self, t, x):
+    def d_value(self, t, x):
         return np.array([[0., 0.],
                          [0., 0.]])
 
@@ -827,20 +822,36 @@ class GyreFF(FlowField):
         super().__init__()
 
         self.center = np.array((x_center, y_center))
+        self._center = np.hstack((0, self.center))
 
         # Phase gradient
         self.kx = 2 * pi / x_wl
         self.ky = 2 * pi / y_wl
         self.ampl = ampl
 
+    def _f(self, z):
+        return self.ampl * np.stack((-sin(z[..., 1]) * cos(z[..., 2]), cos(z[..., 1]) * sin(z[..., 2])), -1)
+
+    def _df(self, z):
+        return self.ampl * np.stack((-self.kx * cos(z[..., 1]) * cos(z[..., 2]),
+                                     self.ky * sin(z[..., 1]) * sin(z[..., 2]),
+                                     -self.kx * sin(z[..., 1]) * sin(z[..., 2]),
+                                     self.ky * cos(z[..., 1]) * cos(z[..., 2])), -1).reshape(z.shape[:-1] + (2, 2))
+
+    def _rescaled(self, z):
+        return np.dot((z - self._center), np.diag((0, self.kx, self.ky)))
+
+    def value_vec(self, z):
+        return self._f(self._rescaled(z))
+
+    def d_value_vec(self, z):
+        return self._df(self._rescaled(z))
+
     def value(self, t, x):
-        xx = np.diag((self.kx, self.ky)) @ (x - self.center)
-        return self.ampl * np.array((-sin(xx[0]) * cos(xx[1]), cos(xx[0]) * sin(xx[1])))
+        return self.value_vec(np.hstack((t, x)))
 
     def d_value(self, t, x):
-        xx = np.diag((self.kx, self.ky)) @ (x - self.center)
-        return self.ampl * np.array([[-self.kx * cos(xx[0]) * cos(xx[1]), self.ky * sin(xx[0]) * sin(xx[1])],
-                                     [-self.kx * sin(xx[0]) * sin(xx[1]), self.ky * cos(xx[0]) * cos(xx[1])]])
+        return self.d_value_vec(np.hstack((t, x)))
 
 
 class DoubleGyreDampedFF(FlowField):

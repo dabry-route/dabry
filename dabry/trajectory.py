@@ -59,7 +59,7 @@ class Trajectory:
         :param states: States (n, 2)
         :param controls: Controls (n-1, 2)
         :param costates: Costates (n, 2)
-        :param cost: Instantaneous cost (n-1,)
+        :param cost: Running (integrated) cost (n-1,)
         :param events: Dictionary of event time stamps following scipy's solve_ivp behavior
         """
         self.times: ndarray = times.copy()

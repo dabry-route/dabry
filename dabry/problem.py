@@ -17,7 +17,7 @@ from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearF
 from dabry.io_manager import IOManager
 from dabry.misc import Utils, csv_to_dict, Coords
 from dabry.model import Model
-from dabry.obstacle import CircleObs, FrameObs, Obstacle, WrapperObs, DiscreteObs, is_discrete_obstacle, \
+from dabry.obstacle import CircleObs, FrameObs, Obstacle, WrapperObs, is_discrete_obstacle, \
     is_frame_obstacle
 from dabry.penalty import Penalty, NullPenalty, WrapperPen
 from dabry.trajectory import Trajectory
@@ -106,6 +106,7 @@ class NavigationProblem:
             self.obstacles.append(self.obs_frame)
 
         self.scaled = scaled
+        self.timeopt_control = self.timeopt_control_cartesian if self.coords == Coords.CARTESIAN else self.timeopt_control_gcs
 
     def get_grid_params(self, nx: int, ny: int) -> tuple[ndarray, ndarray]:
         """
@@ -185,28 +186,32 @@ class NavigationProblem:
     def middle(self, x1, x2):
         return Utils.middle(x1, x2, self.coords)
 
-    def timeopt_control_cartesian(self, costate: ndarray):
+    def timeopt_control(self, state: ndarray, costate: ndarray):
+        pass
+
+    def timeopt_control_cartesian(self, state: ndarray, costate: ndarray):
+        del state
         return timeopt_control_cartesian(costate, self.srf_max)
 
     def timeopt_control_gcs(self, state: ndarray, costate: ndarray):
         return timeopt_control_gcs(state, costate, self.srf_max)
 
-    def augsys_dyn_timeopt(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
+    def augsys_dyn_control(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
         return np.hstack((self.model.dyn.value(t, state, control),
                           -self.model.dyn.d_value__d_state(t, state, control).transpose() @ costate
                           - self.penalty.d_value(t, state)))
 
-    def augsys_dyn_timeopt_cartesian(self, t: float, state: ndarray, costate: ndarray):
-        return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_cartesian(costate))
-
-    def augsys_dyn_timeopt_gcs(self, t: float, state: ndarray, costate: ndarray):
-        return self.augsys_dyn_timeopt(t, state, costate, self.timeopt_control_gcs(state, costate))
+    def augsys_dyn_timeopt(self, t: float, state: ndarray, costate: ndarray):
+        return self.augsys_dyn_control(t, state, costate, self.timeopt_control(state, costate))
 
     def hamiltonian(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
         return costate @ (control + self.model.ff.value(t, state)) + 1
 
     def in_obs(self, state):
         return [obs for obs in self.obstacles if obs.value(state) < 0.]
+
+    def in_obs_tol(self, state):
+        return [obs for obs in self.obstacles if obs.value(state) < -5e-3 * self.length_reference]
 
     def apply_feedback(self, fb: Feedback, rel_timeout=3, n_time=1000) -> Trajectory:
         """
@@ -216,6 +221,7 @@ class NavigationProblem:
         :param n_time: The time discretization number
         :return: A Trajectory
         """
+
         def dyn_fb(t, x):
             return self.model.dyn(t, x, fb(t, x))
 

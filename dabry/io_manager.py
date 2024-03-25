@@ -146,14 +146,15 @@ class IOManager:
                   bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
         if target_dir is None:
             target_dir = self.trajs_dir
+        self.setup_trajs()
         traj.save(name, target_dir, scale_length, scale_time, bl, time_offset)
 
     def save_trajs(self, trajs: List[Trajectory], group_name: Optional[str] = None,
                    scale_length: Optional[float] = None, scale_time: Optional[float] = None,
                    bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
+        self.setup_trajs()
         if len(trajs) == 0:
             return
-        self.setup_trajs()
         if group_name is not None:
             target_dir = os.path.join(self.trajs_dir, group_name)
             if not os.path.exists(target_dir):
