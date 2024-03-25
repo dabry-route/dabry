@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from dabry.flowfield import DiscreteFF
 from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha, \
-    diadic_valuation, alpha_to_int, Chrono
+    diadic_valuation, alpha_to_int, Chrono, Coords
 from dabry.misc import terminal
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
@@ -110,8 +110,7 @@ class ClosureReason(Enum):
 class NeuteringReason(Enum):
     # When two neighbours enter obstacle and have different directions
     OBSTACLE_SPLITTING = 0
-    # Two neighbors experience a different obstacle history: resampling undefined yet
-    DIFFERENT_OBS_HISTORY = 1
+    INTERP_CHILD_IN_OBS = 1
 
 
 class Site:
@@ -207,7 +206,7 @@ class Site:
     def neutered(self):
         return self.neutering_reason is not None
 
-    def neuter(self, t: float, reason: NeuteringReason):
+    def neuter(self, reason: NeuteringReason, t: float):
         if self.neutering_reason is not None:
             return
         self.t_neutered = t
@@ -317,7 +316,7 @@ class Site:
 
     def costate(self, t: float):
         return self.data(t)[3:5]
-    
+
     @property
     def costs(self):
         return self.data_disc[:, 0]
@@ -666,8 +665,10 @@ class SolverEFResampling(SolverEF):
         self.solution_site_min_cost_index: Optional[int] = None
         self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth, self.times)
         ff_values = self.pb.model.ff.values if hasattr(self.pb.model.ff, 'values') else \
-            DiscreteFF.from_ff(self.pb.model.ff, (self.pb.bl, self.pb.tr)).values
+            DiscreteFF.from_ff(self.pb.model.ff, (self.pb.bl, self.pb.tr), nx=50, ny=50, nt=20, no_diff=True).values
         self._ff_max_norm = np.max(np.linalg.norm(ff_values, axis=-1))
+        self.distance_inflat = 1 if self.pb.coords == Coords.CARTESIAN else \
+            np.cos(np.max((np.abs(self.pb.bl[1]), np.abs(self.pb.tr[1]))))
 
     def create_initial_sites(self):
         self.initial_sites = [
@@ -737,14 +738,14 @@ class SolverEFResampling(SolverEF):
 
     def integrate_free(self, t_start: float, t_end: float, y0: ndarray):
         res: OdeResult = solve_ivp(self.dyn_augsys, (t_start, t_end), y0,
-                                   t_eval=self.times[np.logical_and(t_start <= self.times,  self.times <= t_end)],
+                                   t_eval=self.times[np.logical_and(t_start <= self.times, self.times <= t_end)],
                                    events=list(self.events.values()), dense_output=True, **self._integrator_kwargs)
         events_dict = self.t_events_to_dict(res.t_events)
         return OdeAugResult(res, events_dict)
 
     def integrate_captive(self, t_start: float, t_end: float, x0: ndarray, obs_name: str, trigo: bool):
         res: OdeResult = solve_ivp(self.dyn_constr, (t_start, t_end), x0,
-                                   t_eval=self.times[np.logical_and(t_start <= self.times,  self.times <= t_end)],
+                                   t_eval=self.times[np.logical_and(t_start <= self.times, self.times <= t_end)],
                                    events=[self._event_exit_obs], args=[obs_name, trigo],
                                    dense_output=True, **self._integrator_kwargs)
         events_dict = {"exit_forced": res.t_events[0]}
@@ -755,13 +756,15 @@ class SolverEFResampling(SolverEF):
 
     @property
     def validity_list(self):
+        # The minus one in indexes is because closure/neutering can happen simultaneously with distance violation
+        # and in this case the check index is stuck -1 behind the closure/neutering index
         return \
             [
                 (site.index_t_check_next, site) for site in self.sites_non_void
-                if not (site.neutered and site.index_t_check_next + 1 >= site.index_neutered) and
+                if not (site.neutered and site.index_t_check_next >= site.index_neutered - 1) and
                    not (site.closed and site.index_t_check_next == site.index_t) and
-                   not (site.next_nb[site.index_t_check_next].closed and site.index_t_check_next + 1 >=
-                        site.next_nb[site.index_t_check_next].index_closed)
+                   not (site.next_nb[site.index_t_check_next].closed and site.index_t_check_next >=
+                        site.next_nb[site.index_t_check_next].index_closed - 1)
             ]
 
     @property
@@ -852,20 +855,25 @@ class SolverEFResampling(SolverEF):
             site_nb = site.next_nb[site.index_t_check_next]
             new_id_check_next = site.index_t_check_next
             new_site: Optional[Site] = None
-            upper_index = min(site.index_t + 1, site_nb.index_t + 1, index_t_hi)
+            upper_index = min(site.index_t + 1, site_nb.index_t + 1, index_t_hi + 1)
             for i in range(site.index_t_check_next, upper_index):
                 state = site.state_at_index(i)
                 state_nb = site_nb.state_at_index(i)
+                distance_crit = np.sum(np.square(state - state_nb)) <= self._max_dist_sq
+                if distance_crit:
+                    new_id_check_next = i
                 if site.in_obs_at_index(i) and site_nb.in_obs_at_index(i) and \
                         site.obs_at_index(i) == site_nb.obs_at_index(i) and \
                         (site.trigo_at_index(i) != site_nb.trigo_at_index(i)):
-                    site.neuter(self.times[i], NeuteringReason.OBSTACLE_SPLITTING)
+                    site.neuter(NeuteringReason.OBSTACLE_SPLITTING, self.times[i])
                     break
-                if np.sum(np.square(state - state_nb)) > self._max_dist_sq and \
-                        site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
+                if not distance_crit and site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and \
+                        not site.neutered:
                     new_site = self.binary_resample(site, site_nb, i)
+                    if self.pb.in_obs_tol(new_site.state_cur):
+                        new_site = None
+                        site.neuter(NeuteringReason.INTERP_CHILD_IN_OBS, self.times[i])
                     break
-                new_id_check_next = i
             # Update the neighbouring property
             site.next_nb[site.index_t_check_next: new_id_check_next + 1] = \
                 [site_nb] * (new_id_check_next - site.index_t_check_next + 1)
@@ -895,7 +903,8 @@ class SolverEFResampling(SolverEF):
             set(site for site in self.sites.values() if len(site.ode_legs) == 0))
         for site in to_check:
             if np.any(np.sum(np.square(site.states[np.logical_not(np.logical_or(np.isnan(site.states[:, 0]),
-                                                                   np.isnan(site.states[:, 1])))] - self.pb.x_target),
+                                                                                np.isnan(site.states[:,
+                                                                                         1])))] - self.pb.x_target),
                              axis=-1)
                       < self._target_radius_sq):
                 self.success = True
@@ -960,6 +969,7 @@ class SolverEFTrimming(SolverEFResampling):
         self._sites_created_at_subframe: list[set[Site]] = [set()
                                                             for _ in range(self.n_subframes)]
         self.depth = 1
+        self.stop = False
 
     def setup(self):
         super().setup()
@@ -988,18 +998,24 @@ class SolverEFTrimming(SolverEFResampling):
 
     def step(self):
         self._to_shoot_sites.extend(self.sites_valid[self.i_subframe])
-        while len(self._to_shoot_sites) > 0:
-            print(self.validity_index)
+        count = 1
+        dki = DelayedKeyboardInterrupt()
+        with dki:
             while len(self._to_shoot_sites) > 0:
-                site = self._to_shoot_sites.pop()
-                self.integrate_site_to_target_time(site, self.times[self.index_t_next_subframe - 1])
-            new_sites = self.feed_new_sites(index_t_hi=self.index_t_next_subframe - 1)
-            self._to_shoot_sites.extend(new_sites)
-            self._sites_created_at_subframe[self.i_subframe] |= set(new_sites)
-        for site in self.sites_valid[self.i_subframe] | self._sites_created_at_subframe[self.i_subframe]:
-            cond = site.index_t_check_next == self.index_t_next_subframe - 1 or site.closed
-            #assert cond
-        self.trim()
+                if dki.signal_received:
+                    self.stop = True
+                    break
+                print(f'Subloop {count:0>2}, VI: {self.validity_index}')
+                while len(self._to_shoot_sites) > 0:
+                    site = self._to_shoot_sites.pop()
+                    self.integrate_site_to_target_time(site, self.times[self.index_t_next_subframe - 1])
+                new_sites = self.feed_new_sites(index_t_hi=self.index_t_next_subframe - 1)
+                self._to_shoot_sites.extend(new_sites)
+                self._sites_created_at_subframe[self.i_subframe] |= set(new_sites)
+                count += 1
+        print(f'End         VI: {self.validity_index}')
+        if not self.stop:
+            self.trim()
         self.i_subframe += 1
 
     def trim(self):
@@ -1013,7 +1029,9 @@ class SolverEFTrimming(SolverEFResampling):
         bl, spacings = self.pb.get_grid_params(nx, ny)
         new_valid_sites = []
         for site in [site for site in sites_considered if not site.closed]:
-            sup_time = np.linalg.norm(site.state_cur - self.pb.x_target) / (self.pb.srf_max + self._ff_max_norm)
+            dist = np.linalg.norm(site.state_cur - self.pb.x_target) if self.pb.coords == Coords.CARTESIAN else \
+                Utils.geodesic_radian_distance(site.state_cur, self.pb.x_target)
+            sup_time = dist / (self.pb.srf_max + self._ff_max_norm)
             if site.t_cur + sup_time > self.times[-1]:
                 site.close(ClosureReason.SUBOPTI_DISTANCE)
                 continue
@@ -1032,10 +1050,12 @@ class SolverEFTrimming(SolverEFResampling):
         self.setup()
         self.pre_solve()
         for _ in range(self.n_subframes):
+            if self.stop:
+                break
             s = 'Subframe {i_subframe}/{n_subframe}, Act: {n_active: >4}, Cls: {n_closed: >4} (Tot: {n_total: >4})'
             print(s.format(
-                i_subframe=self.i_subframe,
-                n_subframe=self.n_subframes - 1,
+                i_subframe=self.i_subframe + 1,
+                n_subframe=self.n_subframes,
                 n_active=len(self.sites_valid[self.i_subframe]),
                 n_closed=len([site for site in self.sites.values() if site.closed]),
                 n_total=len(self.sites))

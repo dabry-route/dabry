@@ -194,10 +194,10 @@ class DiscreteObs(Obstacle):
         return cls(values, bounds, grad_values=grad_values, **kwargs)
 
     def value(self, x: ndarray) -> ndarray:
-        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, x)
+        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, x, ndim_values_data=0)
 
     def d_value(self, x: ndarray) -> ndarray:
-        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, x)
+        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, x, ndim_values_data=1)
 
     def compute_derivatives(self):
         """

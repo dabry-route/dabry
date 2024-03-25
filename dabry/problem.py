@@ -210,6 +210,9 @@ class NavigationProblem:
     def in_obs(self, state):
         return [obs for obs in self.obstacles if obs.value(state) < 0.]
 
+    def in_obs_tol(self, state):
+        return [obs for obs in self.obstacles if obs.value(state) < -5e-3 * self.length_reference]
+
     def apply_feedback(self, fb: Feedback, rel_timeout=3, n_time=1000) -> Trajectory:
         """
         Integrate a trajectory applying feedback control

@@ -304,6 +304,10 @@ class Utils:
         return arg
 
     @staticmethod
+    def geodesic_radian_distance(point1: ndarray, point2: ndarray):
+        return acos(Utils.central_angle(point1, point2, mode='rad'))
+
+    @staticmethod
     def geodesic_distance(*args, mode='rad'):
         """
         Computes the great circle distance between two points on the earth surface
@@ -580,7 +584,7 @@ class Utils:
         weight_hi = position - index_lo
         weight_lo = 1 - weight_hi
         index_lo, index_hi = tuple(
-            np.clip(index, 0, np.array(values.shape[:-ndim_values_data])
+            np.clip(index, 0, np.array(values.shape[:values.ndim - ndim_values_data])
                     - np.ones(values.ndim - ndim_values_data, dtype=np.int32))
             for index in (index_lo, index_hi))
         weight = functools.reduce(lambda x, y: x * y, np.ix_(*np.stack([weight_lo, weight_hi], -1)))
