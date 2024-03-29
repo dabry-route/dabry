@@ -625,15 +625,13 @@ class SolverEF(ABC):
                     res[index] = traj.times[k]
         return res
 
-    def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
-                     bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
+    def save_results(self, rescale=False):
         self.pb.io.clean_output_dir()
-        self.pb.io.save_trajs(self.trajs, group_name='ef_01', scale_length=scale_length, scale_time=scale_time,
-                              bl=bl, time_offset=time_offset)
+        self.pb.save_trajs(self.trajs, group_name='ef_01', rescale=rescale)
         self.save_info()
-        self.pb.save_ff()
-        self.pb.save_obs()
-        self.pb.save_info()
+        self.pb.unscaled.save_ff()
+        self.pb.unscaled.save_obs()
+        self.pb.unscaled.save_info()
 
     def save_info(self):
         pb_info = {
@@ -932,12 +930,10 @@ class SolverEFResampling(SolverEF):
             return False
         return self.validity_index >= self.solution_site_min_cost_index
 
-    def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
-                     bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
-        super(SolverEFResampling, self).save_results(scale_length, scale_time, bl, time_offset)
+    def save_results(self, rescale=False):
+        super(SolverEFResampling, self).save_results(rescale=rescale)
         if self.solution_site is not None:
-            self.pb.io.save_traj(self.solution_site.traj, name='solution',
-                                 scale_length=scale_length, scale_time=scale_time, bl=bl, time_offset=time_offset)
+            self.pb.save_traj(self.solution_site.traj, name='solution', rescale=rescale)
 
     def post_solve(self):
         super().post_solve()

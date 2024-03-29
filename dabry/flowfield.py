@@ -779,7 +779,7 @@ class LinearFFT(FlowField):
         self.value_origin = value_origin.copy()
 
     def value(self, t, x):
-        (self.gradient_diff_time * t + self.gradient_init) @ (x - self.origin) + self.value_origin
+        return (self.gradient_diff_time * t + self.gradient_init) @ (x - self.origin) + self.value_origin
 
     def d_value(self, t, x):
         return self.gradient_diff_time * t + self.gradient_init

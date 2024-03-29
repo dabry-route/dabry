@@ -56,7 +56,7 @@ class NavigationProblem:
                  aero: Optional[Aero] = None,
                  penalty: Optional[Penalty] = None,
                  autoframe=True,
-                 scaled=False):
+                 unscaled=None):
         self.model = Model.zermelo(ff)
         self.x_init: ndarray = x_init.copy()
         self.x_target: ndarray = x_target.copy()
@@ -105,7 +105,8 @@ class NavigationProblem:
             self.obs_frame = FrameObs(bl_frame, tr_frame)
             self.obstacles.append(self.obs_frame)
 
-        self.scaled = scaled
+        self.unscaled = unscaled if unscaled is not None else self
+        self.scaled = unscaled is not None
         self.timeopt_control = self.timeopt_control_cartesian if self.coords == Coords.CARTESIAN else self.timeopt_control_gcs
 
     def get_grid_params(self, nx: int, ny: int) -> tuple[ndarray, ndarray]:
@@ -156,6 +157,22 @@ class NavigationProblem:
         }
         with open(os.path.join(self.io.case_dir, f'problem_info.json'), 'w') as f:
             json.dump(pb_info, f, indent=4)
+
+    def save_traj(self, traj: Trajectory, name: str, rescale=False):
+        kwargs = {}
+        if rescale:
+            kwargs = {**self.scaling_for_saving}
+        self.io.save_traj(traj, name, **kwargs)
+
+    def save_trajs(self, trajs: List[Trajectory], group_name: Optional[str] = None, rescale=False):
+        kwargs = {}
+        if rescale:
+            kwargs = {**self.scaling_for_saving}
+        self.io.save_trajs(trajs, group_name, **kwargs)
+
+    def set_case_dir(self, dirpath: str):
+        self.io.set_case_dir(dirpath)
+        self.unscaled.io.set_case_dir(dirpath)
 
     @property
     def coords(self):
@@ -288,6 +305,12 @@ class NavigationProblem:
         scale_time = scale_length / srf_max
         return x_init, x_target, bl_pb_adim, bl_wrapper, tr_pb_adim, scale_length, scale_time
 
+    @property
+    def scaling_for_saving(self):
+        _, _, _, _, _, scale_length, scale_time = self.unscaled.scaling_params()
+        return dict(scale_length=scale_length, scale_time=scale_time, bl=self.unscaled.bl,
+                    time_offset=self.unscaled.model.ff.t_start)
+
     def rescale(self):
         """
         Builds a new problem where space and time variables are of unit magnitude
@@ -306,7 +329,7 @@ class NavigationProblem:
         penalty = WrapperPen(self.penalty, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
         return NavigationProblem(wrapper_ff, x_init, x_target, srf_max,
                                  bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty,
-                                 name=self.name, scaled=True)
+                                 name=self.name, unscaled=self)
 
     @classmethod
     def from_database(cls, x_init: ndarray, x_target: ndarray, srf: float,
