@@ -71,7 +71,7 @@ class OdeAugResult:
                  obs_name: Optional[str] = None, obs_trigo: Optional[bool] = None,
                  sol_extra: Optional[Callable] = None):
         self.sol = ode_res.sol
-        self.t: ndarray = ode_res.t
+        self.t: list = ode_res.t
         self.y: ndarray = ode_res.y
         self.sol: Optional[OdeSolution] = ode_res.sol
         self.t_events: Optional[List[ndarray]] = ode_res.t_events
@@ -347,7 +347,7 @@ class Site:
             return self.costate_init
         return self.ode_legs[-1].sol(self.ode_legs[-1].sol.t_max)[3:5]
 
-    def add_leg(self, ode_aug_res):
+    def add_leg(self, ode_aug_res: OdeAugResult):
         if ode_aug_res.status == -1:
             self.close(ClosureReason.INTEGRATION_FAILED)
             self.status_int = IntStatus.FAILURE
@@ -732,6 +732,9 @@ class SolverEFResampling(SolverEF):
                 costate_artificial = - control_cur / np.linalg.norm(control_cur)
                 y0 = np.hstack((site.cost_cur, site.state_cur, costate_artificial))
                 ode_aug_res = self.integrate_free(site.t_cur, t_target, y0)
+                if len(ode_aug_res.t) == 0:
+                    site.close(ClosureReason.FORCED_OBSTACLE_PENETRATION)
+                    break
                 site.add_leg(ode_aug_res)
             elif site.status_int == IntStatus.FAILURE:
                 break

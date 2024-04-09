@@ -525,10 +525,12 @@ class NavigationProblem:
             x_init = f * np.array([0., 0.])
             x_target = f * np.array([1., 0.])
 
-            gradient_init = np.array(((0., 3 * srf / f),
+            # gradient_init = np.array(((0., 3 * srf / f),
+            #                           (0., 0.)))
+            gradient_init = np.array(((0., 0),
                                       (0., 0.)))
 
-            gradient_diff_time = np.array(((0., -3 * srf / f),
+            gradient_diff_time = np.array(((0., 1),
                                            (0., 0.)))
 
             origin = np.array([0., 0.])

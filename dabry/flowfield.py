@@ -771,7 +771,7 @@ class LinearFFT(FlowField):
         :param origin: The origin point for the origin value, shape (2,)
         :param value_origin: The origin value, shape (2,)
         """
-        super().__init__()
+        super().__init__(t_end=2)
 
         self.gradient_diff_time = gradient_diff_time.copy()
         self.gradient_init = gradient_init.copy()

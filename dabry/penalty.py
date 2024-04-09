@@ -93,6 +93,19 @@ class CirclePenalty(Penalty):
         return np.max((self.amplitude * 0.5 * (self.radius ** 2 - np.sum(np.square(x - self.center))), 0.))
 
 
+class GaussianPenalty(Penalty):
+
+    def __init__(self, center: ndarray, sigma: float, amplitude: float):
+        super().__init__()
+        self.center = center.copy()
+        self.sigma = sigma
+        self.amplitude = amplitude
+        self._factor = 1 / (self.sigma * np.sqrt(2 * np.pi))
+
+    def value(self, t, x):
+        return self.amplitude * self._factor * np.exp(-0.5 * np.sum(np.square((x - self.center) / self.sigma)))
+
+
 class DiscretePenalty(Penalty):
 
     # TODO: validate this class
