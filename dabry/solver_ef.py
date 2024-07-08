@@ -353,11 +353,12 @@ class Site:
             self.status_int = IntStatus.FAILURE
             return
         self.ode_legs.append(ode_aug_res)
-        i_min, i_max = self.time_to_index(ode_aug_res.t[0]), self.time_to_index(ode_aug_res.t[-1]) + 1
-        if ode_aug_res.obs_name is None:
-            self.data_disc[i_min:i_max, :] = ode_aug_res.y.transpose()
-        else:
-            self.data_disc[i_min:i_max, :3] = ode_aug_res.y.transpose()
+        if len(ode_aug_res.t) > 0:
+            i_min, i_max = self.time_to_index(ode_aug_res.t[0]), self.time_to_index(ode_aug_res.t[-1]) + 1
+            if ode_aug_res.obs_name is None:
+                self.data_disc[i_min:i_max, :] = ode_aug_res.y.transpose()
+            else:
+                self.data_disc[i_min:i_max, :3] = ode_aug_res.y.transpose()
         self.update_status()
 
     def update_status(self):
