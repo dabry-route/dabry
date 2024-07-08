@@ -1188,3 +1188,154 @@ def save_ff(ff: FlowField, filepath: str,
             tr: Optional[ndarray] = None):
     dff = discretize_ff(ff, nx, ny, nt, bl, tr)
     np.savez(filepath, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords.value))
+
+
+def array_from_cdsgrib(field_names: tuple[str],
+                       grid_bounds: ndarray, t_start: Union[float | datetime], t_end: Union[float | datetime],
+                       data_path: Optional[str] = None,
+                       is_longitude_0_360=True, **kwargs):
+    """
+    :param field_names: A tuple of field names extracted from ERA5 using cdsapi
+    :param grid_bounds: A (2,2) array where the zeroth element corresponds to the bounds of the zeroth axis
+    and the first element to the bounds of the first axis. In RADIANS.
+    :param t_start: The required start time for flow field
+    :param t_end: The required end time for flow field
+    :param data_path: Path to the grib files
+    :param is_longitude_0_360: True for ERA5 Reanalysis extracted from CDS. False for ECMWF forecast (-180, 180).
+    :return: A numpy array of the shape of the time-space grid + the number of fields (nt, nx, ny, n_fields)
+    """
+    t_start = t_start.timestamp() if isinstance(t_start, datetime) else t_start
+    t_end = t_end.timestamp() if isinstance(t_end, datetime) else t_end
+    single_frame = abs(t_start - t_end) < 60
+    bl, tr = grid_bounds.transpose()[0], grid_bounds.transpose()[1]
+    bl_d, tr_d = bl * Utils.RAD_TO_DEG, tr * Utils.RAD_TO_DEG
+
+    if is_longitude_0_360:
+        lon_b = Utils.rectify(bl_d[0], tr_d[0])
+    else:
+        lon_b = bl_d[0], tr_d[0]
+    field_file = sorted(os.listdir(data_path))[0]
+    wind_start_date = datetime(int(field_file[:4]), int(field_file[4:6]), int(field_file[6:8]))
+    field_file = sorted(os.listdir(data_path))[-1]
+    wind_stop_date = datetime(int(field_file[:4]), int(field_file[4:6]), int(field_file[6:8]), 21)
+    dates = [wind_start_date, wind_stop_date]
+    for k, (t_bound, wind_date_bound, op) in enumerate(zip((t_start, t_end), (wind_start_date, wind_stop_date),
+                                                           ('<', '>'))):
+        adj = "lower" if op == "<" else "upper"
+        if t_bound is None:
+            print(f'[CDS wind] Using field time {adj} bound {wind_date_bound}')
+            dates[k] = wind_date_bound
+        else:
+            if not isinstance(t_bound, datetime):
+                # Assuming float
+                _date_bound = datetime.fromtimestamp(t_bound)
+            else:
+                _date_bound = t_bound
+            if (op == '<' and _date_bound < wind_date_bound) or (op == '>' and _date_bound > wind_date_bound):
+                print(f'[CDS wind] Clipping {adj} bound to field time bound {wind_date_bound}')
+                dates[k] = wind_date_bound
+            else:
+                dates[k] = _date_bound
+
+    grb = pygrib.open(os.path.join(data_path, os.listdir(data_path)[0]))
+    grb_u = grb.select(name=field_names[0])
+    if lon_b[1] > 360:
+        # Has to extract in two steps
+        data1 = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=360)
+        data2 = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=0, lon2=lon_b[1] - 360)
+        lons1 = Utils.DEG_TO_RAD * Utils.to_m180_180(data1[2]).transpose()
+        lons2 = Utils.DEG_TO_RAD * Utils.to_m180_180(data2[2]).transpose()
+        lats1 = Utils.DEG_TO_RAD * data1[1].transpose()
+        lats2 = Utils.DEG_TO_RAD * data2[1].transpose()
+        lons = np.concatenate((lons1, lons2))
+        lats = np.concatenate((lats1, lats2))
+    else:
+        data = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])
+        lons = Utils.DEG_TO_RAD * Utils.to_m180_180(data[2]).transpose()
+        lats = Utils.DEG_TO_RAD * data[1].transpose()
+
+    shape = lons.shape
+    print(shape)
+
+    # Get wind and timestamps
+    fields_frames = []
+    ts = []
+    start_date_rounded = datetime(dates[0].year, dates[0].month, dates[0].day, 0, 0)
+    stop_date_rounded = datetime(dates[1].year, dates[1].month, dates[1].day, 0, 0) + timedelta(days=1)
+    startd_rounded = datetime(dates[0].year, dates[0].month, dates[0].day, 3 * (dates[0].hour // 3), 0)
+    stopd_rounded = datetime(dates[1].year, dates[1].month, dates[1].day, 0, 0) + timedelta(
+        hours=3 * (1 + (dates[1].hour // 3)))
+    one = False
+    field_srcfiles = []
+    for field_file in sorted(os.listdir(data_path)):
+        field_date = datetime(int(field_file[:4]), int(field_file[4:6]), int(field_file[6:8]))
+        if field_date < start_date_rounded:
+            continue
+        if field_date >= stop_date_rounded:
+            continue
+        if one and single_frame:
+            break
+        field_srcfiles.append(field_file)
+
+    for field_file in tqdm(field_srcfiles):
+        grbs = pygrib.open(os.path.join(data_path, field_file))
+        grb_fields = [grbs.select(name=field_name) for field_name in field_names]
+        for i in range(len(grb_fields[0])):
+            date = f'{grb_fields[0][i]["date"]:0>8}'
+            hours = f'{grb_fields[0][i]["time"]:0>4}'
+            t = datetime(int(date[:4]), int(date[4:6]), int(date[6:8]),
+                         int(hours[:2]), int(hours[2:4]))
+            if t < startd_rounded:
+                continue
+            if t > stopd_rounded:
+                continue
+            if one and single_frame:
+                break
+            one = True
+            fields = []
+            if lon_b[1] > 360:
+                for grb_field in grb_fields:
+                    f1 = grb_field[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=360)[0].transpose()
+                    f2 = grb_field[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=0, lon2=lon_b[1] - 360)[0].transpose()
+                    fields.append(np.concatenate((f1, f2)))
+            else:
+                for grb_field in grb_fields:
+                    fields.append(
+                        grb_field[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose())
+            fields_frames.append(np.stack(fields, axis=-1))
+            ts.append(t)
+
+    return ts, lons, lats, np.stack(fields_frames, axis=0)
+
+
+def array_from_ecmwf_fc(field_names: tuple[str], grid_bounds: ndarray, file_path: str):
+    """
+    Return a stack of time-space fields contained in a grib extracted from ECMWF opendata API with a
+    selection of fields of interest
+    """
+    bl, tr = grid_bounds.transpose()[0], grid_bounds.transpose()[1]
+    bl_d, tr_d = bl * Utils.RAD_TO_DEG, tr * Utils.RAD_TO_DEG
+    lon_b = bl_d[0], tr_d[0]
+
+    grbs = pygrib.open(file_path)
+    grb_fields = [grbs.select(name=field_name) for field_name in field_names]
+    n_time = len(grb_fields[0])
+    # TODO: at this point handling data near -180 or +180 may be done wrong
+    _, lats, lons = grb_fields[0][0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])
+    print(lons.shape)
+
+    times = []
+    fields_frames = []
+    for i in tqdm(range(n_time)):
+        date = f'{grb_fields[0][i]["date"]:0>8}'
+        forecast_time = grb_fields[0][i]["forecastTime"]
+        t = datetime(int(date[:4]), int(date[4:6]), int(date[6:8])) + timedelta(seconds=forecast_time * 3600)
+        times.append(t)
+        fields = []
+        for grb_field in grb_fields:
+            fields.append(
+                grb_field[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose()
+            )
+        fields_frames.append(np.stack(fields, axis=-1))
+
+    return times, lons, lats, np.stack(fields_frames, axis=0)
