@@ -652,7 +652,7 @@ class SolverEF(ABC):
 
 class SolverEFResampling(SolverEF):
 
-    def __init__(self, *args, max_dist: Optional[float] = None, **kwargs):
+    def __init__(self, *args, max_dist: Optional[float] = None, mode_resamp_interp=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.max_dist = max_dist if max_dist is not None else self.target_radius
         self._max_dist_sq = self.max_dist ** 2
@@ -669,6 +669,7 @@ class SolverEFResampling(SolverEF):
         self._ff_max_norm = np.max(np.linalg.norm(ff_values, axis=-1))
         self.distance_inflat = 1 if self.pb.coords == Coords.CARTESIAN else \
             np.cos(np.max((np.abs(self.pb.bl[1]), np.abs(self.pb.tr[1]))))
+        self.mode_resamp_interp = mode_resamp_interp
 
     def create_initial_sites(self):
         self.initial_sites = [
@@ -893,7 +894,7 @@ class SolverEFResampling(SolverEF):
 
     def binary_resample(self, site_prev: Site, site_next: Site, index: int):
         if site_prev.in_obs_at_index(index) == site_next.in_obs_at_index(index) and \
-                not site_prev.interpolated and not site_next.interpolated:
+                not site_prev.interpolated and not site_next.interpolated and not self.mode_resamp_interp:
             return self.site_mngr.site_from_mean_init_cond(site_prev, site_next, index)
         else:
             return self.site_mngr.site_from_interpolation(site_prev, site_next, index)
