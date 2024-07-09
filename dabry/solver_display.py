@@ -38,16 +38,17 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
     cost_map = None
     if not no_value_func:
         cost_map = solver.get_cost_map()
-        fig.add_trace(go.Heatmap(z=cost_map.transpose(),
+        fig.add_trace(go.Contour(z=cost_map.transpose(),
                                  x=np.linspace(solver.pb.bl[0], solver.pb.tr[0], cost_map.shape[0]),
                                  y=np.linspace(solver.pb.bl[1], solver.pb.tr[1], cost_map.shape[1]),
-                                 name='Cost map', connectgaps=False, coloraxis='coloraxis'))
-        fig.update_layout(coloraxis_cmin=solver.times[0], coloraxis_cmax=solver.times[-1])
+                                 name='Cost map',
+                                 contours=dict(start=0, end=1.2, size=0.1),
+                                 coloraxis='coloraxis'))
     # fig.add_trace(go.Contour(z=solver.cost_map_triangle(nx, ny).transpose()[1::-1, 1::-1],
     #                          x=np.linspace(pb.bl[0], pb.tr[0], nx)[1::-1],
     #                          y=np.linspace(pb.bl[1], pb.tr[1], ny)[1::-1],
     #                          name='Cost contour', connectgaps=False, coloraxis='coloraxis'))
-    fig.update_coloraxes(showscale=False)
+    fig.update_coloraxes(showscale=False, colorscale='Jet')
     fig.add_trace(go.Scatter(x=[solver.pb.x_init[0]], y=[solver.pb.x_init[1]], name='Start',
                              marker=dict(size=15, color=def_color)))
     fig.add_trace(go.Scatter(x=[solver.pb.x_target[0]], y=[solver.pb.x_target[1]], name='Target',
