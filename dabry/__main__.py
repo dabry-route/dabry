@@ -103,7 +103,9 @@ if __name__ == '__main__':
     pb.io.set_case_dir(case_dir)
     pb_unscaled.io.clean_output_dir()
     _, _, _, _, _, scale_length, scale_time = pb_unscaled.scaling_params()
-    scaling_params = dict(scale_length=scale_length, scale_time=scale_time, bl=pb_unscaled.bl,
+    scaling_params = dict(scale_length=scale_length, scale_time=scale_time,
+                          bl=pb_unscaled.bl if pb_unscaled.coords == Coords.CARTESIAN else
+                          np.zeros(2),
                           time_offset=pb_unscaled.model.ff.t_start)
     solver.save_results(**scaling_params)
     pb_unscaled.io.save_ff(pb_unscaled.model.ff, bl=pb_unscaled.bl, tr=pb_unscaled.tr)
