@@ -675,7 +675,7 @@ class NavigationProblem:
                                                   'ff.npz'))
             x_init = np.diag((5 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
             x_target = np.diag((1 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
-            return cls(ff, x_init, x_target, 10, name=b_name)
+            return cls(ff, x_init, x_target, 23, name=b_name)
 
         if b_name == "double_gyre_time_dependent":
             ff = GyreMSEASFF()

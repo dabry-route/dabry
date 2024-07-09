@@ -76,7 +76,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
                       yaxis_range=[solver.pb.bl[1], solver.pb.tr[1]],
                       width=800, height=800)
 
-    sites_by_depth = sorted(solver.sites.values(), key=lambda x: x.depth)
+    sites_by_depth = sorted(solver.sites.values(), key=lambda x: x.name)
 
     if not no_trajectories:
         if not timeslider:
