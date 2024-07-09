@@ -653,7 +653,11 @@ class SolverEF(ABC):
 
 class SolverEFResampling(SolverEF):
 
-    def __init__(self, *args, max_dist: Optional[float] = None, mode_resamp_interp=False, **kwargs):
+    def __init__(self, *args,
+                 max_dist: Optional[float] = None,
+                 mode_resamp_interp: bool = False,
+                 mode_obs_stop: bool = False,
+                 **kwargs):
         super().__init__(*args, **kwargs)
         self.max_dist = max_dist if max_dist is not None else self.target_radius
         self._max_dist_sq = self.max_dist ** 2
@@ -671,6 +675,7 @@ class SolverEFResampling(SolverEF):
         self.distance_inflat = 1 if self.pb.coords == Coords.CARTESIAN else \
             np.cos(np.max((np.abs(self.pb.bl[1]), np.abs(self.pb.tr[1]))))
         self.mode_resamp_interp = mode_resamp_interp
+        self.mode_obs_stop = mode_obs_stop
 
     def create_initial_sites(self):
         self.initial_sites = [
@@ -709,7 +714,7 @@ class SolverEFResampling(SolverEF):
                 trigo = cross >= 0.
                 dot = np.dot(grad_obs, self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, state_cur)),
                                                        obs_name, trigo)[1:3])
-                if not np.isclose(dot, 0):
+                if not np.isclose(dot, 0) or self.mode_obs_stop:
                     site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
                     break
                 x0 = np.hstack((site.cost_cur, state_cur))
