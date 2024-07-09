@@ -255,12 +255,12 @@ class NavigationProblem:
     def time_orthodromic(self):
         traj_ortho = self.orthodromic()
         reached = traj_ortho.events['target'].size > 0
-        return traj_ortho.events['target'][0] if reached else np.infty
+        return traj_ortho.events['target'][0] if reached else np.inf
 
     def time_radial(self):
         traj_radial = self.radial()
         reached = traj_radial.events['target'].size > 0
-        return traj_radial.events['target'][0] if reached else np.infty
+        return traj_radial.events['target'][0] if reached else np.inf
 
     def scaling_params(self):
         if self.coords == Coords.CARTESIAN:

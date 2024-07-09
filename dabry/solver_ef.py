@@ -529,7 +529,7 @@ class SolverEF(ABC):
             # Inflation factor needed for particular case when heuristic trajectory
             # is indeed leading to optimal cost
             self.total_duration = 1.1 * self.pb.auto_time_upper_bound()
-            if self.total_duration == np.infty:
+            if self.total_duration == np.inf:
                 self.total_duration = 2 * self.pb.length_reference / self.pb.srf_max
         else:
             self.total_duration = total_duration
