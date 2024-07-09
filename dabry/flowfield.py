@@ -10,6 +10,7 @@ import h5py
 import numpy as np
 import pygrib
 from numpy import ndarray, pi, sin, cos
+from scipy.interpolate import RegularGridInterpolator
 from tqdm import tqdm
 
 from dabry.misc import Utils, Coords, Units
@@ -181,8 +182,7 @@ class DiscreteFF(FlowField):
     Handles flow field loading from H5 format and derivative computation
     """
 
-    def __init__(self, values: ndarray, bounds: ndarray, coords: Coords, grad_values: Optional[ndarray] = None,
-                 no_diff=False):
+    def __init__(self, values: ndarray, bounds: ndarray, coords: Coords, no_diff=False):
         super().__init__(nt_int=values.shape[0] if values.ndim == 4 else None)
 
         self.is_dumpable = 2
@@ -199,20 +199,30 @@ class DiscreteFF(FlowField):
         self.spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(self.values.shape[:-1]) -
                                                          np.ones(self.values.ndim - 1))
 
-        self.grad_values = grad_values
-
-        if not no_diff:
-            if self.grad_values is None:
-                self.compute_derivatives()
-
         if values.ndim == 3:
             self.value = self._value_steady
             self.d_value = self._d_value_steady
+            bl = bounds.T[0]
+            tr = bounds.T[1]
+            xx = np.linspace(bl[0], tr[0], values.shape[0])
+            yy = np.linspace(bl[1], tr[1], values.shape[1])
+            points = (xx, yy)
+
         else:
             self.value = self._value_unsteady
             self.d_value = self._d_value_unsteady
             self.t_start = bounds[0, 0]
             self.t_end = bounds[0, 1]
+            bl = bounds.T[0]
+            tr = bounds.T[1]
+            tt = np.linspace(bl[0], tr[0], values.shape[0])
+            xx = np.linspace(bl[1], tr[1], values.shape[1])
+            yy = np.linspace(bl[2], tr[2], values.shape[2])
+            points = (tt, xx, yy)
+
+        self.interp = RegularGridInterpolator(points, values,
+                                              method='cubic' if not no_diff else 'linear',
+                                              bounds_error=False, fill_value=None)
 
     @property
     def times(self):
@@ -291,7 +301,6 @@ class DiscreteFF(FlowField):
         spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(shape) - np.ones(bounds.shape[0]))
         _nt = nt if t_end is not None else 1
         values = np.zeros(shape + (2,))
-        grad_values = np.zeros(shape + (2, 2)) if not kwargs.get('no_diff') else None
         for k in range(_nt):
             t = bounds[0, 0] + k * spacings[0] if t_end is not None else t_start
             for i in range(nx):
@@ -301,16 +310,11 @@ class DiscreteFF(FlowField):
                         values[i, j, :] = ff.value(t, state)
                     else:
                         values[k, i, j, :] = ff.value(t, state)
-                    if not kwargs.get('no_diff'):
-                        if t_end is None:
-                            grad_values[i, j, ...] = ff.d_value(t, state)
-                        else:
-                            grad_values[k, i, j, ...] = ff.d_value(t, state)
 
         coords = coords if coords is not None else \
             Coords.GCS if hasattr(ff, 'coords') and ff.coords == Coords.GCS \
                 else Coords.CARTESIAN
-        return cls(values, bounds, coords, grad_values=grad_values, **kwargs)
+        return cls(values, bounds, coords, **kwargs)
 
     @classmethod
     def from_cds(cls, grid_bounds: ndarray, t_start: Union[float | datetime], t_end: Union[float | datetime],
@@ -441,7 +445,7 @@ class DiscreteFF(FlowField):
         values = np.array(uv_frames)
 
         return cls(values, np.column_stack((np.array((ts[0], ts[-1])), grid_bounds.transpose())).transpose(),
-                   Coords.GCS, grad_values=None, **kwargs)
+                   Coords.GCS, **kwargs)
 
     def value(self, t, x):
         """
@@ -453,10 +457,10 @@ class DiscreteFF(FlowField):
         pass
 
     def _value_steady(self, _, x: ndarray):
-        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, x)
+        return self.interp(x)[0]
 
     def _value_unsteady(self, t, x):
-        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)))
+        return self.interp(np.array((t, *tuple(x))))[0]
 
     def d_value(self, t, x):
         """
@@ -468,44 +472,11 @@ class DiscreteFF(FlowField):
         pass
 
     def _d_value_steady(self, _, x):
-        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, x,
-                                 ndim_values_data=2)
+        return np.stack((self.interp(x, nu=(1, 0)), self.interp(x, nu=(0, 1))), axis=-1)[0]
 
     def _d_value_unsteady(self, t, x):
-        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)),
-                                 ndim_values_data=2)
-
-    def compute_derivatives(self):
-        """
-        Computes the derivatives of the flow field with a central difference scheme
-        on the flow field native grid
-        """
-        grad_shape = self.values.shape + (2,)
-        self.grad_values = np.zeros(grad_shape)
-        inside_shape = np.array(grad_shape, dtype=int)
-        inside_shape[-4] -= 2  # x-axis
-        inside_shape[-3] -= 2  # y-axis
-        inside_shape = tuple(inside_shape)
-
-        # Use order 2 precision derivative
-        self.grad_values[..., 1:-1, 1:-1, :, :] = \
-            np.stack(((self.values[..., 2:, 1:-1, 0] - self.values[..., :-2, 1:-1, 0]) / (2 * self.spacings[-2]),
-                      (self.values[..., 1:-1, 2:, 0] - self.values[..., 1:-1, :-2, 0]) / (2 * self.spacings[-1]),
-                      (self.values[..., 2:, 1:-1, 1] - self.values[..., :-2, 1:-1, 1]) / (2 * self.spacings[-2]),
-                      (self.values[..., 1:-1, 2:, 1] - self.values[..., 1:-1, :-2, 1]) / (2 * self.spacings[-1])),
-                     axis=-1
-                     ).reshape(inside_shape)
-        # Padding to full grid
-        # Borders
-        self.grad_values[..., 0, 1:-1, :, :] = self.grad_values[..., 1, 1:-1, :, :]
-        self.grad_values[..., -1, 1:-1, :, :] = self.grad_values[..., -2, 1:-1, :, :]
-        self.grad_values[..., 1:-1, 0, :, :] = self.grad_values[..., 1:-1, 1, :, :]
-        self.grad_values[..., 1:-1, -1, :, :] = self.grad_values[..., 1:-1, -2, :, :]
-        # Corners
-        self.grad_values[..., 0, 0, :, :] = self.grad_values[..., 1, 1, :, :]
-        self.grad_values[..., 0, -1, :, :] = self.grad_values[..., 1, -2, :, :]
-        self.grad_values[..., -1, 0, :, :] = self.grad_values[..., -2, 1, :, :]
-        self.grad_values[..., -1, -1, :, :] = self.grad_values[..., -2, -2, :, :]
+        z = np.array((t, *tuple(x)))
+        return np.stack((self.interp(z, nu=(0, 1, 0)), self.interp(z, nu=(0, 0, 1))), axis=-1)[0]
 
     def dualize(self):
         # Override method so that the dual of a DiscreteFF stays a DiscreteFF and
