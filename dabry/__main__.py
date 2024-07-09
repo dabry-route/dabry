@@ -98,7 +98,9 @@ if __name__ == '__main__':
     traj_radial = pb.radial()
 
     output_dir = args.output if args.output is not None else os.path.abspath('.')
-    pb_unscaled.io.set_case_dir(os.path.join(output_dir, pb_unscaled.name))
+    case_dir = os.path.join(output_dir, pb_unscaled.name)
+    pb_unscaled.io.set_case_dir(case_dir)
+    pb.io.set_case_dir(case_dir)
     pb_unscaled.io.clean_output_dir()
     _, _, _, _, _, scale_length, scale_time = pb_unscaled.scaling_params()
     scaling_params = dict(scale_length=scale_length, scale_time=scale_time, bl=pb_unscaled.bl,
