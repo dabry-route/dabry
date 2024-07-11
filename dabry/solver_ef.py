@@ -450,8 +450,8 @@ class SiteManager:
             return s_prefix
         return "{prefix}-{depth}-{location}".format(
             prefix=s_prefix,
-            depth=str(depth),  # .rjust(self._n_depth_chars, '0'),
-            location=str(location)  # .rjust(self._n_location_chars, '0')
+            depth=str(depth).rjust(self._n_depth_chars, '0'),
+            location=str(location).rjust(self._n_location_chars, '0')
         )
 
     @staticmethod
@@ -566,6 +566,7 @@ class SolverEF(ABC):
             self._integrator_kwargs['max_step'] = self.max_int_step
 
         self._cost_map = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
+        self._cost_map_no_g = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
         self.chrono = Chrono(f'Solving problem "{self.pb.name}"')
 
     @property
@@ -635,6 +636,10 @@ class SolverEF(ABC):
         self.pb.save_ff()
         self.pb.save_obs()
         self.pb.save_info()
+        with open(os.path.join(self.pb.io.case_dir, 'cost_map.npy'), 'wb') as f:
+            np.save(f, self.get_cost_map())
+        # with open(os.path.join(self.pb.io.case_dir, 'cost_map_no_guarantee.npy'), 'wb') as f:
+        #     np.save(f, self.get_cost_map_no_guarantee())
 
     def save_info(self):
         pb_info = {
@@ -821,8 +826,11 @@ class SolverEFResampling(SolverEF):
         return [site for site in self.sites.values() if len(site.ode_legs) > 0]
 
     def get_cost_map(self):
-        self._cost_map.update_from_sites(self.sites_non_void, 0, self.validity_index)
         return self._cost_map.values
+
+    def get_cost_map_no_guarantee(self):
+        self._cost_map_no_g.update_from_sites(self.sites_non_void, 0, self.n_time - 1)
+        return self._cost_map_no_g.values
 
     def site_front(self, index_t):
         site0 = list(self.sites.values())[0]
@@ -948,13 +956,8 @@ class SolverEFResampling(SolverEF):
 
     def post_solve(self):
         super().post_solve()
-        # with Chrono('Discretizing'):
-        #     cache_count = 0
-        #     sites_non_void = self.sites_non_void
-        #     for site in tqdm(sites_non_void, file=sys.stdout):
-        #         cache_count += site.discretize()
-        #     total = len(sites_non_void) * self.n_time
-        #     print(f'Cached: {cache_count}/{total} ({100 * cache_count/total:.2f}%)')
+        with Chrono('Computing cost map'):
+            self._cost_map.update_from_sites(self.sites_non_void, 0, self.validity_index)
 
 
 class SolverEFBisection(SolverEFResampling):

@@ -96,7 +96,7 @@ class NavigationProblem:
                 self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
 
         self.target_radius: float = target_radius if target_radius is not None else \
-            0.025 * np.linalg.norm(self.tr - self.bl)
+            0.0125 * np.linalg.norm(self.tr - self.bl)
 
         frame_offset = 0.
         if autoframe:
@@ -671,8 +671,10 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, 10, name=b_name)
 
         if b_name == "reykjavik_dublin":
-            ff = DiscreteFF.from_npz(os.path.join(os.path.abspath('..'), 'data', 'cds_omerc', 'reykjavik_dublin',
-                                                  'ff.npz'))
+            # ff = DiscreteFF.from_npz(os.path.join(os.path.abspath('..'), 'data', 'cds_omerc', 'reykjavik_dublin',
+            #                                       'ff.npz'))
+            ff = DiscreteFF.from_interp(os.path.join(os.path.abspath('..'), 'data', 'cds_omerc', 'reykjavik_dublin',
+                                                     'ff_interp.pickle'))
             x_init = np.diag((5 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
             x_target = np.diag((1 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
             return cls(ff, x_init, x_target, 23, name=b_name)

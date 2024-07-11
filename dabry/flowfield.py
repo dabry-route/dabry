@@ -1,4 +1,5 @@
 import os
+import pickle
 import sys
 import warnings
 from abc import ABC
@@ -182,7 +183,7 @@ class DiscreteFF(FlowField):
     Handles flow field loading from H5 format and derivative computation
     """
 
-    def __init__(self, values: ndarray, bounds: ndarray, coords: Coords, no_diff=False):
+    def __init__(self, values: ndarray, bounds: ndarray, coords: Coords, no_diff=False, interp=None):
         super().__init__(nt_int=values.shape[0] if values.ndim == 4 else None)
 
         self.is_dumpable = 2
@@ -195,9 +196,6 @@ class DiscreteFF(FlowField):
         self.values = values
         self.bounds = bounds
         self.coords = coords
-
-        self.spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(self.values.shape[:-1]) -
-                                                         np.ones(self.values.ndim - 1))
 
         if values.ndim == 3:
             self.value = self._value_steady
@@ -220,9 +218,13 @@ class DiscreteFF(FlowField):
             yy = np.linspace(bl[2], tr[2], values.shape[2])
             points = (tt, xx, yy)
 
-        self.interp = RegularGridInterpolator(points, values,
-                                              method='cubic' if not no_diff else 'linear',
-                                              bounds_error=False, fill_value=None)
+        if interp is None:
+            # with Chrono('Building flow field spline interpolation'):
+            self.interp = RegularGridInterpolator(points, values,
+                                                  method='cubic' if not no_diff else 'linear',
+                                                  bounds_error=False, fill_value=None)
+        else:
+            self.interp = interp
 
     @property
     def times(self):
@@ -237,6 +239,15 @@ class DiscreteFF(FlowField):
         if no_diff is not None:
             kwargs['no_diff'] = no_diff
         return cls(ff['values'], ff['bounds'], Coords.from_string(ff['coords']), **kwargs)
+
+    @classmethod
+    def from_interp(cls, filepath):
+        with open(filepath, 'rb') as f:
+            interp = pickle.load(f)
+        bounds = np.array(((interp.grid[0][0], interp.grid[0][-1]),
+                           (interp.grid[1][0], interp.grid[1][-1]),
+                           (interp.grid[2][0], interp.grid[2][-1])))
+        return cls(interp.values, bounds, Coords.CARTESIAN, interp=interp)
 
     @classmethod
     def from_h5(cls, filepath, **kwargs):
