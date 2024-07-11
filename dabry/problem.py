@@ -96,7 +96,7 @@ class NavigationProblem:
                 self.tr = (self.x_init + self.x_target) / 2. + np.array((w / 2., w / 2.))
 
         self.target_radius: float = target_radius if target_radius is not None else \
-            0.0125 * np.linalg.norm(self.tr - self.bl)
+            0.025 * np.linalg.norm(self.tr - self.bl)
 
         frame_offset = 0.
         if autoframe:
