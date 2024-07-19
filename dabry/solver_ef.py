@@ -526,9 +526,9 @@ class SolverEF(ABC):
         # Problem is assumed to be well conditioned ! (non-dimensionalized)
         self.pb = pb
         if total_duration is None:
-            # Inflation factor needed for particular case when heuristic trajectory
-            # is indeed leading to optimal cost
-            self.total_duration = 1.1 * self.pb.auto_time_upper_bound()
+            # Inflation factor for obstacle cases
+            factor = 1.3 if len(self.pb.obstacles) > 0 else 1
+            self.total_duration = factor * self.pb.auto_time_upper_bound()
             if self.total_duration == np.inf:
                 self.total_duration = 2 * self.pb.length_reference / self.pb.srf_max
         else:
@@ -885,7 +885,7 @@ class SolverEFResampling(SolverEF):
                 if not distance_crit and site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and \
                         not site.neutered:
                     new_site = self.binary_resample(site, site_nb, i)
-                    if self.pb.in_obs_tol(new_site.state_cur):
+                    if self.pb.in_obs(new_site.state_cur):
                         new_site = None
                         site.neuter(NeuteringReason.INTERP_CHILD_IN_OBS, self.times[i])
                     break
