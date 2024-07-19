@@ -589,9 +589,11 @@ class SolverEF(ABC):
 
     def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool, ff_tweak=1.):
         sign = 2 * trigo - 1
-        d = np.array(((0., -sign), (sign, 0.))) @ self.obstacles[obstacle].d_value(x[1:3])
+        grad_obs = self.obstacles[obstacle].d_value(t, x[1:3])
+        d = np.array(((0., -sign), (sign, 0.))) @ grad_obs
         ff_val = ff_tweak * self.pb.model.ff.value(t, x[1:3])
-        return np.hstack((1., ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max)))
+        offset = sign * 1 / np.linalg.norm(grad_obs) * self.obstacles[obstacle].d_value_dt(t, x[1:3])
+        return np.hstack((1., ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max, offset)))
 
     @non_terminal
     def _event_target(self, _, x):
@@ -599,7 +601,7 @@ class SolverEF(ABC):
 
     @terminal
     def _event_exit_obs(self, t, x, obstacle: str, _: bool):
-        d_value = self.obstacles[obstacle].d_value(x[1:3])
+        d_value = self.obstacles[obstacle].d_value(t, x[1:3])
         n = d_value / np.linalg.norm(d_value)
         ff_val = self.pb.model.ff.value(t, x[1:3])
         ff_ortho = ff_val @ n
@@ -711,13 +713,13 @@ class SolverEFResampling(SolverEF):
                 obs_name = active_obstacles[0]
                 t_enter_obs = last_leg.events_dict[obs_name][0]
                 state_cur, costate_cur = site.state_cur, site.costate_cur
-                grad_obs = self.obstacles[obs_name].d_value(state_cur)
+                grad_obs = self.obstacles[obs_name].d_value(t_enter_obs, state_cur)
                 cross = np.cross(grad_obs,
                                  self.pb.model.dyn.value(t_enter_obs, state_cur,
                                                          self.pb.timeopt_control(state_cur, costate_cur)))
                 trigo = cross >= 0.
                 dot = np.dot(grad_obs, self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, state_cur)),
-                                                       obs_name, trigo)[1:3])
+                                                       obs_name, trigo)[1:3]) + self.obstacles[obs_name].d_value_dt(t_enter_obs, state_cur)
                 if not np.isclose(dot, 0) or self.mode_obs_stop:
                     site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
                     break
@@ -737,7 +739,7 @@ class SolverEFResampling(SolverEF):
                 # factor shall have a small component inside the obstacle
                 gv_tweaked = self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, site.state_cur)),
                                              site.obs_cur, site.trigo_cur, ff_tweak=1.01)[1:3]
-                if ls_float(np.dot(self.obstacles[site.obs_cur].d_value(site.state_cur), gv_tweaked), 0):
+                if ls_float(np.dot(self.obstacles[site.obs_cur].d_value(site.t_cur, site.state_cur), gv_tweaked), 0):
                     site.close(ClosureReason.FORCED_OBSTACLE_PENETRATION)
                     break
                 costate_artificial = - control_cur / np.linalg.norm(control_cur)
@@ -884,7 +886,7 @@ class SolverEFResampling(SolverEF):
                 if not distance_crit and site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and \
                         not site.neutered:
                     new_site = self.binary_resample(site, site_nb, i)
-                    if self.pb.in_obs(new_site.state_cur):
+                    if self.pb.in_obs(new_site.t_cur, new_site.state_cur):
                         new_site = None
                         site.neuter(NeuteringReason.INTERP_CHILD_IN_OBS, self.times[i])
                     break

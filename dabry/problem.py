@@ -224,8 +224,8 @@ class NavigationProblem:
     def hamiltonian(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
         return costate @ (control + self.model.ff.value(t, state)) + 1
 
-    def in_obs(self, state):
-        return [obs for obs in self.obstacles if obs.value(state) < 0.]
+    def in_obs(self, t, state):
+        return [obs for obs in self.obstacles if obs.value(t, state) < 0.]
 
     def in_obs_tol(self, state):
         return [obs for obs in self.obstacles if obs.value(state) < -5e-3 * self.length_reference]

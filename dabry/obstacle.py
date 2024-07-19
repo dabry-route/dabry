@@ -4,6 +4,7 @@ from typing import Union, Optional
 
 import numpy as np
 from numpy import ndarray
+from scipy.interpolate import RegularGridInterpolator
 
 from dabry.misc import Utils, terminal
 
@@ -37,30 +38,36 @@ class Obstacle(ABC):
 
     @terminal
     def event(self, time: float, state_aug: ndarray):
-        return self.value(state_aug[1:3])
+        return self.value(time, state_aug[1:3])
 
     @abstractmethod
-    def value(self, x: ndarray):
+    def value(self, t: float, x: ndarray):
         """
         Return a negative value if within obstacle, positive if outside and zero at the border
+        :param t: Time
         :param x: Position at which to get value (1D numpy array)
         :return: Obstacle function value
         """
         pass
 
-    def d_value(self, x: ndarray) -> ndarray:
+    @abstractmethod
+    def d_value(self, t: float, x: ndarray) -> ndarray:
         """
         Derivative of obstacle value function
+        :param t: Time
         :param x: Position at which to get derivative (1D numpy array)
         :return: Gradient of obstacle function at point
         """
         pass
 
-    def _d_value_finite_differences(self, x: ndarray, eps: float = 1e-6):
-        dx1 = eps * np.array((1, 0))
-        dx2 = eps * np.array((0, 1))
-        return np.column_stack(((self.value(x + dx1) - self.value(x - dx1)) / (2 * eps),
-                                (self.value(x + dx2) - self.value(x - dx2)) / (2 * eps)))
+    def d_value_dt(self, t: float, x: ndarray) -> float:
+        """
+        Time derivative of obstacle
+        :param t: Time
+        :param x: State
+        :return: Time derivative
+        """
+        return 0.
 
 
 class WrapperObs(Obstacle):
@@ -68,17 +75,19 @@ class WrapperObs(Obstacle):
     Wrap an obstacle to work with appropriate units
     """
 
-    def __init__(self, obs: Obstacle, scale_length: float, bl: ndarray):
+    def __init__(self, obs: Obstacle, scale_length: float, bl: ndarray, scale_time: float, time_origin: float):
         super().__init__()
         self.obs: Obstacle = obs
         self.scale_length = scale_length
         self.bl: ndarray = bl.copy()
+        self.scale_time = scale_time
+        self.time_origin = time_origin
 
-    def value(self, x):
-        return self.obs.value(self.bl + x * self.scale_length)
+    def value(self, t, x):
+        return self.obs.value(self.time_origin + t * self.scale_time, self.bl + x * self.scale_length)
 
-    def d_value(self, x):
-        return self.obs.d_value(self.bl + x * self.scale_length)
+    def d_value(self, t, x):
+        return self.obs.d_value(self.time_origin + t * self.scale_time, self.bl + x * self.scale_length)
 
     def __getattr__(self, item):
         if isinstance(self.obs, DiscreteObs):
@@ -100,10 +109,10 @@ class CircleObs(Obstacle):
         self._sqradius = radius ** 2
         super().__init__()
 
-    def value(self, x: ndarray):
+    def value(self, t, x: ndarray):
         return 0.5 * (np.sum(np.square(x - self.center)) - self._sqradius)
 
-    def d_value(self, x: ndarray) -> ndarray:
+    def d_value(self, t, x: ndarray) -> ndarray:
         return x - self.center
 
 
@@ -119,10 +128,10 @@ class FrameObs(Obstacle):
         self.scaler = np.diag(1 / (0.5 * (self.tr - self.bl)))
         super().__init__()
 
-    def value(self, x):
+    def value(self, t, x):
         return 1. - np.max(np.abs(np.dot(x[..., :2] - self.center, self.scaler)), -1)
 
-    def d_value(self, x):
+    def d_value(self, t, x):
         xx = np.dot(x[..., :2] - self.center, self.scaler)
         c1 = np.dot(xx, np.array((1., 1.)))
         c2 = np.dot(xx, np.array((1., -1.)))
@@ -137,7 +146,7 @@ class FrameObs(Obstacle):
 
 
 class DiscreteObs(Obstacle):
-    def __init__(self, values: ndarray, bounds: ndarray, grad_values: Optional[ndarray] = None, no_diff=False):
+    def __init__(self, values: ndarray, bounds: ndarray, no_diff=False, interp=None):
         super().__init__()
 
         if bounds.shape[0] != values.ndim:
@@ -148,13 +157,65 @@ class DiscreteObs(Obstacle):
         self.values = values.copy()
         self.bounds = bounds.copy()
 
-        self.spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(self.values.shape) -
-                                                         np.ones(self.values.ndim))
+        if values.ndim == 2:
+            self.value = self._value_steady
+            self.d_value = self._d_value_steady
+            self.d_value_dt = self._d_value_dt_steady
+            bl = bounds.T[0]
+            tr = bounds.T[1]
+            xx = np.linspace(bl[0], tr[0], values.shape[0])
+            yy = np.linspace(bl[1], tr[1], values.shape[1])
+            points = (xx, yy)
 
-        self.grad_values = grad_values.copy() if grad_values is not None else None
+        else:
+            self.value = self._value_unsteady
+            self.d_value = self._d_value_unsteady
+            self.d_value_dt = self._d_value_dt_unsteady
+            self.t_start = bounds[0, 0]
+            self.t_end = bounds[0, 1]
+            bl = bounds.T[0]
+            tr = bounds.T[1]
+            tt = np.linspace(bl[0], tr[0], values.shape[0])
+            xx = np.linspace(bl[1], tr[1], values.shape[1])
+            yy = np.linspace(bl[2], tr[2], values.shape[2])
+            points = (tt, xx, yy)
 
-        if self.grad_values is None and not no_diff:
-            self.compute_derivatives()
+        if interp is None:
+            # with Chrono('Building flow field spline interpolation'):
+            self.interp = RegularGridInterpolator(points, values,
+                                                  method='cubic' if not no_diff else 'linear',
+                                                  bounds_error=False, fill_value=None)
+        else:
+            self.interp = interp
+
+    def value(self, t: float, x: ndarray):
+        pass
+
+    def d_value(self, t: float, x: ndarray) -> ndarray:
+        pass
+
+    def d_value_dt(self, t, x):
+        pass
+
+    def _value_steady(self, _, x: ndarray):
+        return self.interp(x)[0]
+
+    def _value_unsteady(self, t, x):
+        return self.interp(np.array((t, *tuple(x))))[0]
+
+    def _d_value_steady(self, _, x):
+        return np.stack((self.interp(x, nu=(1, 0)), self.interp(x, nu=(0, 1))), axis=-1)[0]
+
+    def _d_value_unsteady(self, t, x):
+        z = np.array((t, *tuple(x)))
+        return np.stack((self.interp(z, nu=(0, 1, 0)), self.interp(z, nu=(0, 0, 1))), axis=-1)[0]
+
+    def _d_value_dt_steady(self, _, x):
+        return 0.
+
+    def _d_value_dt_unsteady(self, t, x):
+        z = np.array((t, *tuple(x)))
+        return self.interp(z, nu=(1, 0, 0))[0]
 
     @classmethod
     def from_npz(cls, filepath, no_diff: Optional[bool] = None):
@@ -166,11 +227,12 @@ class DiscreteObs(Obstacle):
 
     @classmethod
     def from_obs(cls, obs: Obstacle, grid_bounds: Union[tuple[ndarray, ndarray], ndarray],
-                 nx=100, ny=100, **kwargs):
+                 nx=51, ny=51, nt=25, **kwargs):
         """
         Create discrete obstacle from analytical obstacle.
         Similar to "from_ff" of the "DiscreteFF" class
         """
+        # TODO : rewrite for time varying obstacles
         if isinstance(grid_bounds, tuple):
             if len(grid_bounds) != 2:
                 raise ValueError('"grid_bounds" provided as a tuple must have two elements')
@@ -183,51 +245,13 @@ class DiscreteObs(Obstacle):
         shape = (nx, ny)
         spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(shape) - np.ones(bounds.shape[0]))
         values = np.zeros(shape)
-        grad_values = np.zeros(shape + (2,)) if not kwargs.get('no_diff') else None
         for i in range(nx):
             for j in range(ny):
                 state = bounds[-2:, 0] + np.diag((i, j)) @ spacings[-2:]
-                values[i, j] = obs.value(state)
-                if not kwargs.get('no_diff'):
-                    grad_values[i, j, :] = obs.d_value(state)
+                # TODO: modify this line
+                values[i, j] = obs.value(0, state)
 
-        return cls(values, bounds, grad_values=grad_values, **kwargs)
-
-    def value(self, x: ndarray) -> ndarray:
-        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, x, ndim_values_data=0)
-
-    def d_value(self, x: ndarray) -> ndarray:
-        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, x, ndim_values_data=1)
-
-    def compute_derivatives(self):
-        """
-        Computes the derivatives of the flow field with a central difference scheme
-        on the flow field native grid
-        """
-        grad_shape = self.values.shape + (2,)
-        self.grad_values = np.zeros(grad_shape)
-        inside_shape = np.array(grad_shape, dtype=int)
-        inside_shape[0] -= 2  # x-axis
-        inside_shape[1] -= 2  # y-axis
-        inside_shape = tuple(inside_shape)
-
-        # Use order 2 precision derivative
-        self.grad_values[1:-1, 1:-1, :] = \
-            np.stack(((self.values[2:, 1:-1] - self.values[:-2, 1:-1]) / (2 * self.spacings[-2]),
-                      (self.values[1:-1, 2:] - self.values[1:-1, :-2]) / (2 * self.spacings[-1])),
-                     axis=-1
-                     ).reshape(inside_shape)
-        # Padding to full grid
-        # Borders
-        self.grad_values[0, 1:-1, :] = self.grad_values[1, 1:-1, :]
-        self.grad_values[-1, 1:-1, :] = self.grad_values[-2, 1:-1, :]
-        self.grad_values[1:-1, 0, :] = self.grad_values[1:-1, 1, :]
-        self.grad_values[1:-1, -1, :] = self.grad_values[1:-1, -2, :]
-        # Corners
-        self.grad_values[0, 0, :] = self.grad_values[1, 1, :]
-        self.grad_values[0, -1, :] = self.grad_values[1, -2, :]
-        self.grad_values[-1, 0, :] = self.grad_values[-2, 1, :]
-        self.grad_values[-1, -1, :] = self.grad_values[-2, -2, :]
+        return cls(values, bounds, **kwargs)
 
 
 class GreatCircleObs(Obstacle):
@@ -258,14 +282,14 @@ class GreatCircleObs(Obstacle):
         self.dir_vect /= np.linalg.norm(self.dir_vect)
         super().__init__()
 
-    def value(self, x):
+    def value(self, _, x):
         if self.z1 is not None:
             if not Utils.in_lonlat_box(self.z1, self.z2, x):
                 return 1.
         X = np.array((np.cos(x[0]) * np.cos(x[1]), np.sin(x[0]) * np.cos(x[1]), np.sin(x[1])))
         return X @ self.dir_vect
 
-    def d_value(self, x):
+    def d_value(self, _, x):
         if self.z1 is not None:
             if not Utils.in_lonlat_box(self.z1, self.z2, x):
                 return np.array((1., 1.))
