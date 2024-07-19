@@ -277,11 +277,11 @@ class GreatCircleObs(Obstacle):
 def discretize_obs(obs: Obstacle,
                    shape: tuple[int, int],
                    bl: Optional[ndarray] = None,
-                   tr: Optional[ndarray] = None):
+                   tr: Optional[ndarray] = None, no_diff=False):
     if not is_discrete_obstacle(obs):
         if bl is None or tr is None:
             raise Exception(f'Missing bounding box (bl, tr) to sample unbounded {obs}')
-        return DiscreteObs.from_obs(obs, np.array((bl, tr)).transpose(), nx=shape[0], ny=shape[1], no_diff=True)
+        return DiscreteObs.from_obs(obs, np.array((bl, tr)).transpose(), nx=shape[0], ny=shape[1], no_diff=no_diff)
     else:
         if shape[0] != obs.values.shape[0] or shape[1] != obs.values.shape[1]:
             warnings.warn(f'Grid shape {shape} differs from DiscreteObs native grid. Resampling not implemented yet: '

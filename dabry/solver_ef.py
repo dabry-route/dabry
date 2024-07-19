@@ -353,11 +353,12 @@ class Site:
             self.status_int = IntStatus.FAILURE
             return
         self.ode_legs.append(ode_aug_res)
-        i_min, i_max = self.time_to_index(ode_aug_res.t[0]), self.time_to_index(ode_aug_res.t[-1]) + 1
-        if ode_aug_res.obs_name is None:
-            self.data_disc[i_min:i_max, :] = ode_aug_res.y.transpose()
-        else:
-            self.data_disc[i_min:i_max, :3] = ode_aug_res.y.transpose()
+        if len(ode_aug_res.t) > 0:
+            i_min, i_max = self.time_to_index(ode_aug_res.t[0]), self.time_to_index(ode_aug_res.t[-1]) + 1
+            if ode_aug_res.obs_name is None:
+                self.data_disc[i_min:i_max, :] = ode_aug_res.y.transpose()
+            else:
+                self.data_disc[i_min:i_max, :3] = ode_aug_res.y.transpose()
         self.update_status()
 
     def update_status(self):
@@ -449,8 +450,8 @@ class SiteManager:
             return s_prefix
         return "{prefix}-{depth}-{location}".format(
             prefix=s_prefix,
-            depth=str(depth),  # .rjust(self._n_depth_chars, '0'),
-            location=str(location)  # .rjust(self._n_location_chars, '0')
+            depth=str(depth).rjust(self._n_depth_chars, '0'),
+            location=str(location).rjust(self._n_location_chars, '0')
         )
 
     @staticmethod
@@ -525,10 +526,10 @@ class SolverEF(ABC):
         # Problem is assumed to be well conditioned ! (non-dimensionalized)
         self.pb = pb
         if total_duration is None:
-            # Inflation factor needed for particular case when heuristic trajectory
-            # is indeed leading to optimal cost
-            self.total_duration = 1.1 * self.pb.auto_time_upper_bound()
-            if self.total_duration == np.infty:
+            # Inflation factor for obstacle cases
+            factor = 1.3 if len(self.pb.obstacles) > 0 else 1
+            self.total_duration = factor * self.pb.auto_time_upper_bound()
+            if self.total_duration == np.inf:
                 self.total_duration = 2 * self.pb.length_reference / self.pb.srf_max
         else:
             self.total_duration = total_duration
@@ -565,6 +566,7 @@ class SolverEF(ABC):
             self._integrator_kwargs['max_step'] = self.max_int_step
 
         self._cost_map = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
+        self._cost_map_no_g = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
         self.chrono = Chrono(f'Solving problem "{self.pb.name}"')
 
     @property
@@ -629,9 +631,14 @@ class SolverEF(ABC):
         self.pb.io.clean_output_dir()
         self.pb.save_trajs(self.trajs, group_name='ef_01', rescale=rescale)
         self.save_info()
-        self.pb.unscaled.save_ff()
-        self.pb.unscaled.save_obs()
-        self.pb.unscaled.save_info()
+        self.pb.save_ff()
+        self.pb.save_obs()
+        self.pb.save_info()
+        with open(os.path.join(self.pb.io.case_dir, 'cost_map.npy'), 'wb') as f:
+            np.save(f, self.get_cost_map())
+        # with open(os.path.join(self.pb.io.case_dir, 'cost_map_no_guarantee.npy'), 'wb') as f:
+        #     np.save(f, self.get_cost_map_no_guarantee())
+
 
     def save_info(self):
         pb_info = {
@@ -650,7 +657,11 @@ class SolverEF(ABC):
 
 class SolverEFResampling(SolverEF):
 
-    def __init__(self, *args, max_dist: Optional[float] = None, **kwargs):
+    def __init__(self, *args,
+                 max_dist: Optional[float] = None,
+                 mode_resamp_interp: bool = False,
+                 mode_obs_stop: bool = False,
+                 **kwargs):
         super().__init__(*args, **kwargs)
         self.max_dist = max_dist if max_dist is not None else self.target_radius
         self._max_dist_sq = self.max_dist ** 2
@@ -667,6 +678,8 @@ class SolverEFResampling(SolverEF):
         self._ff_max_norm = np.max(np.linalg.norm(ff_values, axis=-1))
         self.distance_inflat = 1 if self.pb.coords == Coords.CARTESIAN else \
             np.cos(np.max((np.abs(self.pb.bl[1]), np.abs(self.pb.tr[1]))))
+        self.mode_resamp_interp = mode_resamp_interp
+        self.mode_obs_stop = mode_obs_stop
 
     def create_initial_sites(self):
         self.initial_sites = [
@@ -705,7 +718,7 @@ class SolverEFResampling(SolverEF):
                 trigo = cross >= 0.
                 dot = np.dot(grad_obs, self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, state_cur)),
                                                        obs_name, trigo)[1:3])
-                if not np.isclose(dot, 0):
+                if not np.isclose(dot, 0) or self.mode_obs_stop:
                     site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
                     break
                 x0 = np.hstack((site.cost_cur, state_cur))
@@ -812,8 +825,11 @@ class SolverEFResampling(SolverEF):
         return [site for site in self.sites.values() if len(site.ode_legs) > 0]
 
     def get_cost_map(self):
-        self._cost_map.update_from_sites(self.sites_non_void, 0, self.validity_index)
         return self._cost_map.values
+
+    def get_cost_map_no_guarantee(self):
+        self._cost_map_no_g.update_from_sites(self.sites_non_void, 0, self.n_time - 1)
+        return self._cost_map_no_g.values
 
     def site_front(self, index_t):
         site0 = list(self.sites.values())[0]
@@ -868,7 +884,7 @@ class SolverEFResampling(SolverEF):
                 if not distance_crit and site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and \
                         not site.neutered:
                     new_site = self.binary_resample(site, site_nb, i)
-                    if self.pb.in_obs_tol(new_site.state_cur):
+                    if self.pb.in_obs(new_site.state_cur):
                         new_site = None
                         site.neuter(NeuteringReason.INTERP_CHILD_IN_OBS, self.times[i])
                     break
@@ -891,7 +907,7 @@ class SolverEFResampling(SolverEF):
 
     def binary_resample(self, site_prev: Site, site_next: Site, index: int):
         if site_prev.in_obs_at_index(index) == site_next.in_obs_at_index(index) and \
-                not site_prev.interpolated and not site_next.interpolated:
+                not site_prev.interpolated and not site_next.interpolated and not self.mode_resamp_interp:
             return self.site_mngr.site_from_mean_init_cond(site_prev, site_next, index)
         else:
             return self.site_mngr.site_from_interpolation(site_prev, site_next, index)
@@ -937,13 +953,8 @@ class SolverEFResampling(SolverEF):
 
     def post_solve(self):
         super().post_solve()
-        # with Chrono('Discretizing'):
-        #     cache_count = 0
-        #     sites_non_void = self.sites_non_void
-        #     for site in tqdm(sites_non_void, file=sys.stdout):
-        #         cache_count += site.discretize()
-        #     total = len(sites_non_void) * self.n_time
-        #     print(f'Cached: {cache_count}/{total} ({100 * cache_count/total:.2f}%)')
+        with Chrono('Computing cost map'):
+            self._cost_map.update_from_sites(self.sites_non_void, 0, self.validity_index)
 
 
 class SolverEFBisection(SolverEFResampling):

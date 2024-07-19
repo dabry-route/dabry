@@ -1,4 +1,5 @@
 import os
+import pickle
 import sys
 import warnings
 from abc import ABC
@@ -10,6 +11,7 @@ import h5py
 import numpy as np
 import pygrib
 from numpy import ndarray, pi, sin, cos
+from scipy.interpolate import RegularGridInterpolator
 from tqdm import tqdm
 
 from dabry.misc import Utils, Coords, Units
@@ -181,8 +183,7 @@ class DiscreteFF(FlowField):
     Handles flow field loading from H5 format and derivative computation
     """
 
-    def __init__(self, values: ndarray, bounds: ndarray, coords: Coords, grad_values: Optional[ndarray] = None,
-                 no_diff=False):
+    def __init__(self, values: ndarray, bounds: ndarray, coords: Coords, no_diff=False, interp=None):
         super().__init__(nt_int=values.shape[0] if values.ndim == 4 else None)
 
         self.is_dumpable = 2
@@ -196,23 +197,34 @@ class DiscreteFF(FlowField):
         self.bounds = bounds
         self.coords = coords
 
-        self.spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(self.values.shape[:-1]) -
-                                                         np.ones(self.values.ndim - 1))
-
-        self.grad_values = grad_values
-
-        if not no_diff:
-            if self.grad_values is None:
-                self.compute_derivatives()
-
         if values.ndim == 3:
             self.value = self._value_steady
             self.d_value = self._d_value_steady
+            bl = bounds.T[0]
+            tr = bounds.T[1]
+            xx = np.linspace(bl[0], tr[0], values.shape[0])
+            yy = np.linspace(bl[1], tr[1], values.shape[1])
+            points = (xx, yy)
+
         else:
             self.value = self._value_unsteady
             self.d_value = self._d_value_unsteady
             self.t_start = bounds[0, 0]
             self.t_end = bounds[0, 1]
+            bl = bounds.T[0]
+            tr = bounds.T[1]
+            tt = np.linspace(bl[0], tr[0], values.shape[0])
+            xx = np.linspace(bl[1], tr[1], values.shape[1])
+            yy = np.linspace(bl[2], tr[2], values.shape[2])
+            points = (tt, xx, yy)
+
+        if interp is None:
+            # with Chrono('Building flow field spline interpolation'):
+            self.interp = RegularGridInterpolator(points, values,
+                                                  method='cubic' if not no_diff else 'linear',
+                                                  bounds_error=False, fill_value=None)
+        else:
+            self.interp = interp
 
     @property
     def times(self):
@@ -227,6 +239,15 @@ class DiscreteFF(FlowField):
         if no_diff is not None:
             kwargs['no_diff'] = no_diff
         return cls(ff['values'], ff['bounds'], Coords.from_string(ff['coords']), **kwargs)
+
+    @classmethod
+    def from_interp(cls, filepath):
+        with open(filepath, 'rb') as f:
+            interp = pickle.load(f)
+        bounds = np.array(((interp.grid[0][0], interp.grid[0][-1]),
+                           (interp.grid[1][0], interp.grid[1][-1]),
+                           (interp.grid[2][0], interp.grid[2][-1])))
+        return cls(interp.values, bounds, Coords.CARTESIAN, interp=interp)
 
     @classmethod
     def from_h5(cls, filepath, **kwargs):
@@ -291,7 +312,6 @@ class DiscreteFF(FlowField):
         spacings = (bounds[:, 1] - bounds[:, 0]) / (np.array(shape) - np.ones(bounds.shape[0]))
         _nt = nt if t_end is not None else 1
         values = np.zeros(shape + (2,))
-        grad_values = np.zeros(shape + (2, 2)) if not kwargs.get('no_diff') else None
         for k in range(_nt):
             t = bounds[0, 0] + k * spacings[0] if t_end is not None else t_start
             for i in range(nx):
@@ -301,16 +321,11 @@ class DiscreteFF(FlowField):
                         values[i, j, :] = ff.value(t, state)
                     else:
                         values[k, i, j, :] = ff.value(t, state)
-                    if not kwargs.get('no_diff'):
-                        if t_end is None:
-                            grad_values[i, j, ...] = ff.d_value(t, state)
-                        else:
-                            grad_values[k, i, j, ...] = ff.d_value(t, state)
 
         coords = coords if coords is not None else \
             Coords.GCS if hasattr(ff, 'coords') and ff.coords == Coords.GCS \
                 else Coords.CARTESIAN
-        return cls(values, bounds, coords, grad_values=grad_values, **kwargs)
+        return cls(values, bounds, coords, **kwargs)
 
     @classmethod
     def from_cds(cls, grid_bounds: ndarray, t_start: Union[float | datetime], t_end: Union[float | datetime],
@@ -441,7 +456,7 @@ class DiscreteFF(FlowField):
         values = np.array(uv_frames)
 
         return cls(values, np.column_stack((np.array((ts[0], ts[-1])), grid_bounds.transpose())).transpose(),
-                   Coords.GCS, grad_values=None, **kwargs)
+                   Coords.GCS, **kwargs)
 
     def value(self, t, x):
         """
@@ -453,10 +468,10 @@ class DiscreteFF(FlowField):
         pass
 
     def _value_steady(self, _, x: ndarray):
-        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, x)
+        return self.interp(x)[0]
 
     def _value_unsteady(self, t, x):
-        return Utils.interpolate(self.values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)))
+        return self.interp(np.array((t, *tuple(x))))[0]
 
     def d_value(self, t, x):
         """
@@ -468,44 +483,11 @@ class DiscreteFF(FlowField):
         pass
 
     def _d_value_steady(self, _, x):
-        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, x,
-                                 ndim_values_data=2)
+        return np.stack((self.interp(x, nu=(1, 0)), self.interp(x, nu=(0, 1))), axis=-1)[0]
 
     def _d_value_unsteady(self, t, x):
-        return Utils.interpolate(self.grad_values, self.bounds.transpose()[0], self.spacings, np.array((t,) + tuple(x)),
-                                 ndim_values_data=2)
-
-    def compute_derivatives(self):
-        """
-        Computes the derivatives of the flow field with a central difference scheme
-        on the flow field native grid
-        """
-        grad_shape = self.values.shape + (2,)
-        self.grad_values = np.zeros(grad_shape)
-        inside_shape = np.array(grad_shape, dtype=int)
-        inside_shape[-4] -= 2  # x-axis
-        inside_shape[-3] -= 2  # y-axis
-        inside_shape = tuple(inside_shape)
-
-        # Use order 2 precision derivative
-        self.grad_values[..., 1:-1, 1:-1, :, :] = \
-            np.stack(((self.values[..., 2:, 1:-1, 0] - self.values[..., :-2, 1:-1, 0]) / (2 * self.spacings[-2]),
-                      (self.values[..., 1:-1, 2:, 0] - self.values[..., 1:-1, :-2, 0]) / (2 * self.spacings[-1]),
-                      (self.values[..., 2:, 1:-1, 1] - self.values[..., :-2, 1:-1, 1]) / (2 * self.spacings[-2]),
-                      (self.values[..., 1:-1, 2:, 1] - self.values[..., 1:-1, :-2, 1]) / (2 * self.spacings[-1])),
-                     axis=-1
-                     ).reshape(inside_shape)
-        # Padding to full grid
-        # Borders
-        self.grad_values[..., 0, 1:-1, :, :] = self.grad_values[..., 1, 1:-1, :, :]
-        self.grad_values[..., -1, 1:-1, :, :] = self.grad_values[..., -2, 1:-1, :, :]
-        self.grad_values[..., 1:-1, 0, :, :] = self.grad_values[..., 1:-1, 1, :, :]
-        self.grad_values[..., 1:-1, -1, :, :] = self.grad_values[..., 1:-1, -2, :, :]
-        # Corners
-        self.grad_values[..., 0, 0, :, :] = self.grad_values[..., 1, 1, :, :]
-        self.grad_values[..., 0, -1, :, :] = self.grad_values[..., 1, -2, :, :]
-        self.grad_values[..., -1, 0, :, :] = self.grad_values[..., -2, 1, :, :]
-        self.grad_values[..., -1, -1, :, :] = self.grad_values[..., -2, -2, :, :]
+        z = np.array((t, *tuple(x)))
+        return np.stack((self.interp(z, nu=(0, 1, 0)), self.interp(z, nu=(0, 0, 1))), axis=-1)[0]
 
     def dualize(self):
         # Override method so that the dual of a DiscreteFF stays a DiscreteFF and
@@ -1188,3 +1170,154 @@ def save_ff(ff: FlowField, filepath: str,
             tr: Optional[ndarray] = None):
     dff = discretize_ff(ff, nx, ny, nt, bl, tr)
     np.savez(filepath, values=dff.values, bounds=dff.bounds, coords=np.array(dff.coords.value))
+
+
+def array_from_cdsgrib(field_names: tuple[str],
+                       grid_bounds: ndarray, t_start: Union[float | datetime], t_end: Union[float | datetime],
+                       data_path: Optional[str] = None,
+                       is_longitude_0_360=True, **kwargs):
+    """
+    :param field_names: A tuple of field names extracted from ERA5 using cdsapi
+    :param grid_bounds: A (2,2) array where the zeroth element corresponds to the bounds of the zeroth axis
+    and the first element to the bounds of the first axis. In RADIANS.
+    :param t_start: The required start time for flow field
+    :param t_end: The required end time for flow field
+    :param data_path: Path to the grib files
+    :param is_longitude_0_360: True for ERA5 Reanalysis extracted from CDS. False for ECMWF forecast (-180, 180).
+    :return: A numpy array of the shape of the time-space grid + the number of fields (nt, nx, ny, n_fields)
+    """
+    t_start = t_start.timestamp() if isinstance(t_start, datetime) else t_start
+    t_end = t_end.timestamp() if isinstance(t_end, datetime) else t_end
+    single_frame = abs(t_start - t_end) < 60
+    bl, tr = grid_bounds.transpose()[0], grid_bounds.transpose()[1]
+    bl_d, tr_d = bl * Utils.RAD_TO_DEG, tr * Utils.RAD_TO_DEG
+
+    if is_longitude_0_360:
+        lon_b = Utils.rectify(bl_d[0], tr_d[0])
+    else:
+        lon_b = bl_d[0], tr_d[0]
+    field_file = sorted(os.listdir(data_path))[0]
+    wind_start_date = datetime(int(field_file[:4]), int(field_file[4:6]), int(field_file[6:8]))
+    field_file = sorted(os.listdir(data_path))[-1]
+    wind_stop_date = datetime(int(field_file[:4]), int(field_file[4:6]), int(field_file[6:8]), 21)
+    dates = [wind_start_date, wind_stop_date]
+    for k, (t_bound, wind_date_bound, op) in enumerate(zip((t_start, t_end), (wind_start_date, wind_stop_date),
+                                                           ('<', '>'))):
+        adj = "lower" if op == "<" else "upper"
+        if t_bound is None:
+            print(f'[CDS wind] Using field time {adj} bound {wind_date_bound}')
+            dates[k] = wind_date_bound
+        else:
+            if not isinstance(t_bound, datetime):
+                # Assuming float
+                _date_bound = datetime.fromtimestamp(t_bound)
+            else:
+                _date_bound = t_bound
+            if (op == '<' and _date_bound < wind_date_bound) or (op == '>' and _date_bound > wind_date_bound):
+                print(f'[CDS wind] Clipping {adj} bound to field time bound {wind_date_bound}')
+                dates[k] = wind_date_bound
+            else:
+                dates[k] = _date_bound
+
+    grb = pygrib.open(os.path.join(data_path, os.listdir(data_path)[0]))
+    grb_u = grb.select(name=field_names[0])
+    if lon_b[1] > 360:
+        # Has to extract in two steps
+        data1 = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=360)
+        data2 = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=0, lon2=lon_b[1] - 360)
+        lons1 = Utils.DEG_TO_RAD * Utils.to_m180_180(data1[2]).transpose()
+        lons2 = Utils.DEG_TO_RAD * Utils.to_m180_180(data2[2]).transpose()
+        lats1 = Utils.DEG_TO_RAD * data1[1].transpose()
+        lats2 = Utils.DEG_TO_RAD * data2[1].transpose()
+        lons = np.concatenate((lons1, lons2))
+        lats = np.concatenate((lats1, lats2))
+    else:
+        data = grb_u[0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])
+        lons = Utils.DEG_TO_RAD * Utils.to_m180_180(data[2]).transpose()
+        lats = Utils.DEG_TO_RAD * data[1].transpose()
+
+    shape = lons.shape
+    print(shape)
+
+    # Get wind and timestamps
+    fields_frames = []
+    ts = []
+    start_date_rounded = datetime(dates[0].year, dates[0].month, dates[0].day, 0, 0)
+    stop_date_rounded = datetime(dates[1].year, dates[1].month, dates[1].day, 0, 0) + timedelta(days=1)
+    startd_rounded = datetime(dates[0].year, dates[0].month, dates[0].day, 3 * (dates[0].hour // 3), 0)
+    stopd_rounded = datetime(dates[1].year, dates[1].month, dates[1].day, 0, 0) + timedelta(
+        hours=3 * (1 + (dates[1].hour // 3)))
+    one = False
+    field_srcfiles = []
+    for field_file in sorted(os.listdir(data_path)):
+        field_date = datetime(int(field_file[:4]), int(field_file[4:6]), int(field_file[6:8]))
+        if field_date < start_date_rounded:
+            continue
+        if field_date >= stop_date_rounded:
+            continue
+        if one and single_frame:
+            break
+        field_srcfiles.append(field_file)
+
+    for field_file in tqdm(field_srcfiles):
+        grbs = pygrib.open(os.path.join(data_path, field_file))
+        grb_fields = [grbs.select(name=field_name) for field_name in field_names]
+        for i in range(len(grb_fields[0])):
+            date = f'{grb_fields[0][i]["date"]:0>8}'
+            hours = f'{grb_fields[0][i]["time"]:0>4}'
+            t = datetime(int(date[:4]), int(date[4:6]), int(date[6:8]),
+                         int(hours[:2]), int(hours[2:4]))
+            if t < startd_rounded:
+                continue
+            if t > stopd_rounded:
+                continue
+            if one and single_frame:
+                break
+            one = True
+            fields = []
+            if lon_b[1] > 360:
+                for grb_field in grb_fields:
+                    f1 = grb_field[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=360)[0].transpose()
+                    f2 = grb_field[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=0, lon2=lon_b[1] - 360)[0].transpose()
+                    fields.append(np.concatenate((f1, f2)))
+            else:
+                for grb_field in grb_fields:
+                    fields.append(
+                        grb_field[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose())
+            fields_frames.append(np.stack(fields, axis=-1))
+            ts.append(t)
+
+    return ts, lons, lats, np.stack(fields_frames, axis=0)
+
+
+def array_from_ecmwf_fc(field_names: tuple[str], grid_bounds: ndarray, file_path: str):
+    """
+    Return a stack of time-space fields contained in a grib extracted from ECMWF opendata API with a
+    selection of fields of interest
+    """
+    bl, tr = grid_bounds.transpose()[0], grid_bounds.transpose()[1]
+    bl_d, tr_d = bl * Utils.RAD_TO_DEG, tr * Utils.RAD_TO_DEG
+    lon_b = bl_d[0], tr_d[0]
+
+    grbs = pygrib.open(file_path)
+    grb_fields = [grbs.select(name=field_name) for field_name in field_names]
+    n_time = len(grb_fields[0])
+    # TODO: at this point handling data near -180 or +180 may be done wrong
+    _, lats, lons = grb_fields[0][0].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])
+    print(lons.shape)
+
+    times = []
+    fields_frames = []
+    for i in tqdm(range(n_time)):
+        date = f'{grb_fields[0][i]["date"]:0>8}'
+        forecast_time = grb_fields[0][i]["forecastTime"]
+        t = datetime(int(date[:4]), int(date[4:6]), int(date[6:8])) + timedelta(seconds=forecast_time * 3600)
+        times.append(t)
+        fields = []
+        for grb_field in grb_fields:
+            fields.append(
+                grb_field[i].data(lat1=bl_d[1], lat2=tr_d[1], lon1=lon_b[0], lon2=lon_b[1])[0].transpose()
+            )
+        fields_frames.append(np.stack(fields, axis=-1))
+
+    return times, lons, lats, np.stack(fields_frames, axis=0)

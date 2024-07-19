@@ -259,12 +259,12 @@ class IOManager:
         """
         Standard case name
         """
-        slon = str(abs(round(x_init[0]))) + ('W' if x_init[0] < 0 else 'E')
-        slat = str(abs(round(x_init[1]))) + ('S' if x_init[1] < 0 else 'N')
-        tlon = str(abs(round(x_target[0]))) + ('W' if x_target[0] < 0 else 'E')
-        tlat = str(abs(round(x_target[1]))) + ('S' if x_target[1] < 0 else 'N')
+        slon = str(abs(round(Utils.RAD_TO_DEG * x_init[0]))) + ('W' if x_init[0] < 0 else 'E')
+        slat = str(abs(round(Utils.RAD_TO_DEG * x_init[1]))) + ('S' if x_init[1] < 0 else 'N')
+        tlon = str(abs(round(Utils.RAD_TO_DEG * x_target[0]))) + ('W' if x_target[0] < 0 else 'E')
+        tlat = str(abs(round(Utils.RAD_TO_DEG * x_target[1]))) + ('S' if x_target[1] < 0 else 'N')
         start_date = datetime.fromtimestamp(t_start)
-        return f'{slon}_{slat}_{tlon}_{tlat}_{strftime("%Y%m%d", start_date.timetuple())}_{start_date.hour:0>2}'
+        return f'gcs_{slon}_{slat}_{tlon}_{tlat}_{strftime("%Y%m%d", start_date.timetuple())}_{start_date.hour:0>2}'
 
     def process_grib(self, input_gribs, output_path, x_init, x_target, print_name=False):
         """
