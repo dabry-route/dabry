@@ -40,6 +40,13 @@ class Obstacle(ABC):
     def event(self, time: float, state_aug: ndarray):
         return self.value(time, state_aug[1:3])
 
+    @terminal
+    def event_tangency(self, time: float, state_aug: ndarray):
+        grad_obs = self.d_value(time, state_aug[1:3])
+        costate = state_aug[3:5]
+        return np.max((self.value(time, state_aug[1:3]) - 0.02,
+                      np.abs(np.dot(grad_obs / np.linalg.norm(grad_obs), - costate / np.linalg.norm(costate))) - 0.2))
+
     @abstractmethod
     def value(self, t: float, x: ndarray):
         """
@@ -110,10 +117,10 @@ class CircleObs(Obstacle):
         super().__init__()
 
     def value(self, t, x: ndarray):
-        return 0.5 * (np.sum(np.square(x - self.center)) - self._sqradius)
+        return np.linalg.norm(x - self.center) - self.radius
 
     def d_value(self, t, x: ndarray) -> ndarray:
-        return x - self.center
+        return (x - self.center) / np.linalg.norm(x - self.center)
 
 
 class FrameObs(Obstacle):

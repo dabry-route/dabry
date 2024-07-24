@@ -105,6 +105,7 @@ class ClosureReason(Enum):
     IMPOSSIBLE_OBS_TRACKING = 2
     FORCED_OBSTACLE_PENETRATION = 3
     INTEGRATION_FAILED = 4
+    OBS_TANGENCY_VIOLATION = 5
 
 
 class NeuteringReason(Enum):
@@ -557,6 +558,9 @@ class SolverEF(ABC):
             full_name = 'obs_' + name + '_' + str(n if n is not None else 0)
             self.events[full_name] = obs.event
             self.obstacles[full_name] = obs
+            # tangency_name = full_name + 'tang'
+            # self.events[tangency_name] = obs.event_tangency
+            # self.obstacles[tangency_name] = obs
         abs_max_step = self.total_duration / 2 if abs_max_step is None else abs_max_step
         self.max_int_step: Optional[float] = None if free_max_step else abs_max_step if rel_max_step is None else \
             min(abs_max_step, rel_max_step * self.total_duration)
@@ -714,9 +718,12 @@ class SolverEFResampling(SolverEF):
                 t_enter_obs = last_leg.events_dict[obs_name][0]
                 state_cur, costate_cur = site.state_cur, site.costate_cur
                 grad_obs = self.obstacles[obs_name].d_value(t_enter_obs, state_cur)
+                control_cur = self.pb.timeopt_control(state_cur, costate_cur)
+                # if np.abs(np.dot(grad_obs / np.linalg.norm(grad_obs), control_cur / np.linalg.norm(control_cur))) > 0.6:
+                #     site.close(ClosureReason.OBS_TANGENCY_VIOLATION)
+                #     break
                 cross = np.cross(grad_obs,
-                                 self.pb.model.dyn.value(t_enter_obs, state_cur,
-                                                         self.pb.timeopt_control(state_cur, costate_cur)))
+                                 self.pb.model.dyn.value(t_enter_obs, state_cur, control_cur))
                 trigo = cross >= 0.
                 dot = np.dot(grad_obs, self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, state_cur)),
                                                        obs_name, trigo)[1:3]) + self.obstacles[obs_name].d_value_dt(t_enter_obs, state_cur)
@@ -883,13 +890,20 @@ class SolverEFResampling(SolverEF):
                         (site.trigo_at_index(i) != site_nb.trigo_at_index(i)):
                     site.neuter(NeuteringReason.OBSTACLE_SPLITTING, self.times[i])
                     break
-                if not distance_crit and site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and \
-                        not site.neutered:
-                    new_site = self.binary_resample(site, site_nb, i)
-                    if self.pb.in_obs(new_site.t_cur, new_site.state_cur):
-                        new_site = None
-                        site.neuter(NeuteringReason.INTERP_CHILD_IN_OBS, self.times[i])
-                    break
+                if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
+                    obs_branching = \
+                        (site.index_closed == i and
+                         site.closure_reason == ClosureReason.OBS_TANGENCY_VIOLATION and
+                         site_nb.index_closed is None or site_nb.index_closed > i) or \
+                        (site.index_closed is None or site.index_closed > i and
+                         site_nb.index_closed == i and
+                         site_nb.closure_reason == ClosureReason.OBS_TANGENCY_VIOLATION)
+                    if not distance_crit: # or obs_branching:
+                        new_site = self.binary_resample(site, site_nb, i)
+                        if self.pb.in_obs(new_site.t_cur, new_site.state_cur):
+                            new_site = None
+                            site.neuter(NeuteringReason.INTERP_CHILD_IN_OBS, self.times[i])
+                        break
             # Update the neighbouring property
             site.next_nb[site.index_t_check_next: new_id_check_next + 1] = \
                 [site_nb] * (new_id_check_next - site.index_t_check_next + 1)
