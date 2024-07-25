@@ -519,7 +519,7 @@ class SolverEF(ABC):
                  abs_max_step: Optional[float] = None,
                  rel_max_step: Optional[float] = 0.01,
                  free_max_step: bool = False,
-                 tangency_tol: float = 0.785,
+                 tangency_tol: float = np.pi / 2,
                  cost_map_shape: Optional[tuple[int, int]] = (100, 100),
                  ivp_solver: str = 'RK45'):
         if mode not in self._ALL_MODES:
@@ -561,9 +561,6 @@ class SolverEF(ABC):
             full_name = 'obs_' + name + '_' + str(n if n is not None else 0)
             self.events[full_name] = obs.event
             self.obstacles[full_name] = obs
-            # tangency_name = full_name + 'tang'
-            # self.events[tangency_name] = obs.event_tangency
-            # self.obstacles[tangency_name] = obs
         abs_max_step = self.total_duration / 2 if abs_max_step is None else abs_max_step
         self.max_int_step: Optional[float] = None if free_max_step else abs_max_step if rel_max_step is None else \
             min(abs_max_step, rel_max_step * self.total_duration)
