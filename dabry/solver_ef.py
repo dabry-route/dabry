@@ -152,6 +152,7 @@ class Site:
         costate = 0.5 * (site_prev.costate(t_interp) / np.linalg.norm(site_prev.costate(t_interp)) +
                          site_next.costate(t_interp) / np.linalg.norm(site_next.costate(t_interp)))
         data_disc = 0.5 * (site_prev.data_disc + site_next.data_disc)
+        data_disc[index_t_check_next + 1:] = np.nan
         return cls(t_interp, cost, state, costate,
                    site_prev.time_grid, name, (site_prev.time_grid[0], t_interp),
                    site_prev=site_prev, site_next=site_next, index_t_check_next=index_t_check_next, data_disc=data_disc)
@@ -517,7 +518,8 @@ class SolverEF(ABC):
                  target_radius: Optional[float] = None,
                  abs_max_step: Optional[float] = None,
                  rel_max_step: Optional[float] = 0.01,
-                 free_max_step: bool = True,
+                 free_max_step: bool = False,
+                 tangency_tol: float = 0.785,
                  cost_map_shape: Optional[tuple[int, int]] = (100, 100),
                  ivp_solver: str = 'RK45'):
         if mode not in self._ALL_MODES:
@@ -543,6 +545,7 @@ class SolverEF(ABC):
         self.n_costate_norm = n_costate_norm
         self.max_depth = max_depth
         self.success = False
+        self.tangency_tol = tangency_tol
         self.depth = 0
         self._id_optitraj: int = 0
         self.events = {}
@@ -719,9 +722,11 @@ class SolverEFResampling(SolverEF):
                 state_cur, costate_cur = site.state_cur, site.costate_cur
                 grad_obs = self.obstacles[obs_name].d_value(t_enter_obs, state_cur)
                 control_cur = self.pb.timeopt_control(state_cur, costate_cur)
-                # if np.abs(np.dot(grad_obs / np.linalg.norm(grad_obs), control_cur / np.linalg.norm(control_cur))) > 0.6:
-                #     site.close(ClosureReason.OBS_TANGENCY_VIOLATION)
-                #     break
+                abs_dot = np.abs(np.dot(grad_obs / np.linalg.norm(grad_obs), control_cur / np.linalg.norm(control_cur)))
+                ang = np.pi/2 - np.arccos(abs_dot)
+                if ang > self.tangency_tol:
+                    site.close(ClosureReason.OBS_TANGENCY_VIOLATION)
+                    break
                 cross = np.cross(grad_obs,
                                  self.pb.model.dyn.value(t_enter_obs, state_cur, control_cur))
                 trigo = cross >= 0.

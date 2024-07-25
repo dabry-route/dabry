@@ -321,12 +321,14 @@ class NavigationProblem:
         # In the new system, srf_max is unit
         srf_max = 1.
 
-        wrapper_ff = WrapperFF(self.model.ff, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
+        time_origin = self.model.ff.t_start
+
+        wrapper_ff = WrapperFF(self.model.ff, scale_length, bl_wrapper, scale_time, time_origin)
 
         obstacles = self.obstacles.copy()
         obstacles.remove(self.obs_frame)
-        obstacles = [WrapperObs(obs, scale_length, bl_wrapper) for obs in obstacles]
-        penalty = WrapperPen(self.penalty, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
+        obstacles = [WrapperObs(obs, scale_length, bl_wrapper, scale_time, time_origin) for obs in obstacles]
+        penalty = WrapperPen(self.penalty, scale_length, bl_wrapper, scale_time, time_origin)
         return NavigationProblem(wrapper_ff, x_init, x_target, srf_max,
                                  bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty,
                                  name=self.name, unscaled=self)
