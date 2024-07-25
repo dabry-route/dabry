@@ -724,9 +724,7 @@ class SolverEFResampling(SolverEF):
                 control_cur = self.pb.timeopt_control(state_cur, costate_cur)
                 abs_dot = np.abs(np.dot(grad_obs / np.linalg.norm(grad_obs), control_cur / np.linalg.norm(control_cur)))
                 ang = np.pi/2 - np.arccos(abs_dot)
-                if ang > self.tangency_tol:
-                    site.close(ClosureReason.OBS_TANGENCY_VIOLATION)
-                    break
+                tangency_violation = ang > self.tangency_tol
                 cross = np.cross(grad_obs,
                                  self.pb.model.dyn.value(t_enter_obs, state_cur, control_cur))
                 trigo = cross >= 0.
@@ -736,8 +734,15 @@ class SolverEFResampling(SolverEF):
                     site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
                     break
                 x0 = np.hstack((site.cost_cur, state_cur))
-                ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, obs_name, trigo)
+                if tangency_violation:
+                    t_stop = self.times[self.times > t_enter_obs][0]
+                else:
+                    t_stop = t_target
+                ode_aug_res = self.integrate_captive(site.t_cur, t_stop, x0, obs_name, trigo)
                 site.add_leg(ode_aug_res)
+                if tangency_violation:
+                    site.close(ClosureReason.OBS_TANGENCY_VIOLATION)
+                    break
             elif site.status_int == IntStatus.OBSTACLE:
                 x0 = np.hstack((site.cost_cur, site.state_cur))
                 ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, site.obs_cur, site.trigo_cur)
