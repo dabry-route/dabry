@@ -1,7 +1,10 @@
+import itertools
 import warnings
 from typing import Union, Optional
 
+import matplotlib
 import numpy as np
+from matplotlib import pyplot as plt, patches
 
 from dabry.flowfield import DiscreteFF
 from dabry.obstacle import CircleObs, FrameObs, is_frame_obstacle, is_circle_obstacle
@@ -214,3 +217,122 @@ def solver_structure(solver: SolverEFResampling):
 
     fig.update_layout(width=800, height=800)
     return fig
+
+
+def static_figure(solver, ff_on=False, no_quiver=False, ff_sub=1, t_min=None, t_max=None):
+    plt.rc('font', size=18)
+    plt.rc('axes', titlesize=18)
+    plt.rc('axes', labelsize=18)
+    plt.rc('xtick', labelsize=18)
+    plt.rc('ytick', labelsize=18)
+    plt.rc('legend', fontsize=10)
+    plt.rc('mathtext', fontset='cm')
+    plt.rc('text', usetex=True)
+    if t_min is None:
+        t_min = 0
+    if t_max is None:
+        t_max = solver.total_duration
+    norm = matplotlib.colors.Normalize(vmin=0, vmax=t_max, clip=True)
+    c_levels = np.arange(0, t_max + 0.01, 0.1)
+    nrows, ncols = 2, 3
+    fig, axs = plt.subplots(nrows, ncols, figsize=1.1 * np.array((12, 8)))
+    times = np.linspace(t_min, t_max, 7)
+    for k, (i, j) in enumerate(itertools.product(range(nrows), range(ncols))):
+        t_cur_m1 = times[k]
+        if k == 0:
+            t_cur_m1 = 0
+        t_cur = times[k + 1]
+        levels = np.hstack((c_levels[c_levels < t_cur], t_cur))
+        ax = axs[i, j]
+        ax.axis('equal')
+        ax.set_xlim(solver.pb.bl[0], solver.pb.tr[0])
+        ax.set_ylim(solver.pb.bl[1], solver.pb.tr[1])
+        points_scatter = np.zeros((len(solver.trajs), 2))
+        for i_traj, traj in enumerate(solver.trajs):
+            sl = np.logical_and(t_cur_m1 < traj.times, traj.times < t_cur)
+            ax.plot(*traj.states[sl].T, color='grey', zorder=4)
+            points_scatter[i_traj, :] = traj.states[sl][-1]
+        ax.scatter(*points_scatter.T, color='black', s=10, zorder=5)
+        for site in solver.solution_sites:
+            ax.plot(*site.traj.states[site.traj.times < t_cur].T, color='black', zorder=8)
+        if solver.solution_site is not None:
+            ax.plot(*solver.solution_site.traj.states[solver.solution_site.traj.times < t_cur].T, color='red', zorder=8)
+            ax.scatter(*solver.solution_site.traj.states[solver.solution_site.traj.times < t_cur][-1], color='red',
+                       s=10, zorder=8)
+        if not ff_on:
+            if k == nrows * ncols - 1:
+                c = ax.contourf(solver._cost_map.grid_vectors[1:-1, 1:-1, 0],
+                                solver._cost_map.grid_vectors[1:-1, 1:-1, 1],
+                                solver._cost_map.values[1:-1, 1:-1], levels=levels,
+                                cmap='jet', norm=norm, zorder=4, alpha=0.5)
+                c = ax.contour(solver._cost_map.grid_vectors[1:-1, 1:-1, 0],
+                               solver._cost_map.grid_vectors[1:-1, 1:-1, 1],
+                               solver._cost_map.values[1:-1, 1:-1], levels=c_levels[c_levels < t_cur],
+                               alpha=1, colors=((0.2, 0.2, 0.2),) if not ff_on else 'black', zorder=5)
+                ax.clabel(c, c.levels, inline=True, fontsize=15)
+        else:
+            ff = solver.pb.model.ff
+            grid_vectors_ff = np.stack(
+                np.meshgrid(
+                    np.linspace(
+                        ff.bounds[-2, 0],
+                        ff.bounds[-2, 1],
+                        ff.values.shape[-3]
+                    ),
+                    np.linspace(
+                        ff.bounds[-1, 0],
+                        ff.bounds[-1, 1],
+                        ff.values.shape[-2]
+                    ), indexing='ij'), -1)
+            grid_vectors_ff = grid_vectors_ff[::ff_sub, ::ff_sub]
+            t_virt_ff = (t_cur - ff.bounds[0, 0]) / (ff.bounds[0, 1] - ff.bounds[0, 0])
+            it = np.floor(t_virt_ff * (ff.values.shape[0] - 1)).astype(np.int32)
+            alpha = t_virt_ff * ff.values.shape[0] - it
+            if it == ff.values.shape[0]:
+                it = ff.values.shape[0] - 2
+                alpha = 1
+            ff_frame = (1 - alpha) * ff.values[it, ::ff_sub, ::ff_sub] + alpha * ff.values[it + 1, ::ff_sub, ::ff_sub]
+            ff_norms = np.linalg.norm(ff_frame, axis=-1)
+            ax.pcolormesh(grid_vectors_ff[..., 0], grid_vectors_ff[..., 1],
+                          ff_norms, zorder=2,
+                          shading='gouraud', cmap='turbo')
+            rect = patches.Rectangle(solver.pb.bl, solver.pb.tr[0] - solver.pb.bl[0], solver.pb.tr[1] - solver.pb.bl[1],
+                                     alpha=0.3, color='white', zorder=3)
+            ax.add_patch(rect)
+            if not no_quiver:
+                ax.quiver(grid_vectors_ff[..., 0], grid_vectors_ff[..., 1], ff_frame[..., 0], ff_frame[..., 1],
+                          zorder=4)
+
+        obs = solver.pb.obstacles[0]
+        grid_vectors_obs = np.stack(
+            np.meshgrid(
+                np.linspace(
+                    obs.bounds[-2, 0],
+                    obs.bounds[-2, 1],
+                    obs.values.shape[-2]
+                ),
+                np.linspace(
+                    obs.bounds[-1, 0],
+                    obs.bounds[-1, 1],
+                    obs.values.shape[-1]
+                ), indexing='ij'), -1)
+        t_virt_obs = (t_cur - obs.bounds[0, 0]) / (obs.bounds[0, 1] - obs.bounds[0, 0])
+        it = np.floor(t_virt_obs * (obs.values.shape[0] - 1)).astype(np.int32)
+        alpha = t_virt_obs * obs.values.shape[0] - it
+        if it == obs.values.shape[0]:
+            it = obs.values.shape[0] - 2
+            alpha = 1
+        obs_frame = (1 - alpha) * obs.values[it] + alpha * obs.values[it + 1]
+        ax.contourf(grid_vectors_obs[..., 0], grid_vectors_obs[..., 1],
+                    obs_frame, levels=[-100, 0],
+                    colors='purple', extend='min', alpha=0.5, zorder=4)
+        ax.contour(grid_vectors_obs[..., 0], grid_vectors_obs[..., 1], obs_frame, levels=0, colors='purple', zorder=4)
+        ax.scatter(*solver.pb.x_init, color='black', edgecolor='white', s=100, zorder=10)
+        ax.scatter(*solver.pb.x_target, color='black', edgecolor='white', s=200, marker='*', zorder=10)
+        circ = patches.Circle(solver.pb.x_target, solver.target_radius, facecolor='none', edgecolor='black',
+                              linewidth=1, zorder=8)
+        ax.add_patch(circ)
+        ax.set_title(rf'$t={t_cur:.3g}$')
+        ax.set_xticks(np.arange(0, 1.1, 0.2))
+        ax.grid(True)
+    return fig, axs

@@ -1360,7 +1360,7 @@ class Display:
             self.draw_trajs()
             if self.has_display_rff:
                 self.draw_rff()
-            self.draw_obs()
+            #self.draw_obs()
             self.draw_pen()
             self.draw_solver()
             if self.leg is None:

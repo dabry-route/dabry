@@ -500,6 +500,8 @@ class SiteManager:
 
     def site_from_interpolation(self, site_prev: Site, site_next: Site, index: int) -> Site:
         name = self.name_from_parents_name(site_prev.name, site_next.name)
+        # TODO: check if this line is necessary
+        #site_prev.index_t_check_next = min(site_prev.index_t_check_next, index)
         return Site.from_interpolation(site_prev, site_next, site_prev.time_grid[index], name, index_t_check_next=index)
 
 
@@ -898,18 +900,17 @@ class SolverEFResampling(SolverEF):
                     site.neuter(NeuteringReason.OBSTACLE_SPLITTING, self.times[i])
                     break
                 if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
-                    obs_branching = \
-                        (site.index_closed == i and
-                         site.closure_reason == ClosureReason.OBS_TANGENCY_VIOLATION and
-                         site_nb.index_closed is None or site_nb.index_closed > i) or \
-                        (site.index_closed is None or site.index_closed > i and
-                         site_nb.index_closed == i and
-                         site_nb.closure_reason == ClosureReason.OBS_TANGENCY_VIOLATION)
-                    if not distance_crit: # or obs_branching:
-                        new_site = self.binary_resample(site, site_nb, i)
-                        if self.pb.in_obs(new_site.t_cur, new_site.state_cur):
-                            new_site = None
-                            site.neuter(NeuteringReason.INTERP_CHILD_IN_OBS, self.times[i])
+                    if not distance_crit:
+                        if self.pb.in_obs(site.time_grid[i],
+                                          0.5 * (site.state_at_index(i) + site_nb.state_at_index(i))):
+                            # Resampled child would be inside obstacle, find appropriate previous time index
+                            mids = [(site.time_grid[j], 0.5 * (site.state_at_index(j) + site_nb.state_at_index(j)))
+                                    for j in range(0, i + 1)]
+                            child_in_obs = np.array(list(map(lambda tx: len(self.pb.in_obs(*tx)) == 0, mids)))
+                            i_offset_out_obs = 0 if child_in_obs.size == 0 else child_in_obs[::-1].argmax()
+                        else:
+                            i_offset_out_obs = 0
+                        new_site = self.binary_resample(site, site_nb, i - i_offset_out_obs)
                         break
             # Update the neighbouring property
             site.next_nb[site.index_t_check_next: new_id_check_next + 1] = \
