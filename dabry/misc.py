@@ -69,7 +69,7 @@ def diadic_valuation(i: int):
     return 1 + diadic_valuation(i // 2)
 
 
-def directional_timeopt_control(ff_val: ndarray, d: ndarray, srf_max: float):
+def directional_timeopt_control(ff_val: ndarray, d: ndarray, srf_max: float, offset=0.):
     """
     :param ff_val: Flow field vector
     :param d: Direction vector (norm has no importance)
@@ -79,7 +79,8 @@ def directional_timeopt_control(ff_val: ndarray, d: ndarray, srf_max: float):
     _d = d / np.linalg.norm(d)
     n = np.array(((0., -1.), (1., 0.))) @ _d
     ff_ortho = ff_val @ n
-    angle = np.arctan2(np.sqrt(np.max((srf_max ** 2 - ff_ortho ** 2, 0.))), ff_ortho)
+    ff_ortho_corrected = ff_ortho - offset
+    angle = np.arctan2(np.sqrt(np.max((srf_max ** 2 - ff_ortho_corrected ** 2, 0.))), ff_ortho_corrected)
     u = srf_max * np.array(((np.cos(angle), -np.sin(angle)), (np.sin(angle), np.cos(angle)))) @ (-n)
     return u
 

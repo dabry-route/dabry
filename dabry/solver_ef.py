@@ -105,6 +105,7 @@ class ClosureReason(Enum):
     IMPOSSIBLE_OBS_TRACKING = 2
     FORCED_OBSTACLE_PENETRATION = 3
     INTEGRATION_FAILED = 4
+    OBS_TANGENCY_VIOLATION = 5
 
 
 class NeuteringReason(Enum):
@@ -151,6 +152,7 @@ class Site:
         costate = 0.5 * (site_prev.costate(t_interp) / np.linalg.norm(site_prev.costate(t_interp)) +
                          site_next.costate(t_interp) / np.linalg.norm(site_next.costate(t_interp)))
         data_disc = 0.5 * (site_prev.data_disc + site_next.data_disc)
+        data_disc[index_t_check_next + 1:] = np.nan
         return cls(t_interp, cost, state, costate,
                    site_prev.time_grid, name, (site_prev.time_grid[0], t_interp),
                    site_prev=site_prev, site_next=site_next, index_t_check_next=index_t_check_next, data_disc=data_disc)
@@ -498,6 +500,8 @@ class SiteManager:
 
     def site_from_interpolation(self, site_prev: Site, site_next: Site, index: int) -> Site:
         name = self.name_from_parents_name(site_prev.name, site_next.name)
+        # TODO: check if this line is necessary
+        #site_prev.index_t_check_next = min(site_prev.index_t_check_next, index)
         return Site.from_interpolation(site_prev, site_next, site_prev.time_grid[index], name, index_t_check_next=index)
 
 
@@ -516,7 +520,8 @@ class SolverEF(ABC):
                  target_radius: Optional[float] = None,
                  abs_max_step: Optional[float] = None,
                  rel_max_step: Optional[float] = 0.01,
-                 free_max_step: bool = True,
+                 free_max_step: bool = False,
+                 tangency_tol: float = np.pi / 2,
                  cost_map_shape: Optional[tuple[int, int]] = (100, 100),
                  ivp_solver: str = 'RK45'):
         if mode not in self._ALL_MODES:
@@ -542,6 +547,7 @@ class SolverEF(ABC):
         self.n_costate_norm = n_costate_norm
         self.max_depth = max_depth
         self.success = False
+        self.tangency_tol = tangency_tol
         self.depth = 0
         self._id_optitraj: int = 0
         self.events = {}
@@ -589,9 +595,11 @@ class SolverEF(ABC):
 
     def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool, ff_tweak=1.):
         sign = 2 * trigo - 1
-        d = np.array(((0., -sign), (sign, 0.))) @ self.obstacles[obstacle].d_value(x[1:3])
+        grad_obs = self.obstacles[obstacle].d_value(t, x[1:3])
+        d = np.array(((0., -sign), (sign, 0.))) @ grad_obs
         ff_val = ff_tweak * self.pb.model.ff.value(t, x[1:3])
-        return np.hstack((1., ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max)))
+        offset = sign * 1 / np.linalg.norm(grad_obs) * self.obstacles[obstacle].d_value_dt(t, x[1:3])
+        return np.hstack((1., ff_val + directional_timeopt_control(ff_val, d, self.pb.srf_max, offset)))
 
     @non_terminal
     def _event_target(self, _, x):
@@ -599,7 +607,7 @@ class SolverEF(ABC):
 
     @terminal
     def _event_exit_obs(self, t, x, obstacle: str, _: bool):
-        d_value = self.obstacles[obstacle].d_value(x[1:3])
+        d_value = self.obstacles[obstacle].d_value(t, x[1:3])
         n = d_value / np.linalg.norm(d_value)
         ff_val = self.pb.model.ff.value(t, x[1:3])
         ff_ortho = ff_val @ n
@@ -627,11 +635,9 @@ class SolverEF(ABC):
                     res[index] = traj.times[k]
         return res
 
-    def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
-                     bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
+    def save_results(self, rescale=False):
         self.pb.io.clean_output_dir()
-        self.pb.io.save_trajs(self.trajs, group_name='ef_01', scale_length=scale_length, scale_time=scale_time,
-                              bl=bl, time_offset=time_offset)
+        self.pb.save_trajs(self.trajs, group_name='ef_01', rescale=rescale)
         self.save_info()
         self.pb.save_ff()
         self.pb.save_obs()
@@ -640,6 +646,7 @@ class SolverEF(ABC):
             np.save(f, self.get_cost_map())
         # with open(os.path.join(self.pb.io.case_dir, 'cost_map_no_guarantee.npy'), 'wb') as f:
         #     np.save(f, self.get_cost_map_no_guarantee())
+
 
     def save_info(self):
         pb_info = {
@@ -712,19 +719,29 @@ class SolverEFResampling(SolverEF):
                 obs_name = active_obstacles[0]
                 t_enter_obs = last_leg.events_dict[obs_name][0]
                 state_cur, costate_cur = site.state_cur, site.costate_cur
-                grad_obs = self.obstacles[obs_name].d_value(state_cur)
+                grad_obs = self.obstacles[obs_name].d_value(t_enter_obs, state_cur)
+                control_cur = self.pb.timeopt_control(state_cur, costate_cur)
+                abs_dot = np.abs(np.dot(grad_obs / np.linalg.norm(grad_obs), control_cur / np.linalg.norm(control_cur)))
+                ang = np.pi/2 - np.arccos(abs_dot)
+                tangency_violation = ang > self.tangency_tol
                 cross = np.cross(grad_obs,
-                                 self.pb.model.dyn.value(t_enter_obs, state_cur,
-                                                         self.pb.timeopt_control(state_cur, costate_cur)))
+                                 self.pb.model.dyn.value(t_enter_obs, state_cur, control_cur))
                 trigo = cross >= 0.
                 dot = np.dot(grad_obs, self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, state_cur)),
-                                                       obs_name, trigo)[1:3])
+                                                       obs_name, trigo)[1:3]) + self.obstacles[obs_name].d_value_dt(t_enter_obs, state_cur)
                 if not np.isclose(dot, 0) or self.mode_obs_stop:
                     site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
                     break
                 x0 = np.hstack((site.cost_cur, state_cur))
-                ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, obs_name, trigo)
+                if tangency_violation:
+                    t_stop = self.times[self.times > t_enter_obs][0]
+                else:
+                    t_stop = t_target
+                ode_aug_res = self.integrate_captive(site.t_cur, t_stop, x0, obs_name, trigo)
                 site.add_leg(ode_aug_res)
+                if tangency_violation:
+                    site.close(ClosureReason.OBS_TANGENCY_VIOLATION)
+                    break
             elif site.status_int == IntStatus.OBSTACLE:
                 x0 = np.hstack((site.cost_cur, site.state_cur))
                 ode_aug_res = self.integrate_captive(site.t_cur, t_target, x0, site.obs_cur, site.trigo_cur)
@@ -738,7 +755,7 @@ class SolverEFResampling(SolverEF):
                 # factor shall have a small component inside the obstacle
                 gv_tweaked = self.dyn_constr(site.t_cur, np.hstack((site.cost_cur, site.state_cur)),
                                              site.obs_cur, site.trigo_cur, ff_tweak=1.01)[1:3]
-                if ls_float(np.dot(self.obstacles[site.obs_cur].d_value(site.state_cur), gv_tweaked), 0):
+                if ls_float(np.dot(self.obstacles[site.obs_cur].d_value(site.t_cur, site.state_cur), gv_tweaked), 0):
                     site.close(ClosureReason.FORCED_OBSTACLE_PENETRATION)
                     break
                 costate_artificial = - control_cur / np.linalg.norm(control_cur)
@@ -882,13 +899,19 @@ class SolverEFResampling(SolverEF):
                         (site.trigo_at_index(i) != site_nb.trigo_at_index(i)):
                     site.neuter(NeuteringReason.OBSTACLE_SPLITTING, self.times[i])
                     break
-                if not distance_crit and site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and \
-                        not site.neutered:
-                    new_site = self.binary_resample(site, site_nb, i)
-                    if self.pb.in_obs(new_site.state_cur):
-                        new_site = None
-                        site.neuter(NeuteringReason.INTERP_CHILD_IN_OBS, self.times[i])
-                    break
+                if site.depth < self.max_depth - 1 and site_nb.depth < self.max_depth - 1 and not site.neutered:
+                    if not distance_crit:
+                        if self.pb.in_obs(site.time_grid[i],
+                                          0.5 * (site.state_at_index(i) + site_nb.state_at_index(i))):
+                            # Resampled child would be inside obstacle, find appropriate previous time index
+                            mids = [(site.time_grid[j], 0.5 * (site.state_at_index(j) + site_nb.state_at_index(j)))
+                                    for j in range(0, i + 1)]
+                            child_in_obs = np.array(list(map(lambda tx: len(self.pb.in_obs(*tx)) == 0, mids)))
+                            i_offset_out_obs = 0 if child_in_obs.size == 0 else child_in_obs[::-1].argmax()
+                        else:
+                            i_offset_out_obs = 0
+                        new_site = self.binary_resample(site, site_nb, i - i_offset_out_obs)
+                        break
             # Update the neighbouring property
             site.next_nb[site.index_t_check_next: new_id_check_next + 1] = \
                 [site_nb] * (new_id_check_next - site.index_t_check_next + 1)
@@ -947,12 +970,10 @@ class SolverEFResampling(SolverEF):
             return False
         return self.validity_index >= self.solution_site_min_cost_index
 
-    def save_results(self, scale_length: Optional[float] = None, scale_time: Optional[float] = None,
-                     bl: Optional[ndarray] = None, time_offset: Optional[float] = None):
-        super(SolverEFResampling, self).save_results(scale_length, scale_time, bl, time_offset)
+    def save_results(self, rescale=False):
+        super(SolverEFResampling, self).save_results(rescale=rescale)
         if self.solution_site is not None:
-            self.pb.io.save_traj(self.solution_site.traj, name='solution',
-                                 scale_length=scale_length, scale_time=scale_time, bl=bl, time_offset=time_offset)
+            self.pb.save_traj(self.solution_site.traj, name='solution', rescale=rescale)
 
     def post_solve(self):
         super().post_solve()

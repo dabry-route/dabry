@@ -56,7 +56,7 @@ class NavigationProblem:
                  aero: Optional[Aero] = None,
                  penalty: Optional[Penalty] = None,
                  autoframe=True,
-                 scaled=False):
+                 unscaled=None):
         self.model = Model.zermelo(ff)
         self.x_init: ndarray = x_init.copy()
         self.x_target: ndarray = x_target.copy()
@@ -105,7 +105,8 @@ class NavigationProblem:
             self.obs_frame = FrameObs(bl_frame, tr_frame)
             self.obstacles.append(self.obs_frame)
 
-        self.scaled = scaled
+        self.unscaled = unscaled if unscaled is not None else self
+        self.scaled = unscaled is not None
         self.timeopt_control = self.timeopt_control_cartesian if self.coords == Coords.CARTESIAN else self.timeopt_control_gcs
 
     def get_grid_params(self, nx: int, ny: int) -> tuple[ndarray, ndarray]:
@@ -157,6 +158,22 @@ class NavigationProblem:
         with open(os.path.join(self.io.case_dir, f'problem_info.json'), 'w') as f:
             json.dump(pb_info, f, indent=4)
 
+    def save_traj(self, traj: Trajectory, name: str, rescale=False):
+        kwargs = {}
+        if rescale:
+            kwargs = {**self.scaling_for_saving}
+        self.io.save_traj(traj, name, **kwargs)
+
+    def save_trajs(self, trajs: List[Trajectory], group_name: Optional[str] = None, rescale=False):
+        kwargs = {}
+        if rescale:
+            kwargs = {**self.scaling_for_saving}
+        self.io.save_trajs(trajs, group_name, **kwargs)
+
+    def set_case_dir(self, dirpath: str):
+        self.io.set_case_dir(dirpath)
+        self.unscaled.io.set_case_dir(dirpath)
+
     @property
     def coords(self):
         return self.model.coords
@@ -207,11 +224,8 @@ class NavigationProblem:
     def hamiltonian(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
         return costate @ (control + self.model.ff.value(t, state)) + 1
 
-    def in_obs(self, state):
-        return [obs for obs in self.obstacles if obs.value(state) < 0.]
-
-    def in_obs_tol(self, state):
-        return [obs for obs in self.obstacles if obs.value(state) < -5e-3 * self.length_reference]
+    def in_obs(self, t, state):
+        return [obs for obs in self.obstacles if obs.value(t, state) < 0.]
 
     def apply_feedback(self, fb: Feedback, rel_timeout=3, n_time=1000) -> Trajectory:
         """
@@ -288,6 +302,12 @@ class NavigationProblem:
         scale_time = scale_length / srf_max
         return x_init, x_target, bl_pb_adim, bl_wrapper, tr_pb_adim, scale_length, scale_time
 
+    @property
+    def scaling_for_saving(self):
+        _, _, _, _, _, scale_length, scale_time = self.unscaled.scaling_params()
+        return dict(scale_length=scale_length, scale_time=scale_time, bl=self.unscaled.bl,
+                    time_offset=self.unscaled.model.ff.t_start)
+
     def rescale(self):
         """
         Builds a new problem where space and time variables are of unit magnitude
@@ -298,15 +318,17 @@ class NavigationProblem:
         # In the new system, srf_max is unit
         srf_max = 1.
 
-        wrapper_ff = WrapperFF(self.model.ff, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
+        time_origin = self.model.ff.t_start
+
+        wrapper_ff = WrapperFF(self.model.ff, scale_length, bl_wrapper, scale_time, time_origin)
 
         obstacles = self.obstacles.copy()
         obstacles.remove(self.obs_frame)
-        obstacles = [WrapperObs(obs, scale_length, bl_wrapper) for obs in obstacles]
-        penalty = WrapperPen(self.penalty, scale_length, bl_wrapper, scale_time, self.model.ff.t_start)
+        obstacles = [WrapperObs(obs, scale_length, bl_wrapper, scale_time, time_origin) for obs in obstacles]
+        penalty = WrapperPen(self.penalty, scale_length, bl_wrapper, scale_time, time_origin)
         return NavigationProblem(wrapper_ff, x_init, x_target, srf_max,
                                  bl=bl_pb_adim, tr=tr_pb_adim, obstacles=obstacles, penalty=penalty,
-                                 name=self.name, scaled=True)
+                                 name=self.name, unscaled=self)
 
     @classmethod
     def from_database(cls, x_init: ndarray, x_target: ndarray, srf: float,
