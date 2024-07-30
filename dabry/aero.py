@@ -120,7 +120,10 @@ class ComAircraftAero(LLAero):
         """
         :param level: Flight level in hPa
         """
-        import ambiance
+        try:
+            import ambiance
+        except ImportError:
+            raise Exception('Package "ambiance" required for ComAircraftAero')
         # Coefficients from A330-300
         a = ambiance.Atmosphere.from_pressure(level * 100)
         rho = a.density[0]
