@@ -153,17 +153,37 @@ class MermozAero(Aero):
         self.v_min = 1.05 * self.v_minp
         self.v_max = 30.  # m/s
         self.mode += 'mermoz_fitted'
+        self.p_min = (lambda asp: self.A0 * asp ** 3 + self.A1 * asp + self.A2 / asp)(self.v_minp)
 
     def power(self, asp):
+        if asp < self.v_minp:
+            return self.p_min
         return self.A0 * asp ** 3 + self.A1 * asp + self.A2 / asp
 
     def d_power(self, asp):
+        if asp < self.v_minp:
+            return 0.
         return 3 * self.A0 * asp ** 2 + self.A1 - self.A2 / (asp ** 2)
 
     def asp_opti(self, adjoint):
         pn = np.linalg.norm(adjoint)
         a = (pn - self.A1) / self.A0
-        return np.sqrt(1 / 6 * (a + np.sqrt(a ** 2 + self._B0)))
+        return np.max((self.v_minp, np.sqrt(1 / 6 * (a + np.sqrt(a ** 2 + self._B0)))))
+
+
+class MermozAeroScaled(MermozAero):
+
+    def __init__(self):
+        super().__init__()
+
+    def power(self, asp):
+        return super(MermozAeroScaled, self).power(asp * self.v_fmax) / self.p_min
+
+    def d_power(self, asp):
+        return super(MermozAeroScaled, self).d_power(asp * self.v_fmax) / self.p_min * self.v_fmax
+
+    def asp_opti(self, adjoint):
+        return super(MermozAeroScaled, self).asp_opti(adjoint) / self.v_fmax
 
 
 class SubramaniAero(Aero):

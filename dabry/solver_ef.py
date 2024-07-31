@@ -515,7 +515,7 @@ class SolverEF(ABC):
                  n_time: int = 100,
                  n_costate_sectors: int = 30,
                  t_init: Optional[float] = None,
-                 n_costate_norm: int = 10,
+                 n_costate_norm: int = 1,
                  costate_norm_bounds: tuple[float] = (0., 1.),
                  target_radius: Optional[float] = None,
                  abs_max_step: Optional[float] = None,
@@ -526,8 +526,6 @@ class SolverEF(ABC):
                  ivp_solver: str = 'RK45'):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
-        if mode == 'energy':
-            raise ValueError('Mode "energy" is not implemented yet')
         # Problem is assumed to be well conditioned ! (non-dimensionalized)
         self.pb = pb
         if total_duration is None:
@@ -574,6 +572,10 @@ class SolverEF(ABC):
         self._cost_map = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
         self._cost_map_no_g = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
         self.chrono = Chrono(f'Solving problem "{self.pb.name}"')
+        if mode == 'time':
+            self.dyn_augsys = self.dyn_augsys_timeopt
+        if mode == 'energy':
+            self.dyn_augsys = self.dyn_augsys_eneropt
 
     @property
     def computation_duration(self):
@@ -591,7 +593,14 @@ class SolverEF(ABC):
         return self.t_init + self.total_duration
 
     def dyn_augsys(self, t: float, y: ndarray):
+        pass
+
+    def dyn_augsys_timeopt(self, t: float, y: ndarray):
         return np.hstack((1., self.pb.augsys_dyn_timeopt(t, y[1:3], y[3:5])))
+
+    def dyn_augsys_eneropt(self, t: float, y: ndarray):
+        return np.hstack((self.pb.aero.power(self.pb.aero.asp_opti(y[3:5])),
+                          self.pb.augsys_dyn_eneropt(t, y[1:3], y[3:5])))
 
     def dyn_constr(self, t: float, x: ndarray, obstacle: str, trigo: bool, ff_tweak=1.):
         sign = 2 * trigo - 1

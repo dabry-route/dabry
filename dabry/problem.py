@@ -9,7 +9,7 @@ import numpy as np
 import scipy.integrate as scitg
 from numpy import ndarray
 
-from dabry.aero import MermozAero, Aero
+from dabry.aero import Aero, MermozAeroScaled
 from dabry.feedback import GSTargetFB, Feedback, RadialFB
 from dabry.flowfield import RankineVortexFF, UniformFF, DiscreteFF, StateLinearFF, RadialGaussFF, GyreFF, \
     PointSymFF, LinearFFT, BandFF, TrapFF, ChertovskihFF, \
@@ -61,7 +61,7 @@ class NavigationProblem:
         self.x_init: ndarray = x_init.copy()
         self.x_target: ndarray = x_target.copy()
         self.srf_max: float = srf_max
-        self.aero: Aero = MermozAero() if aero is None else aero
+        self.aero: Aero = MermozAeroScaled() if aero is None else aero
 
         # Domain bounding box corners
         self.bl: ndarray = bl.copy() if bl is not None else np.array(())
@@ -108,6 +108,7 @@ class NavigationProblem:
         self.unscaled = unscaled if unscaled is not None else self
         self.scaled = unscaled is not None
         self.timeopt_control = self.timeopt_control_cartesian if self.coords == Coords.CARTESIAN else self.timeopt_control_gcs
+        self.eneropt_control = self.eneropt_control_cartesian if self.coords == Coords.CARTESIAN else self.eneropt_control_gcs
 
     def get_grid_params(self, nx: int, ny: int) -> tuple[ndarray, ndarray]:
         """
@@ -213,6 +214,16 @@ class NavigationProblem:
     def timeopt_control_gcs(self, state: ndarray, costate: ndarray):
         return timeopt_control_gcs(state, costate, self.srf_max)
 
+    def eneropt_control(self, state: ndarray, costate: ndarray):
+        pass
+
+    def eneropt_control_cartesian(self, state: ndarray, costate: ndarray):
+        del state
+        return timeopt_control_cartesian(costate, self.aero.asp_opti(np.linalg.norm(costate)))
+
+    def eneropt_control_gcs(self, state: ndarray, costate: ndarray):
+        raise NotImplementedError()
+
     def augsys_dyn_control(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
         return np.hstack((self.model.dyn.value(t, state, control),
                           -self.model.dyn.d_value__d_state(t, state, control).transpose() @ costate
@@ -220,6 +231,9 @@ class NavigationProblem:
 
     def augsys_dyn_timeopt(self, t: float, state: ndarray, costate: ndarray):
         return self.augsys_dyn_control(t, state, costate, self.timeopt_control(state, costate))
+
+    def augsys_dyn_eneropt(self, t: float, state: ndarray, costate: ndarray):
+        return self.augsys_dyn_control(t, state, costate, self.eneropt_control(state, costate))
 
     def hamiltonian(self, t: float, state: ndarray, costate: ndarray, control: ndarray):
         return costate @ (control + self.model.ff.value(t, state)) + 1
