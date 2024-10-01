@@ -346,7 +346,7 @@ class DiscreteFF(FlowField):
             dabry_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
             dirpath = os.path.join(dabry_root_dir, 'data', 'cds', resolution, pressure_level)
         else:
-            dirpath = os.path.join(data_path, resolution, pressure_level)
+            dirpath = os.path.join(data_path)
         t_start = t_start.timestamp() if isinstance(t_start, datetime) else t_start
         t_end = t_end.timestamp() if isinstance(t_end, datetime) else t_end
         single_frame = abs(t_start - t_end) < 60
@@ -355,6 +355,7 @@ class DiscreteFF(FlowField):
 
         lon_b = Utils.rectify(bl_d[0], tr_d[0])
         wind_file = sorted(os.listdir(dirpath))[0]
+        print(wind_file)
         wind_start_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
         wind_file = sorted(os.listdir(dirpath))[-1]
         wind_stop_date = datetime(int(wind_file[:4]), int(wind_file[4:6]), int(wind_file[6:8]))
