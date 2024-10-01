@@ -686,7 +686,7 @@ class NavigationProblem:
             return cls(ff, x_init, x_target, srf, bl=bl, tr=tr, name=b_name)
 
         if b_name == "montreal_reykjavik":
-            ff = DiscreteFF.from_npz(os.path.join(os.path.abspath('..'), 'data', 'demo', 'montreal_reykjavik',
+            ff = DiscreteFF.from_npz(os.path.join(os.path.dirname(__file__), '..', 'data', 'demo', 'montreal_reykjavik',
                                                   'ff.npz'))
             x_init = np.diag((5 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
             x_target = np.diag((1 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
@@ -695,7 +695,7 @@ class NavigationProblem:
         if b_name == "reykjavik_dublin":
             # ff = DiscreteFF.from_npz(os.path.join(os.path.abspath('..'), 'data', 'cds_omerc', 'reykjavik_dublin',
             #                                       'ff.npz'))
-            ff = DiscreteFF.from_interp(os.path.join(os.path.abspath('..'), 'data', 'cds_omerc', 'reykjavik_dublin',
+            ff = DiscreteFF.from_interp(os.path.join(os.path.dirname(__file__), '..', 'data', 'cds_omerc', 'reykjavik_dublin',
                                                      'ff_interp.pickle'))
             x_init = np.diag((5 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
             x_target = np.diag((1 / 6, 1 / 2)) @ (ff.bounds[1:, 1] - ff.bounds[1:, 0])
