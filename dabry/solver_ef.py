@@ -18,6 +18,7 @@ from dabry.flowfield import DiscreteFF
 from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha, \
     diadic_valuation, alpha_to_int, Chrono, Coords
 from dabry.misc import terminal
+from dabry.obstacle import FrameObs
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
 
@@ -523,7 +524,10 @@ class SolverEF(ABC):
                  free_max_step: bool = False,
                  tangency_tol: float = np.pi / 2,
                  cost_map_shape: Optional[tuple[int, int]] = (100, 100),
-                 ivp_solver: str = 'RK45'):
+                 ivp_solver: str = 'RK45',
+                 max_dist: Optional[float] = None,
+                 mode_resamp_interp: bool = True,
+                 mode_obs_stop: bool = False):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
         if mode == 'energy':
@@ -532,7 +536,8 @@ class SolverEF(ABC):
         self.pb = pb
         if total_duration is None:
             # Inflation factor for obstacle cases
-            factor = 1.3 if len(self.pb.obstacles) > 0 else 1
+            factor = 1.3 if len([obs for obs in self.pb.obstacles if not isinstance(obs, FrameObs)]) > 0 \
+                else 1
             self.total_duration = factor * self.pb.auto_time_upper_bound()
             if self.total_duration == np.inf:
                 self.total_duration = 2 * self.pb.length_reference / self.pb.srf_max
@@ -575,16 +580,30 @@ class SolverEF(ABC):
         self._cost_map_no_g = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
         self.chrono = Chrono(f'Solving problem "{self.pb.name}"')
 
+        self.max_dist = max_dist if max_dist is not None else self.target_radius
+        self._max_dist_sq = self.max_dist ** 2
+        self.sites: dict[str, Site] = {}
+        self.initial_sites: list[Site] = []
+        self._to_shoot_sites: list[Site] = []
+        self._checked_for_solution: set[Site] = set()
+        self.solution_sites: set[Site] = set()
+        self.solution_site: Optional[Site] = None
+        self.solution_site_min_cost_index: Optional[int] = None
+        self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth, self.times)
+        ff_values = self.pb.model.ff.values if hasattr(self.pb.model.ff, 'values') else \
+            DiscreteFF.from_ff(self.pb.model.ff, (self.pb.bl, self.pb.tr), nx=50, ny=50, nt=20, no_diff=True).values
+        self._ff_max_norm = np.max(np.linalg.norm(ff_values, axis=-1))
+        self.distance_inflat = 1 if self.pb.coords == Coords.CARTESIAN else \
+            np.cos(np.max((np.abs(self.pb.bl[1]), np.abs(self.pb.tr[1]))))
+        self.mode_resamp_interp = mode_resamp_interp
+        self.mode_obs_stop = mode_obs_stop
+
     @property
     def computation_duration(self):
         return self.chrono.t_end - self.chrono.t_start
 
     def setup(self):
         pass
-
-    @property
-    def trajs(self) -> list[Trajectory]:
-        return []
 
     @property
     def t_upper_bound(self):
@@ -644,9 +663,10 @@ class SolverEF(ABC):
         self.pb.save_info()
         with open(os.path.join(self.pb.io.case_dir, 'cost_map.npy'), 'wb') as f:
             np.save(f, self.get_cost_map())
+        if self.solution_site is not None:
+            self.pb.save_traj(self.solution_site.traj, name='solution', rescale=rescale)
         # with open(os.path.join(self.pb.io.case_dir, 'cost_map_no_guarantee.npy'), 'wb') as f:
         #     np.save(f, self.get_cost_map_no_guarantee())
-
 
     def save_info(self):
         pb_info = {
@@ -662,32 +682,9 @@ class SolverEF(ABC):
     def post_solve(self):
         self.chrono.stop()
 
-
-class SolverEFResampling(SolverEF):
-
-    def __init__(self, *args,
-                 max_dist: Optional[float] = None,
-                 mode_resamp_interp: bool = False,
-                 mode_obs_stop: bool = False,
-                 **kwargs):
-        super().__init__(*args, **kwargs)
-        self.max_dist = max_dist if max_dist is not None else self.target_radius
-        self._max_dist_sq = self.max_dist ** 2
-        self.sites: dict[str, Site] = {}
-        self.initial_sites: list[Site] = []
-        self._to_shoot_sites: list[Site] = []
-        self._checked_for_solution: set[Site] = set()
-        self.solution_sites: set[Site] = set()
-        self.solution_site: Optional[Site] = None
-        self.solution_site_min_cost_index: Optional[int] = None
-        self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth, self.times)
-        ff_values = self.pb.model.ff.values if hasattr(self.pb.model.ff, 'values') else \
-            DiscreteFF.from_ff(self.pb.model.ff, (self.pb.bl, self.pb.tr), nx=50, ny=50, nt=20, no_diff=True).values
-        self._ff_max_norm = np.max(np.linalg.norm(ff_values, axis=-1))
-        self.distance_inflat = 1 if self.pb.coords == Coords.CARTESIAN else \
-            np.cos(np.max((np.abs(self.pb.bl[1]), np.abs(self.pb.tr[1]))))
-        self.mode_resamp_interp = mode_resamp_interp
-        self.mode_obs_stop = mode_obs_stop
+    def compute_cost_map(self):
+        with Chrono('Computing cost map'):
+            self._cost_map.update_from_sites(self.sites_non_void, 0, self.validity_index)
 
     def create_initial_sites(self):
         self.initial_sites = [
@@ -970,23 +967,8 @@ class SolverEFResampling(SolverEF):
             return False
         return self.validity_index >= self.solution_site_min_cost_index
 
-    def save_results(self, rescale=False):
-        super(SolverEFResampling, self).save_results(rescale=rescale)
-        if self.solution_site is not None:
-            self.pb.save_traj(self.solution_site.traj, name='solution', rescale=rescale)
 
-    def post_solve(self):
-        super().post_solve()
-        with Chrono('Computing cost map'):
-            self._cost_map.update_from_sites(self.sites_non_void, 0, self.validity_index)
-
-
-class SolverEFBisection(SolverEFResampling):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-class SolverEFTrimming(SolverEFResampling):
+class SolverEFTrimming(SolverEF):
 
     def __init__(self, *args,
                  n_index_per_subframe: int = 10,
@@ -1107,7 +1089,7 @@ class CostMap:
         self.values = np.inf * np.ones((nx, ny))
 
     def update_from_sites(self, sites: Iterable[Site], index_t_lo: int, index_t_hi: int):
-        for site in sites:
+        for site in tqdm(sites):
             for index_t in range(max(0, index_t_lo), min(index_t_hi + 1, site.index_t_check_next)):
                 site_nb = site.next_nb[index_t]
 

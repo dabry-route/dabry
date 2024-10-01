@@ -8,7 +8,7 @@ import numpy as np
 from dabry.io_manager import IOManager
 from dabry.misc import Utils, Chrono, Coords
 from dabry.problem import NavigationProblem
-from dabry.solver_ef import SolverEFResampling
+from dabry.solver_ef import SolverEF
 
 """
 __main__.py
@@ -87,7 +87,7 @@ if __name__ == '__main__':
 
     pb = pb_unscaled.rescale()
 
-    solver = SolverEFResampling(pb)
+    solver = SolverEF(pb)
 
     with Chrono() as _:
         solver.solve()

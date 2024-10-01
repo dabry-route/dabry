@@ -1,11 +1,11 @@
 import pytest
 
 from dabry.problem import NavigationProblem
-from dabry.solver_ef import SolverEFTrimming, SolverEFResampling
+from dabry.solver_ef import SolverEFTrimming, SolverEF
 
 
 @pytest.mark.parametrize("pb_name", [k for k, v in NavigationProblem.ALL.items() if v['gh_wf'] == 'True'])
-@pytest.mark.parametrize("solverclass", [SolverEFResampling, SolverEFTrimming])
+@pytest.mark.parametrize("solverclass", [SolverEF, SolverEFTrimming])
 def test_solver(solverclass, pb_name):
     pb_unscaled = NavigationProblem.from_name(pb_name)
     pb = pb_unscaled.rescale()

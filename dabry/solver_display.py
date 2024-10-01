@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt, patches
 
 from dabry.flowfield import DiscreteFF
 from dabry.obstacle import CircleObs, FrameObs, is_frame_obstacle, is_circle_obstacle
-from dabry.solver_ef import SolverEFResampling, SolverEFTrimming, SiteManager
+from dabry.solver_ef import SolverEF, SolverEFTrimming, SiteManager
 from dabry.trajectory import Trajectory
 
 
@@ -16,7 +16,7 @@ class Style:
     colors = ['blue', 'red', 'green', 'cyan', 'magenta', 'orange']
 
 
-def display(solver: Union[SolverEFResampling | SolverEFTrimming],
+def display(solver: Union[SolverEF | SolverEFTrimming],
             trajectories: Optional[list[Trajectory]] = None, isub=4, timeslider=False,
             no_trajectories=False, no_value_func=False, autoshow=False, theme_dark=False, no_3d=False):
     try:
@@ -198,7 +198,7 @@ def display(solver: Union[SolverEFResampling | SolverEFTrimming],
     return fig, fig_cost
 
 
-def solver_structure(solver: SolverEFResampling):
+def solver_structure(solver: SolverEF):
     try:
         import plotly.graph_objects as go
     except ImportError:
