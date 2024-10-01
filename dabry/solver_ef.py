@@ -678,6 +678,7 @@ class SolverEFResampling(SolverEF):
                  max_dist: Optional[float] = None,
                  mode_resamp_interp: bool = False,
                  mode_obs_stop: bool = False,
+                 no_cost_map: bool = False,
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.max_dist = max_dist if max_dist is not None else self.target_radius
@@ -697,6 +698,7 @@ class SolverEFResampling(SolverEF):
             np.cos(np.max((np.abs(self.pb.bl[1]), np.abs(self.pb.tr[1]))))
         self.mode_resamp_interp = mode_resamp_interp
         self.mode_obs_stop = mode_obs_stop
+        self.no_cost_map = no_cost_map
 
     def create_initial_sites(self):
         self.initial_sites = [
@@ -986,8 +988,9 @@ class SolverEFResampling(SolverEF):
 
     def post_solve(self):
         super().post_solve()
-        with Chrono('Computing cost map'):
-            self._cost_map.update_from_sites(self.sites_non_void, 0, self.validity_index)
+        if not self.no_cost_map:
+            with Chrono('Computing cost map'):
+                self._cost_map.update_from_sites(self.sites_non_void, 0, self.validity_index)
 
 
 class SolverEFBisection(SolverEFResampling):

@@ -80,7 +80,7 @@ if __name__ == '__main__':
         IOManager.query_era5(start_date, stop_date, cds_dir, pressure_level=pressure_level, resolution=resolution)
         pb_unscaled = NavigationProblem.from_database(x_init, x_target, airspeed, start_date.timestamp(),
                                                       stop_date.timestamp(), resolution=resolution,
-                                                      pressure_level=pressure_level, data_path=cds_dir)
+                                                      pressure_level=pressure_level)
     else:
         parser.print_help()
         exit(0)
