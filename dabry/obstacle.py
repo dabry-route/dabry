@@ -254,6 +254,25 @@ class DiscreteObs(Obstacle):
         return cls(values, bounds, **kwargs)
 
 
+class WatershedObs(Obstacle):
+
+    def __init__(self, center: ndarray, t_target: float, speed: float, a_tol: float):
+        super(WatershedObs, self).__init__()
+        self.center = np.array(center)
+        self.t_target = t_target
+        self.speed = speed
+        self.a_tol = a_tol
+
+    def value(self, t: float, x: ndarray):
+        return np.max((self.a_tol, self.speed * (self.t_target - t))) ** 2 - np.sum(np.square(x - self.center))
+
+    def d_value(self, t: float, x: ndarray) -> ndarray:
+        return self.center - x
+
+    def d_value_dt(self, t: float, x: ndarray) -> float:
+        return -2 * self.speed * (self.t_target - t) if self.speed * (self.t_target - t) > self.a_tol else 0
+
+
 class GreatCircleObs(Obstacle):
 
     # TODO: validate this class
@@ -331,3 +350,7 @@ def is_frame_obstacle(obs: Obstacle):
 
 def is_circle_obstacle(obs: Obstacle):
     return isinstance(obs, CircleObs) or (isinstance(obs, WrapperObs) and isinstance(obs.obs, CircleObs))
+
+
+def is_watershed_obstacle(obs: Obstacle):
+    return isinstance(obs, WatershedObs) or (isinstance(obs, WrapperObs) and isinstance(obs.obs, WatershedObs))

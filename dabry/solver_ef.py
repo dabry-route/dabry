@@ -18,7 +18,7 @@ from dabry.flowfield import DiscreteFF
 from dabry.misc import directional_timeopt_control, Utils, triangle_mask_and_cost, non_terminal, to_alpha, \
     diadic_valuation, alpha_to_int, Chrono, Coords
 from dabry.misc import terminal
-from dabry.obstacle import FrameObs
+from dabry.obstacle import FrameObs, is_watershed_obstacle, WatershedObs
 from dabry.problem import NavigationProblem
 from dabry.trajectory import Trajectory
 
@@ -527,7 +527,8 @@ class SolverEF(ABC):
                  ivp_solver: str = 'RK45',
                  max_dist: Optional[float] = None,
                  mode_resamp_interp: bool = True,
-                 mode_obs_stop: bool = False):
+                 mode_obs_stop: bool = False,
+                 mode_watershed_trimming: bool = True):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
         if mode == 'energy':
@@ -540,6 +541,8 @@ class SolverEF(ABC):
                 else 1
             self.total_duration = factor * self.pb.auto_time_upper_bound()
             if self.total_duration == np.inf:
+                print('Failed to determine time upper bound automatically. Resorting to heuristic formula.',
+                      file=sys.stderr)
                 self.total_duration = 2 * self.pb.length_reference / self.pb.srf_max
         else:
             self.total_duration = total_duration
@@ -555,10 +558,19 @@ class SolverEF(ABC):
         self.tangency_tol = tangency_tol
         self.depth = 0
         self._id_optitraj: int = 0
+
+        watershed_obs = None
+        if mode_watershed_trimming:
+            ff_values = self.pb.model.ff.values if hasattr(self.pb.model.ff, 'values') else \
+                DiscreteFF.from_ff(self.pb.model.ff, (self.pb.bl, self.pb.tr), nx=50, ny=50, nt=20, no_diff=True).values
+            self._ff_max_norm = np.max(np.linalg.norm(ff_values, axis=-1))
+            watershed_obs = WatershedObs(pb.x_target, self.total_duration, pb.srf_max + self._ff_max_norm,
+                                         self.target_radius)
+        _watershed_obs = [watershed_obs] if watershed_obs is not None else []
         self.events = {}
         self.obstacles = {}
         classes = {}
-        for obs in self.pb.obstacles:
+        for obs in self.pb.obstacles + _watershed_obs:
             name = obs.__class__.__name__
             n = classes.get(name)
             if n is None:
@@ -590,9 +602,6 @@ class SolverEF(ABC):
         self.solution_site: Optional[Site] = None
         self.solution_site_min_cost_index: Optional[int] = None
         self.site_mngr: SiteManager = SiteManager(self.n_costate_sectors, self.max_depth, self.times)
-        ff_values = self.pb.model.ff.values if hasattr(self.pb.model.ff, 'values') else \
-            DiscreteFF.from_ff(self.pb.model.ff, (self.pb.bl, self.pb.tr), nx=50, ny=50, nt=20, no_diff=True).values
-        self._ff_max_norm = np.max(np.linalg.norm(ff_values, axis=-1))
         self.distance_inflat = 1 if self.pb.coords == Coords.CARTESIAN else \
             np.cos(np.max((np.abs(self.pb.bl[1]), np.abs(self.pb.tr[1]))))
         self.mode_resamp_interp = mode_resamp_interp
@@ -714,6 +723,9 @@ class SolverEF(ABC):
                 active_obstacles = [name for name, t_events in last_leg.events_dict.items() if t_events.shape[0] > 0]
                 assert (len(active_obstacles) == 1)
                 obs_name = active_obstacles[0]
+                if is_watershed_obstacle(self.obstacles[obs_name]):
+                    site.close(ClosureReason.IMPOSSIBLE_OBS_TRACKING)
+                    break
                 t_enter_obs = last_leg.events_dict[obs_name][0]
                 state_cur, costate_cur = site.state_cur, site.costate_cur
                 grad_obs = self.obstacles[obs_name].d_value(t_enter_obs, state_cur)
@@ -1034,12 +1046,6 @@ class SolverEFTrimming(SolverEF):
     def trim(self):
         nx, ny = 100, 100
         sites_considered = self.sites_valid[self.i_subframe] | self._sites_created_at_subframe[self.i_subframe]
-        i_subframe_start_cm = self.i_subframe + 1 - self._trimming_band_width
-        sites_for_cost_map = self._sites_created_at_subframe[self.i_subframe].union(
-            *self.sites_valid[i_subframe_start_cm:self.i_subframe + 1])
-        self._cost_map.update_from_sites(sites_for_cost_map, self.index_t_subframe(i_subframe_start_cm),
-                                         self.index_t_next_subframe - 1)
-        bl, spacings = self.pb.get_grid_params(nx, ny)
         new_valid_sites = []
         for site in [site for site in sites_considered if not site.closed]:
             dist = np.linalg.norm(site.state_cur - self.pb.x_target) if self.pb.coords == Coords.CARTESIAN else \
@@ -1048,15 +1054,7 @@ class SolverEFTrimming(SolverEF):
             if site.t_cur + sup_time > self.times[-1]:
                 site.close(ClosureReason.SUBOPTI_DISTANCE)
                 continue
-            value_opti = Utils.interpolate(self._cost_map.values, bl, spacings,
-                                           site.state_at_index(self.index_t_next_subframe - 1))
-            if np.isnan(value_opti):
-                new_valid_sites.append(site)
-                continue
-            if site.cost_at_index(self.index_t_next_subframe - 1) > 1.02 * value_opti:
-                site.close(ClosureReason.SUBOPTIMAL)
-            else:
-                new_valid_sites.append(site)
+            new_valid_sites.append(site)
         self.sites_valid[self.i_subframe + 1] |= set(new_valid_sites)
 
     def solve(self):
