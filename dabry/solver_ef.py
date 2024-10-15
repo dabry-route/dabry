@@ -523,7 +523,8 @@ class SolverEF(ABC):
                  free_max_step: bool = False,
                  tangency_tol: float = np.pi / 2,
                  cost_map_shape: Optional[tuple[int, int]] = (100, 100),
-                 ivp_solver: str = 'RK45'):
+                 ivp_solver: str = 'RK45',
+                 no_cost_map: bool = False):
         if mode not in self._ALL_MODES:
             raise ValueError('Mode %s is not defined' % mode)
         if mode == 'energy':
@@ -574,6 +575,7 @@ class SolverEF(ABC):
         self._cost_map = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
         self._cost_map_no_g = CostMap(self.pb.bl, self.pb.tr, *cost_map_shape)
         self.chrono = Chrono(f'Solving problem "{self.pb.name}"')
+        self.no_cost_map = no_cost_map
 
     @property
     def computation_duration(self):
