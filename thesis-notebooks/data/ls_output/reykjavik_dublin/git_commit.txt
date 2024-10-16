@@ -1,0 +1,5 @@
+commit 81aedc609201130cd7b47fd075f7104e46d82047
+Author: Bastien <bastien.schnitzler@live.fr>
+Date:   Thu May 30 18:14:22 2024 -0400
+
+    driver_reachability.py now zips code before running case

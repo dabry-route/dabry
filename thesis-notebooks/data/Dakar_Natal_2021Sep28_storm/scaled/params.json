@@ -1,0 +1,40 @@
+{
+    "point_origin": [
+        -17.44406,
+        14.6937
+    ],
+    "point_dest": [
+        -35,
+        -5.8
+    ],
+    "bbox_llcrn": [
+        -40,
+        -11
+    ],
+    "bbox_urcrn": [
+        -12.39,
+        18
+    ],
+    "standard_parallels": [
+        -7,
+        14
+    ],
+    "srf": 23,
+    "era5_source_dir": "/home/bastien/Documents/data/weather/cds_rain/grbs_by_day",
+    "case_dir": "/home/bastien/Documents/data/weather/cds_lambert/Dakar_Natal_2021Sep28_storm",
+    "scaled_data_dir": "/home/bastien/Documents/data/weather/cds_lambert/Dakar_Natal_2021Sep28_storm/scaled",
+    "scale_l": 2133333.3333333335,
+    "scale_t": 129600.0,
+    "scale_rain": -150,
+    "newshape": [
+        112,
+        118
+    ],
+    "i_min": 2,
+    "i_max": 108,
+    "j_min": 2,
+    "j_max": 116,
+    "it_start": 24,
+    "it_end": 72,
+    "time_origin": 1632866400.0
+}

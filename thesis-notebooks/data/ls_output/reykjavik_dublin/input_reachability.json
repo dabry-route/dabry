@@ -1,0 +1,22 @@
+{
+    "t_init": 0.0,
+    "t_final": 1.5,
+    "dt": 5e-4,
+    "data_filepath": "/home/bastien/Documents/data/weather/cds_omerc/reykjavik_dublin/velocities_double_space_sampling.mat",
+    "vehicle_collection_states_min": -1.0,
+    "vehicle_collection_states_max": 0.02,
+    "collection_domain_N_vals": 201,
+    "temporal_accuracy": "medium",
+    "spatial_accuracy": "medium",
+    "obey_CFL": false,
+    "plot_frequency": 100,
+    "vehicle_speed": 1,
+    "vehicle_harvest_start_pt": -0.0075,
+    "vehicle_harvest_destination_pt": -0.01,
+    "forward_solve_init_radius": 0.006,
+    "forward_solve_init_ratio": 1,
+    "vehicle_start_pt": [1.25 , 0.5],
+    "vehicle_destination_pt": [0.25, 0.5],
+    "init_type": "sphere",
+    "sol_checkpoint_num_timestep_saving": 200
+}
